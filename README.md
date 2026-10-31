@@ -13,6 +13,8 @@
 
 [演示操作手册](docs/DEMO_GUIDE.md) · [验证与限制](docs/PROGRESS.md) · [钉钉/飞书配置](docs/INTEGRATIONS.md)
 
+接收方部署优先阅读[交付与Docker启动说明](docs/DELIVERY.md)。总包提供9张功能截图、Demo PPT和完整操作/演示/AI接入/部署手册。首次安装需要联网，不是通用离线首装包。
+
 ## 本地开发
 
 需要 Node.js 24、pnpm 11.25.0、MySQL 8（可通过 Docker Compose 启动）。

@@ -1,6 +1,6 @@
 {
   "name": "@partneros/api",
-  "version": "0.2.0-demo.1",
+  "version": "0.2.0-demo.2",
   "private": true,
   "scripts": {
     "dev": "nest start --watch",
@@ -24,7 +24,7 @@
     "@partneros/database": "workspace:*",
     "@partneros/shared": "workspace:*",
     "@prisma/client": "^6.1.0",
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "ioredis": "^5.4.0",
