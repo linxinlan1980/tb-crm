@@ -98,6 +98,9 @@ try {
   const salesOverview = (await call('/workspace/overview', 'GET', undefined, sales)).data;
   assert(salesOverview.projects > 0 && Number(salesOverview.signedAmount) > 0, 'Sales has a complete demo portfolio');
   checks++;
+  const seedProject=await db.project.findFirstOrThrow({where:{status:'active'}});
+  const customerStats=(await call('/capabilities/customer.get/invoke','POST',{customerId:seedProject.customerId},admin,201)).data.result.statistics;
+  eq(customerStats.activeProjects,await db.project.count({where:{tenantId:seedProject.tenantId,customerId:seedProject.customerId,status:'active',deletedAt:null}}),'Admin customer tool statistics match active project records');
   const name = `数据测试${Date.now()}`,
     requestKey = newKey(),
     payload = { name, industry: '制造/工业' };

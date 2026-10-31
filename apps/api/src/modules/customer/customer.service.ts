@@ -54,13 +54,19 @@ export class CustomerService {
     });
     if (!customer) throw new NotFoundException({ code: 5, message: '客户不存在' });
 
-    const owned=await ownerScope(this.prisma.system,actor);
+    const owned = await ownerScope(this.prisma.system, actor);
+    const projectVisibility = Object.keys(owned).length
+      ? { OR: [
+          await ownerScope(this.prisma.system, actor, 'salesOwnerId'),
+          await ownerScope(this.prisma.system, actor, 'pmId'),
+        ] }
+      : {};
     // 聚合统计
     const [openOpps, activeContracts, totalReceived, activeProjects] = await Promise.all([
       db.opportunity.count({ where: { customerId: id, status: 'open', deletedAt: null, ...owned } }),
       db.contract.count({ where: { customerId: id, status: { in: ['signed', 'executing'] }, deletedAt: null, ...owned } }),
       db.paymentPlan.aggregate({ where: { contract: { customerId: id, ...owned }, status: { not: 'cancelled' } }, _sum: { receivedAmount: true } }),
-      db.project.count({ where: { customerId: id, status: 'active', deletedAt: null, OR:[await ownerScope(this.prisma.system,actor,'salesOwnerId'),await ownerScope(this.prisma.system,actor,'pmId')] } }),
+      db.project.count({ where: { customerId: id, status: 'active', deletedAt: null, ...projectVisibility } }),
     ]);
 
     return {
