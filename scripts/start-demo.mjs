@@ -10,6 +10,9 @@ const require = createRequire(new URL('../packages/database/package.json', impor
 const { PrismaClient } = require('@prisma/client');
 const db = new PrismaClient();
 if (process.env.DEMO_MODE !== 'true') throw new Error('Set DEMO_MODE=true for the local demonstration');
+const target = new URL(process.env.DATABASE_URL);
+if (!['localhost', '127.0.0.1'].includes(target.hostname) || !/^\/tb_crm_demo(?:_\d+)?$/.test(target.pathname))
+  throw new Error('演示启动器仅允许本机独立tb_crm_demo数据库');
 let connected = false;
 try {
   await db.$connect();
