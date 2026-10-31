@@ -234,6 +234,9 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     if (!spec) return;
     try {
       const data = await form.validateFields();
+      if (editing)
+        for (const f of spec.fields)
+          if (!f.required && (data[f.key] === undefined || data[f.key] === '')) data[f.key] = null;
       setBusy(true);
       const body = { data, requestKey: editRequestKey.current, expectedUpdatedAt: editing?.updatedAt };
       if (editing) await put(`/workspace/${kind}/${editing.id}`, body);

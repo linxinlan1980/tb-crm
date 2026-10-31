@@ -31,4 +31,8 @@ describe('Workflow and business input boundaries', () => {
     ).toThrow());
   test('rejects normalized invalid dates', () =>
     expect(() => cleanInput('tasks', { title: 'Task', projectId: 1, dueDate: '2026-02-31' })).toThrow());
+  test('clears nullable contact fields explicitly', () =>
+    expect(cleanInput('contacts', { phone: '' }, true)).toEqual({ phone: null }));
+  test('does not clear required database fields', () =>
+    expect(() => cleanInput('products', { unit: '' }, true)).toThrow());
 });

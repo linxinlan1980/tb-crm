@@ -439,7 +439,7 @@ export class WorkspaceService {
             throw new BadRequestException('仅草稿或驳回单据可编辑');
           if (
             ['contractId', 'customerId', 'opportunityId', 'projectId', 'targetId'].some(
-              (key) => data[key] && data[key] !== row?.[key],
+              (key) => key in data && data[key] !== row?.[key],
             )
           )
             throw new BadRequestException('关联对象创建后不可修改，请新建记录');

@@ -98,9 +98,17 @@ try {
   const salesOverview = (await call('/workspace/overview', 'GET', undefined, sales)).data;
   assert(salesOverview.projects > 0 && Number(salesOverview.signedAmount) > 0, 'Sales has a complete demo portfolio');
   checks++;
-  const seedProject=await db.project.findFirstOrThrow({where:{status:'active'}});
-  const customerStats=(await call('/capabilities/customer.get/invoke','POST',{customerId:seedProject.customerId},admin,201)).data.result.statistics;
-  eq(customerStats.activeProjects,await db.project.count({where:{tenantId:seedProject.tenantId,customerId:seedProject.customerId,status:'active',deletedAt:null}}),'Admin customer tool statistics match active project records');
+  const seedProject = await db.project.findFirstOrThrow({ where: { status: 'active' } });
+  const customerStats = (
+    await call('/capabilities/customer.get/invoke', 'POST', { customerId: seedProject.customerId }, admin, 201)
+  ).data.result.statistics;
+  eq(
+    customerStats.activeProjects,
+    await db.project.count({
+      where: { tenantId: seedProject.tenantId, customerId: seedProject.customerId, status: 'active', deletedAt: null },
+    }),
+    'Admin customer tool statistics match active project records',
+  );
   const name = `数据测试${Date.now()}`,
     requestKey = newKey(),
     payload = { name, industry: '制造/工业' };
@@ -124,7 +132,19 @@ try {
     sales,
     404,
   );
-  await create(sales, 'contacts', { name: '合成联系人', customerId: customer.id });
+  const contact = await create(sales, 'contacts', {
+    name: '合成联系人',
+    customerId: customer.id,
+    phone: '13800000000',
+  });
+  await call(
+    `/workspace/contacts/${contact.id}`,
+    'PUT',
+    { requestKey: newKey(), expectedUpdatedAt: contact.updatedAt, data: { phone: '' } },
+    sales,
+    200,
+  );
+  eq((await detail(sales, 'contacts', contact)).phone, null, 'Clearing optional fields persists');
   await create(sales, 'followups', {
     customerId: customer.id,
     content: '验证需求并约定下一步',
@@ -262,6 +282,18 @@ try {
     nodes: [{ name: '主管处理', approverType: 'role', approverValue: 'sales_manager', condition: 'always' }],
     fields: [{ key: 'reason', label: '申请事由', type: 'text', required: true }],
   };
+  await call(
+    '/approvals/flows',
+    'POST',
+    {
+      ...flowData,
+      requestKey: newKey(),
+      name: '不能选择无审批权限的销售',
+      nodes: [{ name: '无权人员', approverType: 'user', approverValue: String(salesUser.id), condition: 'always' }],
+    },
+    admin,
+    400,
+  );
   const flow = (await call('/approvals/flows', 'POST', flowData, admin, 201)).data;
   await call(
     `/approvals/flows/${flow.id}/publish`,

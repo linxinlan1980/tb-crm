@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { BadRequestException } from '@nestjs/common';
 import { object, text } from './command-runner';
 export interface Field {
@@ -179,10 +180,20 @@ export function cleanInput(kind: string, value: unknown, partial = false): Recor
     result: Record<string, unknown> = {};
   for (const key of Object.keys(input))
     if (!spec.fields.some((f) => f.key === key)) throw new BadRequestException(`不允许修改字段 ${key}`);
+  const model = Prisma.dmmf.datamodel.models.find((m) => m.name[0].toLowerCase() + m.name.slice(1) === spec.model);
   for (const field of spec.fields) {
     const v = input[field.key];
-    if (v === undefined || v === null || v === '') {
-      if (field.required && (!partial || field.key in input)) throw new BadRequestException(`请填写${field.label}`);
+    if (v === undefined) {
+      if (field.required && !partial) throw new BadRequestException(`请填写${field.label}`);
+      continue;
+    }
+    if (v === null || v === '') {
+      if (field.required) throw new BadRequestException(`请填写${field.label}`);
+      if (partial) {
+        if (model?.fields.find((f) => f.name === field.key)?.isRequired !== false)
+          throw new BadRequestException(`${field.label}不可为空`);
+        result[field.key] = null;
+      }
       continue;
     }
     if (['text', 'textarea'].includes(field.type))

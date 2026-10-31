@@ -13,6 +13,15 @@ import { admin } from '../workspace/access';
 import { checkVersion, id, json, object, runCommand, text, type Tx } from '../workspace/command-runner';
 import { condition, flowInput, type FlowField } from './flow-rules';
 
+function canDecide(roles: { role: { code: string; permissions: Prisma.JsonValue } }[]): boolean {
+  if (roles.some((r) => r.role.code === 'super_admin')) return true;
+  const permissions = roles.flatMap((r) =>
+    Array.isArray(r.role.permissions) ? r.role.permissions.filter((p): p is string => typeof p === 'string') : [],
+  );
+  return ['approval:approve', 'approval:reject'].every((required) =>
+    permissions.some((p) => p === '*' || p === 'approval:*' || p === required),
+  );
+}
 @Injectable()
 export class ApprovalService {
   constructor(private readonly prisma: PrismaService) {}
@@ -28,14 +37,22 @@ export class ApprovalService {
     const [users, roles] = await Promise.all([
       this.prisma.system.user.findMany({
         where: { tenantId: a.tenantId, status: 'active', deletedAt: null },
-        select: { id: true, name: true, deptId: true },
+        select: {
+          id: true,
+          name: true,
+          deptId: true,
+          roles: { select: { role: { select: { code: true, permissions: true } } } },
+        },
       }),
       this.prisma.system.role.findMany({
         where: { tenantId: a.tenantId },
-        select: { id: true, code: true, name: true },
+        select: { id: true, code: true, name: true, permissions: true },
       }),
     ]);
-    return { users, roles };
+    return {
+      users: users.filter((u) => canDecide(u.roles)).map(({ id, name, deptId }) => ({ id, name, deptId })),
+      roles: roles.filter((role) => canDecide([{ role }])).map(({ id, code, name }) => ({ id, code, name })),
+    };
   }
   async saveFlow(a: Actor, body: Record<string, unknown>) {
     if (!admin(a)) throw new ForbiddenException('仅管理员可设计审批流');
@@ -368,13 +385,14 @@ export class ApprovalService {
           id: { in: links.map((l) => l.userId) },
           status: 'active',
           deletedAt: null,
-          NOT: { id: applicantId },
+          ...(requireLeader ? { NOT: { id: applicantId } } : {}),
         },
+        include: { roles: { include: { role: true } } },
         orderBy: { id: 'asc' },
-        take: 2,
       });
-      if (active.length > 1) throw new BadRequestException('该角色存在多名可用审批人，请在设计器中指定审批人');
-      userId = active[0]?.id;
+      const candidates = active.filter((u) => canDecide(u.roles));
+      if (candidates.length > 1) throw new BadRequestException('该角色存在多名可用审批人，请在设计器中指定审批人');
+      userId = candidates[0]?.id;
     }
     if (type === 'dept_leader' || type === 'applicant_leader') {
       const u = await tx.user.findFirst({ where: { id: applicantId, tenantId } });
@@ -383,9 +401,13 @@ export class ApprovalService {
       if (!requireLeader) return userId ?? applicantId;
     }
     const u = userId
-      ? await tx.user.findFirst({ where: { id: userId, tenantId, status: 'active', deletedAt: null } })
+      ? await tx.user.findFirst({
+          where: { id: userId, tenantId, status: 'active', deletedAt: null },
+          include: { roles: { include: { role: true } } },
+        })
       : null;
     if (!u) throw new BadRequestException('找不到有效审批人，禁止跳过节点');
+    if (!canDecide(u.roles)) throw new BadRequestException('所选人员没有完整的审批通过/驳回权限');
     return u.id;
   }
 }
