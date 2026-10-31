@@ -15,4 +15,3 @@ CREATE TABLE `command_executions` (
     UNIQUE INDEX `command_executions_tenant_id_actor_id_request_key_key`(`tenant_id`, `actor_id`, `request_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
