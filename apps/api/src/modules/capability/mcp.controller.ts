@@ -1,3 +1,4 @@
+import { approvalCatalog } from '../approval/approval.catalog';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { ApprovalService } from '../approval/approval.service';
 import { resources } from '../workspace/registry';
@@ -145,6 +146,14 @@ export class McpController {
         contents: [
           { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(await this.workspace.schema(actor)) },
         ],
+      }),
+    );
+    server.registerResource(
+      'approval-capabilities',
+      'crm://approval-capabilities',
+      { description: 'Versioned approval form, flow and decision contracts', mimeType: 'application/json' },
+      async (uri) => ({
+        contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(approvalCatalog(actor)) }],
       }),
     );
     const transport = new StreamableHTTPServerTransport({

@@ -1,3 +1,4 @@
+import { approvalCatalog } from './approval.catalog';
 import { Controller, Get, Post, Body, Param, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ApprovalService } from './approval.service';
@@ -9,6 +10,9 @@ import type { Actor } from '../../common/types/actor';
 @Controller('approvals')
 export class ApprovalController {
   constructor(private readonly service: ApprovalService) {}
+  @Get('schema') schema(@CurrentUser() a: Actor) {
+    return approvalCatalog(a);
+  }
   @Get('flows') flows(@CurrentUser() a: Actor) {
     return this.service.flows(a);
   }

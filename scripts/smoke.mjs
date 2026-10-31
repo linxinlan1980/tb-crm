@@ -376,6 +376,25 @@ try {
     4,
   );
   eq(JSON.parse(workspaceTool.result.content[0].text).id, contract.id);
+  const approvalCatalog = (await call('/approvals/schema', 'GET', undefined, sales)).data;
+  eq(
+    approvalCatalog.some((o) => o.id === 'approval.flow.save'),
+    false,
+    'Designer contract hidden from sales',
+  );
+  eq(
+    (await call('/approvals/schema', 'GET', undefined, admin)).data.some((o) => o.id === 'approval.flow.save'),
+    true,
+    'Designer contract available to admin',
+  );
+  const discovery = await mcp('resources/list', {}, 5);
+  eq(discovery.result.resources.length, 2, 'Business and approval discovery resources');
+  const discovered = await mcp('resources/read', { uri: 'crm://approval-capabilities' }, 6);
+  eq(
+    JSON.parse(discovered.result.contents[0].text).some((o) => o.id === 'approval.create'),
+    true,
+    'Readable approval contract',
+  );
   const specialFlow = (
     await call(
       '/approvals/flows',

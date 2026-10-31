@@ -42,9 +42,9 @@
 
 ## 智能体接入
 
-MCP Streamable HTTP：`POST /api/v1/mcp`，使用当前用户的有效Bearer访问令牌。当前7个只读工具：`customer.search`、`customer.get`、`workspace.list`、`workspace.get`、`workspace.overview`、`workspace.schema`、`approval.pending`；另有 `crm://capabilities` 资源。采用受维护的SDK v1，协议协商至2025-11-25；独立OAuth委托凭证尚未实现。
+MCP Streamable HTTP：`POST /api/v1/mcp`，使用当前用户的有效Bearer访问令牌。当前7个只读工具：`customer.search`、`customer.get`、`workspace.list`、`workspace.get`、`workspace.overview`、`workspace.schema`、`approval.pending`；另有 `crm://capabilities` 和 `crm://approval-capabilities` 资源。采用受维护的SDK v1，协议协商至2025-11-25；独立OAuth委托凭证尚未实现。
 
-业务HTTP契约：`GET /api/v1/workspace/schema`。查询 `/workspace/{kind}`，详情 `/workspace/{kind}/{id}`；创建POST、编辑PUT、业务动作POST `/{action}`。写入使用 `requestKey`，更新/动作必须携带详情中的 `updatedAt` 为 `expectedUpdatedAt`。参数不接受调用方注入租户或操作人。写入使用事务、持久化幂等记录和审计；重复键与不同请求内容冲突时拒绝。
+业务HTTP契约：`GET /api/v1/workspace/schema`；审批HTTP契约：`GET /api/v1/approvals/schema`，按当前角色过滤。查询 `/workspace/{kind}`，详情 `/workspace/{kind}/{id}`；创建POST、编辑PUT、业务动作POST `/{action}`。写入使用 `requestKey`，更新/动作必须携带详情中的 `updatedAt` 为 `expectedUpdatedAt`。参数不接受调用方注入租户或操作人。写入使用事务、持久化幂等记录和审计；重复键与不同请求内容冲突时拒绝。
 
 MCP不开放写入。网页业务写入与能力目录共用WorkspaceService；金融处理写入关闭。旧原型业务REST入口已返回503并从OpenAPI文档隐藏，避免绕过新边界。
 

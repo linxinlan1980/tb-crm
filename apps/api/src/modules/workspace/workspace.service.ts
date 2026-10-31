@@ -183,6 +183,14 @@ export class WorkspaceService {
                 required: ['requestKey', 'expectedUpdatedAt'],
                 properties: {
                   ...commandProperties,
+                  ...(action === 'submit'
+                    ? {
+                        form: {
+                          type: 'object',
+                          description: 'Fields are resolved from the document approval-form endpoint',
+                        },
+                      }
+                    : {}),
                   ...(action === 'assign' ? { userId: { type: 'integer', minimum: 1 } } : {}),
                   ...(action === 'quote' ? { items: { type: 'array', minItems: 1, maxItems: 20 } } : {}),
                   ...(action === 'lose' ? { reason: { type: 'string', minLength: 1 } } : {}),
