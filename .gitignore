@@ -24,3 +24,4 @@ docs/reference/
 
 # Local demo credentials and machine-specific notes
 .local/
+deploy/.env

@@ -59,6 +59,6 @@ http
       res.writeHead(400).end('Invalid request');
     }
   })
-  .listen(Number(process.env.WEB_PORT || 3000), '127.0.0.1', () =>
+  .listen(Number(process.env.WEB_PORT || 3000), process.env.WEB_HOST || '127.0.0.1', () =>
     console.log(`CRM Web: http://localhost:${process.env.WEB_PORT || 3000}`),
   );
