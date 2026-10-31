@@ -1,0 +1,2035 @@
+// PartnerOS CRM - Prisma Schema
+// 对应文档：docs/reference/qwen-design/03_数据库设计/DDL_schema.sql
+// 含一致性检查报告补充的8张表（dictionaries/system_settings/approval_flows/approval_flow_nodes/ai_audit_logs/notification_rules/notification_templates/files/credit_check_logs）
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ 1. 租户与权限域 ============
+
+model Tenant {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(100)
+  code        String   @unique @db.VarChar(30)
+  plan        TenantPlan @default(basic)
+  maxUsers    Int      @default(10) @map("max_users")
+  maxCustomers Int     @default(1000) @map("max_customers")
+  config      Json?
+  brandLogo   String?  @map("brand_logo") @db.VarChar(500)
+  brandColor  String?  @map("brand_color") @db.VarChar(10)
+  status      TenantStatus @default(trial)
+  trialEndsAt DateTime? @map("trial_ends_at") @db.Date
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users       User[]
+  departments Department[]
+  roles       Role[]
+
+  @@map("tenants")
+}
+
+enum TenantPlan {
+  basic
+  professional
+  enterprise
+}
+
+enum TenantStatus {
+  trial
+  active
+  suspended
+  cancelled
+}
+
+model Department {
+  id        Int       @id @default(autoincrement())
+  tenantId  Int       @map("tenant_id")
+  parentId  Int?      @map("parent_id")
+  name      String    @db.VarChar(100)
+  code      String?   @db.VarChar(30)
+  leaderId  Int?      @map("leader_id")
+  sortOrder Int       @default(0) @map("sort_order")
+  status    Int       @default(1)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  parent    Department? @relation("DeptTree", fields: [parentId], references: [id])
+  children  Department[] @relation("DeptTree")
+  users     User[]
+
+  @@index([tenantId])
+  @@index([parentId])
+  @@map("departments")
+}
+
+model User {
+  id            Int        @id @default(autoincrement())
+  tenantId      Int        @map("tenant_id")
+  username      String     @db.VarChar(50)
+  passwordHash  String     @map("password_hash") @db.VarChar(200)
+  name          String     @db.VarChar(50)
+  phone         String?    @db.VarChar(200)
+  email         String?    @db.VarChar(100)
+  avatarUrl     String?    @map("avatar_url") @db.VarChar(500)
+  deptId        Int?       @map("dept_id")
+  position      String?    @db.VarChar(50)
+  dingtalkUserid String?   @map("dingtalk_userid") @db.VarChar(50)
+  wecomUserid   String?    @map("wecom_userid") @db.VarChar(50)
+  status        UserStatus @default(active)
+  lastLoginAt   DateTime?  @map("last_login_at")
+  createdBy     Int?       @map("created_by")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedBy     Int?       @map("updated_by")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  deletedAt     DateTime?  @map("deleted_at")
+
+  tenant        Tenant     @relation(fields: [tenantId], references: [id])
+  department    Department? @relation(fields: [deptId], references: [id])
+  roles         UserRole[]
+
+  @@unique([tenantId, username])
+  @@index([tenantId, deptId])
+  @@index([dingtalkUserid])
+  @@map("users")
+}
+
+enum UserStatus {
+  active
+  inactive
+  resigned
+}
+
+model Role {
+  id               Int        @id @default(autoincrement())
+  tenantId         Int        @map("tenant_id")
+  name             String     @db.VarChar(50)
+  code             String     @db.VarChar(30)
+  description      String?    @db.VarChar(200)
+  dataScope        DataScope  @default(self) @map("data_scope")
+  isSystem         Boolean    @default(false) @map("is_system")
+  permissions      Json?
+  fieldPermissions Json?      @map("field_permissions")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  tenant           Tenant     @relation(fields: [tenantId], references: [id])
+  userRoles        UserRole[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+enum DataScope {
+  self
+  team
+  dept
+  custom
+  all
+}
+
+model UserRole {
+  id       Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  userId   Int @map("user_id")
+  roleId   Int @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([tenantId, userId, roleId])
+  @@index([userId])
+  @@map("user_roles")
+}
+
+// ============ 2. 客户域 ============
+
+model Customer {
+  id                Int          @id @default(autoincrement())
+  tenantId          Int          @map("tenant_id")
+  code              String       @db.VarChar(20)
+  name              String       @db.VarChar(200)
+  shortName         String?      @map("short_name") @db.VarChar(100)
+  groupId           Int?         @map("group_id")
+  industry          String?      @db.VarChar(50)
+  level             String?      @db.VarChar(20)
+  source            String?      @db.VarChar(50)
+  poolType          PoolType     @default(public) @map("pool_type")
+  ownerId           Int?         @map("owner_id")
+  ownerDeptId       Int?         @map("owner_dept_id")
+  protectUntil      DateTime?    @map("protect_until") @db.Date
+  status            CustomerStatus @default(active)
+  isProspect        Boolean      @default(true) @map("is_prospect")
+  isTrading         Boolean      @default(false) @map("is_trading")
+  yonyouCode        String?      @map("yonyou_code") @db.VarChar(30)
+  taxType           String?      @map("tax_type") @db.VarChar(20)
+  currency          String       @default("CNY") @db.VarChar(10)
+  address           String?      @db.VarChar(500)
+  region            String?      @db.VarChar(50)
+  website           String?      @db.VarChar(200)
+  registeredCapital Decimal?     @map("registered_capital") @db.Decimal(15, 2)
+  establishedDate   DateTime?    @map("established_date") @db.Date
+  legalPerson       String?      @map("legal_person") @db.VarChar(50)
+  creditCode        String?      @map("credit_code") @db.VarChar(18)
+  employeeCount     String?      @map("employee_count") @db.VarChar(20)
+  yonyouProduct     String?      @map("yonyou_product") @db.VarChar(100)
+  yonyouModules     String?      @map("yonyou_modules") @db.Text
+  serviceExpiry     DateTime?    @map("service_expiry") @db.Date
+  contractCount     Int          @default(0) @map("contract_count")
+  contractAmount    Decimal      @default(0) @map("contract_amount") @db.Decimal(15, 2)
+  lastFollowAt      DateTime?    @map("last_follow_at")
+  lastFollowBy      Int?         @map("last_follow_by")
+  aiProfile         String?      @map("ai_profile") @db.Text
+  aiProfileAt       DateTime?    @map("ai_profile_at")
+  tags              Json?
+  remark            String?      @db.Text
+  createdBy         Int?         @map("created_by")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedBy         Int?         @map("updated_by")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  deletedAt         DateTime?    @map("deleted_at")
+
+  contacts          Contact[]
+  addresses         CustomerAddress[]
+  banks             CustomerBank[]
+  invoicesInfo      CustomerInvoiceInfo[]
+  opportunities     Opportunity[]
+  contracts         Contract[]
+  orders            Order[]
+  projects          Project[]
+  leads             Lead[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, poolType])
+  @@index([tenantId, industry])
+  @@index([creditCode])
+  @@index([name(50)])
+  @@index([groupId])
+  @@index([protectUntil])
+  @@index([lastFollowAt])
+  @@map("customers")
+}
+
+enum PoolType {
+  public
+  dept
+  private
+}
+
+enum CustomerStatus {
+  active
+  inactive
+  churned
+}
+
+model Contact {
+  id           Int           @id @default(autoincrement())
+  tenantId     Int           @map("tenant_id")
+  customerId   Int           @map("customer_id")
+  name         String        @db.VarChar(50)
+  title        String?       @db.VarChar(50)
+  department   String?       @db.VarChar(50)
+  phone        String?       @db.VarChar(200)
+  email        String?       @db.VarChar(100)
+  wechat       String?       @db.VarChar(50)
+  decisionRole DecisionRole? @map("decision_role")
+  isPrimary    Boolean       @default(false) @map("is_primary")
+  birthday     DateTime?     @db.Date
+  preference   String?       @db.Text
+  status       ContactStatus @default(active)
+  createdBy    Int?          @map("created_by")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedBy    Int?          @map("updated_by")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  deletedAt    DateTime?     @map("deleted_at")
+
+  customer     Customer      @relation(fields: [customerId], references: [id])
+
+  @@index([tenantId, customerId])
+  @@map("contacts")
+}
+
+enum DecisionRole {
+  decision_maker
+  influencer
+  user
+  coach
+  gatekeeper
+}
+
+enum ContactStatus {
+  active
+  inactive
+}
+
+model ContactRelation {
+  id             Int            @id @default(autoincrement())
+  tenantId       Int            @map("tenant_id")
+  customerId     Int            @map("customer_id")
+  fromContactId  Int            @map("from_contact_id")
+  toContactId    Int            @map("to_contact_id")
+  relationType   RelationType   @map("relation_type")
+  strength       RelationStrength @default(medium)
+  remark         String?        @db.VarChar(200)
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  @@index([tenantId, customerId])
+  @@map("contact_relations")
+}
+
+enum RelationType {
+  reports_to
+  influences
+  collaborates
+  blocks
+}
+
+enum RelationStrength {
+  strong
+  medium
+  weak
+}
+
+model CustomerAddress {
+  id         Int           @id @default(autoincrement())
+  tenantId   Int           @map("tenant_id")
+  customerId Int           @map("customer_id")
+  type       AddressType   @default(office)
+  province   String?       @db.VarChar(20)
+  city       String?       @db.VarChar(20)
+  district   String?       @db.VarChar(20)
+  detail     String        @db.VarChar(200)
+  isDefault  Boolean       @default(false) @map("is_default")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  customer   Customer      @relation(fields: [customerId], references: [id])
+
+  @@index([tenantId, customerId])
+  @@map("customer_addresses")
+}
+
+enum AddressType {
+  registered
+  office
+  delivery
+  invoice
+}
+
+model CustomerBank {
+  id          Int      @id @default(autoincrement())
+  tenantId    Int      @map("tenant_id")
+  customerId  Int      @map("customer_id")
+  bankName    String   @map("bank_name") @db.VarChar(100)
+  accountName String   @map("account_name") @db.VarChar(200)
+  accountNo   String   @map("account_no") @db.VarChar(200)
+  isDefault   Boolean  @default(false) @map("is_default")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  customer    Customer @relation(fields: [customerId], references: [id])
+
+  @@index([tenantId, customerId])
+  @@map("customer_banks")
+}
+
+model CustomerInvoiceInfo {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int      @map("tenant_id")
+  customerId   Int      @map("customer_id")
+  invoiceTitle String   @map("invoice_title") @db.VarChar(200)
+  taxNo        String   @map("tax_no") @db.VarChar(20)
+  bankName     String?  @map("bank_name") @db.VarChar(100)
+  bankAccount  String?  @map("bank_account") @db.VarChar(200)
+  address      String?  @db.VarChar(200)
+  phone        String?  @db.VarChar(20)
+  isDefault    Boolean  @default(false) @map("is_default")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  customer     Customer @relation(fields: [customerId], references: [id])
+
+  @@index([tenantId, customerId])
+  @@map("customer_invoices_info")
+}
+
+// ============ 3. 线索域 ============
+
+model Lead {
+  id                    Int        @id @default(autoincrement())
+  tenantId              Int        @map("tenant_id")
+  code                  String     @db.VarChar(20)
+  companyName           String     @map("company_name") @db.VarChar(200)
+  contactName           String?    @map("contact_name") @db.VarChar(50)
+  contactPhone          String?    @map("contact_phone") @db.VarChar(200)
+  contactEmail          String?    @map("contact_email") @db.VarChar(100)
+  contactTitle          String?    @map("contact_title") @db.VarChar(50)
+  source                String     @db.VarChar(50)
+  sourceDetail          String?    @map("source_detail") @db.VarChar(200)
+  campaignId            Int?       @map("campaign_id")
+  partnerId             Int?       @map("partner_id")
+  industry              String?    @db.VarChar(50)
+  region                String?    @db.VarChar(50)
+  employeeCount         String?    @map("employee_count") @db.VarChar(20)
+  demand                String?    @db.Text
+  demandProducts        Json?      @map("demand_products")
+  budgetRange           String?    @map("budget_range") @db.VarChar(30)
+  expectedTime          String?    @map("expected_time") @db.VarChar(30)
+  score                 Int        @default(0)
+  scoreDetail           Json?      @map("score_detail")
+  status                LeadStatus @default(new)
+  qualityFlag           LeadQuality @default(valid) @map("quality_flag")
+  assigneeId            Int?       @map("assignee_id")
+  assignedAt            DateTime?  @map("assigned_at")
+  convertedCustomerId   Int?       @map("converted_customer_id")
+  convertedOpportunityId Int?      @map("converted_opportunity_id")
+  convertedAt           DateTime?  @map("converted_at")
+  rejectReason          String?    @map("reject_reason") @db.VarChar(200)
+  expireAt              DateTime?  @map("expire_at")
+  followCount           Int        @default(0) @map("follow_count")
+  lastFollowAt          DateTime?  @map("last_follow_at")
+  creditCode            String?    @map("credit_code") @db.VarChar(18)
+  aiEnrichment          Json?      @map("ai_enrichment")
+  remark                String?    @db.Text
+  createdBy             Int?       @map("created_by")
+  createdAt             DateTime   @default(now()) @map("created_at")
+  updatedBy             Int?       @map("updated_by")
+  updatedAt             DateTime   @updatedAt @map("updated_at")
+  deletedAt             DateTime?  @map("deleted_at")
+
+  customer              Customer?  @relation(fields: [convertedCustomerId], references: [id])
+  followUps             LeadFollowUp[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@index([tenantId, assigneeId])
+  @@index([companyName(50)])
+  @@index([creditCode])
+  @@index([score])
+  @@map("leads")
+}
+
+enum LeadStatus {
+  new
+  cleaning
+  qualified
+  unqualified
+  assigned
+  converted
+  rejected
+  expired
+}
+
+enum LeadQuality {
+  valid
+  invalid_phone
+  duplicate
+  not_target
+  competitor
+}
+
+model LeadFollowUp {
+  id           Int                @id @default(autoincrement())
+  tenantId     Int                @map("tenant_id")
+  leadId       Int                @map("lead_id")
+  method       FollowMethod       @map("method")
+  content      String             @db.Text
+  result       LeadFollowResult?
+  nextAction   String?            @map("next_action") @db.VarChar(200)
+  nextFollowAt DateTime?          @map("next_follow_at")
+  createdBy    Int                @map("created_by")
+  createdAt    DateTime           @default(now()) @map("created_at")
+
+  lead         Lead               @relation(fields: [leadId], references: [id])
+
+  @@index([tenantId, leadId])
+  @@map("lead_follow_ups")
+}
+
+enum LeadFollowResult {
+  connected
+  no_answer
+  rejected
+  interested
+  need_follow
+}
+
+// ============ 4. 公私海域 ============
+
+model PoolConfig {
+  id                 Int            @id @default(autoincrement())
+  tenantId           Int            @map("tenant_id")
+  poolType           PoolConfigType @map("pool_type")
+  deptId             Int?           @map("dept_id")
+  name               String         @db.VarChar(50)
+  maxClaimPerDay     Int            @default(3) @map("max_claim_per_day")
+  protectDays        Int            @default(30) @map("protect_days")
+  followRequiredDays Int            @default(15) @map("follow_required_days")
+  autoRecycleDays    Int            @default(60) @map("auto_recycle_days")
+  recycleTo          PoolType       @default(public) @map("recycle_to")
+  privateMax         Int            @default(50) @map("private_max")
+  claimNeedApproval  Boolean        @default(false) @map("claim_need_approval")
+  assignStrategy     AssignStrategy @default(manual) @map("assign_strategy")
+  isActive           Boolean        @default(true) @map("is_active")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("pool_configs")
+}
+
+enum PoolConfigType {
+  public
+  dept
+}
+
+enum AssignStrategy {
+  manual
+  round_robin
+  region
+  industry
+  load
+  ai
+}
+
+model PoolLog {
+  id          Int          @id @default(autoincrement())
+  tenantId    Int          @map("tenant_id")
+  customerId  Int          @map("customer_id")
+  action      PoolAction
+  fromPool    PoolType     @map("from_pool")
+  toPool      PoolType     @map("to_pool")
+  fromOwnerId Int?         @map("from_owner_id")
+  toOwnerId   Int?         @map("to_owner_id")
+  fromDeptId  Int?         @map("from_dept_id")
+  toDeptId    Int?         @map("to_dept_id")
+  reason      String?      @db.VarChar(200)
+  protectUntil DateTime?   @map("protect_until") @db.Date
+  operatorId  Int          @map("operator_id")
+  isAuto      Boolean      @default(false) @map("is_auto")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  @@index([tenantId, customerId])
+  @@index([tenantId, createdAt])
+  @@index([operatorId])
+  @@map("pool_logs")
+}
+
+enum PoolAction {
+  claim
+  assign
+  return
+  recycle
+  transfer
+  dept_assign
+}
+
+model PrivateHolding {
+  id           Int       @id @default(autoincrement())
+  tenantId     Int       @map("tenant_id")
+  userId       Int       @map("user_id")
+  customerId   Int       @map("customer_id")
+  claimedAt    DateTime  @map("claimed_at")
+  protectUntil DateTime  @map("protect_until") @db.Date
+  lastFollowAt DateTime? @map("last_follow_at")
+  followCount  Int       @default(0) @map("follow_count")
+  isExpired    Boolean   @default(false) @map("is_expired")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tenantId, userId, customerId])
+  @@index([protectUntil])
+  @@index([tenantId, userId])
+  @@map("private_holdings")
+}
+
+// ============ 5. 商机域 ============
+
+model OpportunityStage {
+  id                Int      @id @default(autoincrement())
+  tenantId          Int      @map("tenant_id")
+  code              String   @db.VarChar(30)
+  name              String   @db.VarChar(50)
+  sortOrder         Int      @map("sort_order")
+  probability       Int      @default(0)
+  stallThresholdDays Int     @default(30) @map("stall_threshold_days")
+  entryCriteria     String?  @map("entry_criteria") @db.Text
+  exitActions       String?  @map("exit_actions") @db.Text
+  requiredFields    Json?    @map("required_fields")
+  isWon             Boolean  @default(false) @map("is_won")
+  isLost            Boolean  @default(false) @map("is_lost")
+  color             String?  @db.VarChar(10)
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, sortOrder])
+  @@map("opportunity_stages")
+}
+
+model Opportunity {
+  id                Int              @id @default(autoincrement())
+  tenantId          Int              @map("tenant_id")
+  code              String           @db.VarChar(20)
+  name              String           @db.VarChar(200)
+  customerId        Int              @map("customer_id")
+  contactId         Int?             @map("contact_id")
+  leadId            Int?             @map("lead_id")
+  partnerId         Int?             @map("partner_id")
+  ownerId           Int              @map("owner_id")
+  teamIds           Json?            @map("team_ids")
+  stage             String           @default("intention") @db.VarChar(30)
+  stageEnteredAt    DateTime         @default(now()) @map("stage_entered_at")
+  stageHistory      Json?            @map("stage_history")
+  amount            Decimal          @default(0) @db.Decimal(15, 2)
+  weightedAmount    Decimal          @default(0) @map("weighted_amount") @db.Decimal(15, 2)
+  expectedCloseDate DateTime?        @map("expected_close_date") @db.Date
+  expectedRevenueYear Int?           @map("expected_revenue_year")
+  productIds        Json?            @map("product_ids")
+  demandSummary     String?          @map("demand_summary") @db.Text
+  source            String?          @db.VarChar(50)
+  competitorIds     Json?            @map("competitor_ids")
+  competitorNote    String?          @map("competitor_note") @db.Text
+  priority          OppPriority      @default(medium)
+  isKey             Boolean          @default(false) @map("is_key")
+  healthScore       Int?             @map("health_score")
+  healthFactors     Json?            @map("health_factors")
+  healthLevel       HealthLevel?     @map("health_level")
+  status            OppStatus        @default(open)
+  winDate           DateTime?        @map("win_date") @db.Date
+  lossReason        String?          @map("loss_reason") @db.VarChar(30)
+  lossDetail        String?          @map("loss_detail") @db.VarChar(500)
+  contractId        Int?             @map("contract_id")
+  projectId         Int?             @map("project_id")
+  nextAction        String?          @map("next_action") @db.VarChar(200)
+  nextActionDate    DateTime?        @map("next_action_date") @db.Date
+  lastFollowAt      DateTime?        @map("last_follow_at")
+  followCount       Int              @default(0) @map("follow_count")
+  stageStallDays    Int              @default(0) @map("stage_stall_days")
+  remark            String?          @db.Text
+  createdBy         Int?             @map("created_by")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedBy         Int?             @map("updated_by")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  deletedAt         DateTime?        @map("deleted_at")
+
+  customer          Customer         @relation(fields: [customerId], references: [id])
+  products          OpportunityProduct[]
+  reviews           OpportunityReview[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, stage])
+  @@index([tenantId, status])
+  @@index([expectedCloseDate])
+  @@index([healthLevel])
+  @@map("opportunities")
+}
+
+enum OppPriority {
+  high
+  medium
+  low
+}
+enum HealthLevel {
+  green
+  yellow
+  red
+}
+enum OppStatus {
+  open
+  won
+  lost
+  cancelled
+  on_hold
+}
+
+model OpportunityProduct {
+  id              Int      @id @default(autoincrement())
+  tenantId        Int      @map("tenant_id")
+  opportunityId   Int      @map("opportunity_id")
+  productId       Int?     @map("product_id")
+  productName     String?  @map("product_name") @db.VarChar(200)
+  quantity        Int      @default(1)
+  estimatedPrice  Decimal? @map("estimated_price") @db.Decimal(12, 2)
+  estimatedAmount Decimal? @map("estimated_amount") @db.Decimal(15, 2)
+  remark          String?  @db.VarChar(200)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  opportunity     Opportunity @relation(fields: [opportunityId], references: [id])
+
+  @@index([opportunityId])
+  @@map("opportunity_products")
+}
+
+model OpportunityReview {
+  id            Int          @id @default(autoincrement())
+  tenantId      Int          @map("tenant_id")
+  opportunityId Int          @map("opportunity_id")
+  reviewType    ReviewType   @map("review_type")
+  reviewerId    Int          @map("reviewer_id")
+  result        ReviewResult
+  comments      String?      @db.Text
+  actionItems   Json?        @map("action_items")
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  opportunity   Opportunity  @relation(fields: [opportunityId], references: [id])
+
+  @@index([opportunityId])
+  @@map("opportunity_reviews")
+}
+
+enum ReviewType {
+  stage_gate
+  weekly
+  special
+}
+enum ReviewResult {
+  pass
+  hold
+  reject
+  escalate
+}
+
+// ============ 6. 通用域（跟进/行动/产品） ============
+
+enum FollowMethod {
+  visit
+  phone
+  wechat
+  email
+  meeting
+  other
+}
+
+model FollowUp {
+  id           Int          @id @default(autoincrement())
+  tenantId     Int          @map("tenant_id")
+  targetType   String       @map("target_type") @db.VarChar(20)
+  targetId     Int          @map("target_id")
+  customerId   Int?         @map("customer_id")
+  method       FollowMethod
+  content      String       @db.Text
+  contactId    Int?         @map("contact_id")
+  result       String?      @db.VarChar(50)
+  nextAction   String?      @map("next_action") @db.VarChar(200)
+  nextFollowAt DateTime?    @map("next_follow_at")
+  attachmentIds Json?       @map("attachment_ids")
+  aiStructured Json?        @map("ai_structured")
+  createdBy    Int          @map("created_by")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  deletedAt    DateTime?    @map("deleted_at")
+
+  @@index([tenantId, targetType, targetId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, createdBy])
+  @@index([createdAt])
+  @@map("follow_ups")
+}
+
+model ActionPlan {
+  id           Int              @id @default(autoincrement())
+  tenantId     Int              @map("tenant_id")
+  targetType   String           @map("target_type") @db.VarChar(20)
+  targetId     Int              @map("target_id")
+  title        String           @db.VarChar(200)
+  content      String?          @db.Text
+  actionType   String           @default("other") @map("action_type") @db.VarChar(20)
+  assigneeId   Int              @map("assignee_id")
+  priority     ActionPriority   @default(medium)
+  dueDate      DateTime?        @map("due_date") @db.Date
+  dueTime      String?          @map("due_time") @db.VarChar(5)
+  status       ActionStatus     @default(pending)
+  completedAt  DateTime?        @map("completed_at")
+  source       ActionSource     @default(manual)
+  reminderSent Boolean          @default(false) @map("reminder_sent")
+  createdBy    Int?             @map("created_by")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  deletedAt    DateTime?        @map("deleted_at")
+
+  @@index([tenantId, targetType, targetId])
+  @@index([tenantId, assigneeId, status])
+  @@index([dueDate])
+  @@map("action_plans")
+}
+
+enum ActionPriority {
+  urgent
+  high
+  medium
+  low
+}
+enum ActionStatus {
+  pending
+  in_progress
+  completed
+  overdue
+  cancelled
+}
+enum ActionSource {
+  manual
+  ai_recommend
+  system
+  meeting
+}
+
+model Product {
+  id                Int      @id @default(autoincrement())
+  tenantId          Int      @map("tenant_id")
+  name              String   @db.VarChar(200)
+  code              String?  @db.VarChar(50)
+  category          String   @db.VarChar(50)
+  subCategory       String?  @map("sub_category") @db.VarChar(50)
+  description       String?  @db.Text
+  specification     String?  @db.VarChar(200)
+  unit              String   @default("个") @db.VarChar(20)
+  listPrice         Decimal  @default(0) @map("list_price") @db.Decimal(12, 2)
+  partnerPrice      Decimal? @map("partner_price") @db.Decimal(12, 2)
+  costPrice         Decimal? @map("cost_price") @db.Decimal(12, 2)
+  taxRate           Decimal  @default(13) @map("tax_rate") @db.Decimal(5, 2)
+  yonyouProductCode String?  @map("yonyou_product_code") @db.VarChar(50)
+  isActive          Boolean  @default(true) @map("is_active")
+  sortOrder         Int      @default(0) @map("sort_order")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
+
+  @@index([tenantId, category])
+  @@index([code])
+  @@map("products")
+}
+
+// ============ 7. 合同与订单域 ============
+
+model ContractTemplate {
+  id                  Int          @id @default(autoincrement())
+  tenantId            Int          @map("tenant_id")
+  name                String       @db.VarChar(100)
+  contractType        ContractType @map("contract_type")
+  fileUrl             String?      @map("file_url") @db.VarChar(500)
+  milestoneTemplateId Int?         @map("milestone_template_id")
+  defaultPaymentTerms String?      @map("default_payment_terms") @db.VarChar(200)
+  defaultTaxRate      Decimal?     @default(13) @map("default_tax_rate") @db.Decimal(5, 2)
+  variables           Json?
+  isActive            Boolean      @default(true) @map("is_active")
+  version             Int          @default(1)
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+
+  @@index([tenantId, contractType])
+  @@map("contract_templates")
+}
+
+enum ContractType {
+  software_sale
+  implementation
+  maintenance
+  outsource
+  ai_fde
+  saas_sub
+  channel
+}
+
+model Contract {
+  id                Int            @id @default(autoincrement())
+  tenantId          Int            @map("tenant_id")
+  contractNo        String         @map("contract_no") @db.VarChar(30)
+  name              String         @db.VarChar(200)
+  customerId        Int            @map("customer_id")
+  opportunityId     Int?           @map("opportunity_id")
+  partnerId         Int?           @map("partner_id")
+  contractType      ContractType   @map("contract_type")
+  templateId        Int?           @map("template_id")
+  amount            Decimal        @default(0) @db.Decimal(15, 2)
+  amountExclTax     Decimal?       @map("amount_excl_tax") @db.Decimal(15, 2)
+  taxRate           Decimal?       @default(13) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount         Decimal?       @map("tax_amount") @db.Decimal(15, 2)
+  currency          String         @default("CNY") @db.VarChar(10)
+  discountRate      Decimal?       @map("discount_rate") @db.Decimal(5, 2)
+  signDate          DateTime?      @map("sign_date") @db.Date
+  startDate         DateTime?      @map("start_date") @db.Date
+  endDate           DateTime?      @map("end_date") @db.Date
+  durationMonths    Int?           @map("duration_months")
+  paymentTerms      String?        @map("payment_terms") @db.VarChar(200)
+  status            ContractStatus @default(draft)
+  approvalId        Int?           @map("approval_id")
+  signedByCustomer  String?        @map("signed_by_customer") @db.VarChar(50)
+  signedByUs        String?        @map("signed_by_us") @db.VarChar(50)
+  eSignId           String?        @map("e_sign_id") @db.VarChar(100)
+  eSignStatus       ESignStatus?   @map("e_sign_status")
+  sealType          SealType?      @map("seal_type")
+  ownerId           Int            @map("owner_id")
+  projectId         Int?           @map("project_id")
+  parentContractId  Int?           @map("parent_contract_id")
+  renewCount        Int            @default(0) @map("renew_count")
+  milestoneTemplateId Int?         @map("milestone_template_id")
+  totalInvoiced     Decimal        @default(0) @map("total_invoiced") @db.Decimal(15, 2)
+  totalReceived     Decimal        @default(0) @map("total_received") @db.Decimal(15, 2)
+  totalOutstanding  Decimal        @default(0) @map("total_outstanding") @db.Decimal(15, 2)
+  attachments       Json?
+  remark            String?        @db.Text
+  createdBy         Int?           @map("created_by")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedBy         Int?           @map("updated_by")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  deletedAt         DateTime?      @map("deleted_at")
+
+  customer          Customer       @relation(fields: [customerId], references: [id])
+  items             ContractItem[]
+  milestones        ContractMilestone[]
+  changes           ContractChange[]
+  orders            Order[]
+  paymentPlans      PaymentPlan[]
+  invoices          Invoice[]
+
+  @@unique([tenantId, contractNo])
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
+  @@index([tenantId, ownerId])
+  @@index([endDate])
+  @@index([tenantId, contractType])
+  @@map("contracts")
+}
+
+enum ContractStatus {
+  draft
+  pending_approval
+  approved
+  rejected
+  signed
+  executing
+  completed
+  terminated
+  expired
+}
+
+enum ESignStatus {
+  pending
+  sent
+  signed
+  expired
+  revoked
+}
+enum SealType {
+  company
+  contract
+  finance
+}
+
+model ContractItem {
+  id           Int             @id @default(autoincrement())
+  tenantId     Int             @map("tenant_id")
+  contractId   Int             @map("contract_id")
+  productId    Int?            @map("product_id")
+  itemName     String          @map("item_name") @db.VarChar(200)
+  itemType     ContractItemType @default(service) @map("item_type")
+  specification String?        @db.VarChar(200)
+  quantity     Decimal         @default(1) @db.Decimal(10, 2)
+  unit         String?         @db.VarChar(20)
+  unitPrice    Decimal         @default(0) @map("unit_price") @db.Decimal(12, 2)
+  listPrice    Decimal?        @map("list_price") @db.Decimal(12, 2)
+  discountRate Decimal?        @map("discount_rate") @db.Decimal(5, 2)
+  amount       Decimal         @default(0) @db.Decimal(15, 2)
+  taxRate      Decimal?        @default(13) @map("tax_rate") @db.Decimal(5, 2)
+  serviceYears Int?            @map("service_years")
+  manDays      Decimal?        @map("man_days") @db.Decimal(8, 1)
+  sortOrder    Int             @default(0) @map("sort_order")
+  remark       String?         @db.VarChar(200)
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  contract     Contract        @relation(fields: [contractId], references: [id])
+
+  @@index([contractId])
+  @@map("contract_items")
+}
+
+enum ContractItemType {
+  software
+  service
+  hardware
+  subscription
+  other
+}
+
+model ContractMilestone {
+  id                Int                @id @default(autoincrement())
+  tenantId          Int                @map("tenant_id")
+  contractId        Int                @map("contract_id")
+  templateItemId    Int?               @map("template_item_id")
+  name              String             @db.VarChar(100)
+  sortOrder         Int                @map("sort_order")
+  plannedDate       DateTime           @map("planned_date") @db.Date
+  actualDate        DateTime?          @map("actual_date") @db.Date
+  amount            Decimal?           @db.Decimal(15, 2)
+  amountRatio       Decimal?           @map("amount_ratio") @db.Decimal(5, 2)
+  paymentTrigger    PaymentTrigger     @default(on_complete) @map("payment_trigger")
+  paymentDaysAfter  Int                @default(0) @map("payment_days_after")
+  deliverables      String?            @db.Text
+  ownerId           Int?               @map("owner_id")
+  status            MilestoneStatus    @default(pending)
+  completedBy       Int?               @map("completed_by")
+  completedAt       DateTime?          @map("completed_at")
+  delayReason       String?            @map("delay_reason") @db.VarChar(200)
+  invoiceTriggered  Boolean            @default(false) @map("invoice_triggered")
+  paymentPlanId     Int?               @map("payment_plan_id")
+  attachmentIds     Json?              @map("attachment_ids")
+  remark            String?            @db.VarChar(200)
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  contract          Contract           @relation(fields: [contractId], references: [id])
+
+  @@index([contractId])
+  @@index([tenantId, status])
+  @@index([plannedDate])
+  @@map("contract_milestones")
+}
+
+enum PaymentTrigger {
+  on_complete
+  after_days
+  manual
+  none
+}
+enum MilestoneStatus {
+  pending
+  in_progress
+  completed
+  delayed
+  cancelled
+}
+
+model ContractChange {
+  id          Int              @id @default(autoincrement())
+  tenantId    Int              @map("tenant_id")
+  contractId  Int              @map("contract_id")
+  changeType  ChangeType       @map("change_type")
+  beforeValue String           @map("before_value") @db.Text
+  afterValue  String           @map("after_value") @db.Text
+  reason      String           @db.Text
+  status      ChangeStatus     @default(pending)
+  approvalId  Int?             @map("approval_id")
+  requestedBy Int              @map("requested_by")
+  approvedBy  Int?             @map("approved_by")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  approvedAt  DateTime?        @map("approved_at")
+
+  contract    Contract         @relation(fields: [contractId], references: [id])
+
+  @@index([contractId])
+  @@map("contract_changes")
+}
+
+enum ChangeType {
+  amount
+  scope
+  schedule
+  terms
+  terminate
+  renew
+}
+enum ChangeStatus {
+  pending
+  approved
+  rejected
+}
+
+model Order {
+  id                   Int            @id @default(autoincrement())
+  tenantId             Int            @map("tenant_id")
+  orderNo              String         @map("order_no") @db.VarChar(30)
+  contractId           Int            @map("contract_id")
+  customerId           Int            @map("customer_id")
+  opportunityId        Int?           @map("opportunity_id")
+  orderType            OrderType      @default(standard) @map("order_type")
+  status               OrderStatus    @default(draft)
+  totalAmount          Decimal        @default(0) @map("total_amount") @db.Decimal(15, 2)
+  totalTax             Decimal        @default(0) @map("total_tax") @db.Decimal(15, 2)
+  totalAmountInclTax   Decimal        @default(0) @map("total_amount_incl_tax") @db.Decimal(15, 2)
+  discountRate         Decimal?       @map("discount_rate") @db.Decimal(5, 2)
+  currency             String         @default("CNY") @db.VarChar(10)
+  orderDate            DateTime       @map("order_date") @db.Date
+  expectedDeliveryDate DateTime?      @map("expected_delivery_date") @db.Date
+  actualDeliveryDate   DateTime?      @map("actual_delivery_date") @db.Date
+  deliveryAddress      String?        @map("delivery_address") @db.VarChar(300)
+  deliveryMethod       DeliveryMethod? @map("delivery_method")
+  receiverName         String?        @map("receiver_name") @db.VarChar(50)
+  receiverPhone        String?        @map("receiver_phone") @db.VarChar(200)
+  ownerId              Int            @map("owner_id")
+  approvalId           Int?           @map("approval_id")
+  creditCheckResult    CreditResult?  @map("credit_check_result")
+  creditOverrideReason String?        @map("credit_override_reason") @db.VarChar(200)
+  yonyouOrderNo        String?        @map("yonyou_order_no") @db.VarChar(50)
+  yonyouSyncStatus     SyncStatus     @default(pending) @map("yonyou_sync_status")
+  yonyouSyncAt         DateTime?      @map("yonyou_sync_at")
+  invoiceTriggered     Boolean        @default(false) @map("invoice_triggered")
+  projectTriggered     Boolean        @default(false) @map("project_triggered")
+  remark               String?        @db.Text
+  createdBy            Int?           @map("created_by")
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedBy            Int?           @map("updated_by")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
+  deletedAt            DateTime?      @map("deleted_at")
+
+  contract             Contract       @relation(fields: [contractId], references: [id])
+  items                OrderItem[]
+  deliveries           OrderDelivery[]
+
+  @@unique([tenantId, orderNo])
+  @@index([tenantId, contractId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
+  @@map("orders")
+  customer Customer @relation(fields: [customerId], references: [id])
+
+}
+
+enum OrderType {
+  standard
+  supplement
+  change
+  return
+}
+enum OrderStatus {
+  draft
+  pending_approval
+  approved
+  confirmed
+  shipping
+  delivered
+  completed
+  cancelled
+}
+enum DeliveryMethod {
+  online
+  express
+  onsite
+  email
+}
+enum CreditResult {
+  pass
+  blocked
+  override
+}
+enum SyncStatus {
+  pending
+  synced
+  failed
+  manual
+}
+
+model OrderItem {
+  id             Int             @id @default(autoincrement())
+  tenantId       Int             @map("tenant_id")
+  orderId        Int             @map("order_id")
+  productId      Int?            @map("product_id")
+  itemName       String          @map("item_name") @db.VarChar(200)
+  itemType       ContractItemType @map("item_type")
+  specification  String?         @db.VarChar(200)
+  quantity       Decimal         @default(1) @db.Decimal(10, 2)
+  unit           String?         @db.VarChar(20)
+  unitPrice      Decimal         @default(0) @map("unit_price") @db.Decimal(12, 2)
+  listPrice      Decimal?        @map("list_price") @db.Decimal(12, 2)
+  discountRate   Decimal?        @map("discount_rate") @db.Decimal(5, 2)
+  amount         Decimal         @default(0) @db.Decimal(15, 2)
+  taxRate        Decimal?        @default(13) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount      Decimal         @default(0) @map("tax_amount") @db.Decimal(15, 2)
+  priceSource    PriceSource     @default(list) @map("price_source")
+  manualAdjusted Boolean         @default(false) @map("manual_adjusted")
+  deliveredQty   Decimal         @default(0) @map("delivered_qty") @db.Decimal(10, 2)
+  invoicedQty    Decimal         @default(0) @map("invoiced_qty") @db.Decimal(10, 2)
+  sortOrder      Int             @default(0) @map("sort_order")
+  remark         String?         @db.VarChar(200)
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  order          Order           @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+enum PriceSource {
+  rule
+  policy
+  list
+  manual
+}
+
+model OrderDelivery {
+  id             Int            @id @default(autoincrement())
+  tenantId       Int            @map("tenant_id")
+  orderId        Int            @map("order_id")
+  deliveryType   DeliveryRecordType @map("delivery_type")
+  deliveryDate   DateTime       @map("delivery_date") @db.Date
+  trackingNo     String?        @map("tracking_no") @db.VarChar(50)
+  carrier        String?        @db.VarChar(50)
+  items          Json?
+  receiverConfirm Boolean       @default(false) @map("receiver_confirm")
+  confirmedBy    String?        @map("confirmed_by") @db.VarChar(50)
+  confirmedAt    DateTime?      @map("confirmed_at")
+  licenseKey     String?        @map("license_key") @db.Text
+  attachmentIds  Json?          @map("attachment_ids")
+  operatorId     Int            @map("operator_id")
+  remark         String?        @db.VarChar(200)
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  order          Order          @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@map("order_deliveries")
+}
+
+enum DeliveryRecordType {
+  ship
+  receive
+  install
+}
+
+// ============ 8. 财务域 ============
+
+model Invoice {
+  id                Int            @id @default(autoincrement())
+  tenantId          Int            @map("tenant_id")
+  invoiceNo         String         @map("invoice_no") @db.VarChar(30)
+  contractId        Int            @map("contract_id")
+  orderId           Int?           @map("order_id")
+  milestoneId       Int?           @map("milestone_id")
+  customerId        Int            @map("customer_id")
+  invoiceType       InvoiceType    @default(special) @map("invoice_type")
+  direction         InvoiceDirection @default(output)
+  amount            Decimal        @db.Decimal(15, 2)
+  amountExclTax     Decimal        @map("amount_excl_tax") @db.Decimal(15, 2)
+  taxRate           Decimal        @default(13) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount         Decimal        @map("tax_amount") @db.Decimal(15, 2)
+  invoiceTitle      String         @map("invoice_title") @db.VarChar(200)
+  taxNo             String         @map("tax_no") @db.VarChar(20)
+  bankName          String?        @map("bank_name") @db.VarChar(100)
+  bankAccount       String?        @map("bank_account") @db.VarChar(200)
+  address           String?        @db.VarChar(200)
+  phone             String?        @db.VarChar(20)
+  content           String?        @db.VarChar(200)
+  realInvoiceNo     String?        @map("real_invoice_no") @db.VarChar(50)
+  realInvoiceCode   String?        @map("real_invoice_code") @db.VarChar(50)
+  invoiceDate       DateTime?      @map("invoice_date") @db.Date
+  status            InvoiceStatus  @default(pending)
+  deliveryMethod    InvoiceDelivery? @map("delivery_method")
+  trackingNo        String?        @map("tracking_no") @db.VarChar(50)
+  sentDate          DateTime?      @map("sent_date") @db.Date
+  receivedDate      DateTime?      @map("received_date") @db.Date
+  verifyResult      VerifyResult?  @map("verify_result")
+  verifyAt          DateTime?      @map("verify_at")
+  verifyApi         String?        @map("verify_api") @db.VarChar(20)
+  redFlushReason    String?        @map("red_flush_reason") @db.VarChar(200)
+  redFlushInvoiceId Int?           @map("red_flush_invoice_id")
+  approvalId        Int?           @map("approval_id")
+  yonyouSyncStatus  SyncStatus     @default(pending) @map("yonyou_sync_status")
+  attachmentIds     Json?          @map("attachment_ids")
+  remark            String?        @db.Text
+  createdBy         Int?           @map("created_by")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedBy         Int?           @map("updated_by")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  deletedAt         DateTime?      @map("deleted_at")
+
+  contract          Contract       @relation(fields: [contractId], references: [id])
+
+  @@unique([tenantId, invoiceNo])
+  @@index([contractId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
+  @@map("invoices")
+}
+
+enum InvoiceType {
+  special
+  normal
+  electronic
+}
+enum InvoiceDirection {
+  output
+  input
+}
+enum InvoiceStatus {
+  pending
+  invoiced
+  sent
+  received
+  verified
+  voided
+  red_flushed
+}
+enum InvoiceDelivery {
+  email
+  express
+  onsite
+}
+enum VerifyResult {
+  valid
+  invalid
+  not_found
+}
+
+model PaymentPlan {
+  id               Int                @id @default(autoincrement())
+  tenantId         Int                @map("tenant_id")
+  contractId       Int                @map("contract_id")
+  milestoneId      Int?               @map("milestone_id")
+  planNo           String             @map("plan_no") @db.VarChar(20)
+  amount           Decimal            @db.Decimal(15, 2)
+  ratio            Decimal?           @db.Decimal(5, 2)
+  dueDate          DateTime           @map("due_date") @db.Date
+  triggerCondition String?            @map("trigger_condition") @db.VarChar(200)
+  status           PaymentPlanStatus  @default(pending)
+  receivedAmount   Decimal            @default(0) @map("received_amount") @db.Decimal(15, 2)
+  outstandingAmount Decimal           @default(0) @map("outstanding_amount") @db.Decimal(15, 2)
+  overdueDays      Int                @default(0) @map("overdue_days")
+  invoiceRequired  Boolean            @default(false) @map("invoice_required")
+  invoiceId        Int?               @map("invoice_id")
+  reminded         Boolean            @default(false)
+  remindAt         DateTime?          @map("remind_at")
+  remark           String?            @db.VarChar(200)
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  contract         Contract           @relation(fields: [contractId], references: [id])
+  allocations      ReceiptAllocation[]
+
+  @@unique([tenantId, planNo])
+  @@index([contractId])
+  @@index([tenantId, status])
+  @@index([dueDate])
+  @@index([tenantId, overdueDays])
+  @@map("payment_plans")
+}
+
+enum PaymentPlanStatus {
+  pending
+  partial
+  completed
+  overdue
+  cancelled
+}
+
+model Receipt {
+  id                Int            @id @default(autoincrement())
+  tenantId          Int            @map("tenant_id")
+  receiptNo         String         @map("receipt_no") @db.VarChar(30)
+  customerId        Int            @map("customer_id")
+  contractId        Int?           @map("contract_id")
+  amount            Decimal        @db.Decimal(15, 2)
+  allocatedAmount   Decimal        @default(0) @map("allocated_amount") @db.Decimal(15, 2)
+  unallocatedAmount Decimal        @default(0) @map("unallocated_amount") @db.Decimal(15, 2)
+  receiptDate       DateTime       @map("receipt_date") @db.Date
+  method            ReceiptMethod  @default(bank_transfer)
+  bankAccount       String?        @map("bank_account") @db.VarChar(200)
+  serialNo          String?        @map("serial_no") @db.VarChar(50)
+  payerName         String?        @map("payer_name") @db.VarChar(200)
+  status            ReceiptStatus  @default(draft)
+  confirmedBy       Int?           @map("confirmed_by")
+  confirmedAt       DateTime?      @map("confirmed_at")
+  voidReason        String?        @map("void_reason") @db.VarChar(200)
+  voidedAt          DateTime?      @map("voided_at")
+  yonyouVoucherNo   String?        @map("yonyou_voucher_no") @db.VarChar(50)
+  yonyouSyncStatus  SyncStatus     @default(pending) @map("yonyou_sync_status")
+  attachmentIds     Json?          @map("attachment_ids")
+  remark            String?        @db.Text
+  createdBy         Int?           @map("created_by")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedBy         Int?           @map("updated_by")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  deletedAt         DateTime?      @map("deleted_at")
+
+  allocations       ReceiptAllocation[]
+
+  @@unique([tenantId, receiptNo])
+  @@index([tenantId, customerId])
+  @@index([contractId])
+  @@index([tenantId, status])
+  @@index([receiptDate])
+  @@map("receipts")
+}
+
+enum ReceiptMethod {
+  bank_transfer
+  check
+  cash
+  online
+  bill
+}
+enum ReceiptStatus {
+  draft
+  confirmed
+  voided
+}
+
+model ReceiptAllocation {
+  id            Int      @id @default(autoincrement())
+  tenantId      Int      @map("tenant_id")
+  receiptId     Int      @map("receipt_id")
+  paymentPlanId Int      @map("payment_plan_id")
+  amount        Decimal  @db.Decimal(15, 2)
+  allocatedAt   DateTime @default(now()) @map("allocated_at")
+  allocatedBy   Int      @map("allocated_by")
+  remark        String?  @db.VarChar(200)
+
+  receipt       Receipt  @relation(fields: [receiptId], references: [id])
+  paymentPlan   PaymentPlan @relation(fields: [paymentPlanId], references: [id])
+
+  @@unique([receiptId, paymentPlanId])
+  @@index([paymentPlanId])
+  @@map("receipt_allocations")
+}
+
+model CollectionLog {
+  id             Int                @id @default(autoincrement())
+  tenantId       Int                @map("tenant_id")
+  customerId     Int                @map("customer_id")
+  contractId     Int?               @map("contract_id")
+  paymentPlanId  Int?               @map("payment_plan_id")
+  actionType     CollectionAction   @map("action_type")
+  content        String?            @db.Text
+  result         CollectionResult?
+  promisedDate   DateTime?          @map("promised_date") @db.Date
+  promisedAmount Decimal?           @map("promised_amount") @db.Decimal(15, 2)
+  operatorId     Int                @map("operator_id")
+  createdAt      DateTime           @default(now()) @map("created_at")
+
+  @@index([tenantId, customerId])
+  @@index([paymentPlanId])
+  @@map("collection_logs")
+}
+
+enum CollectionAction {
+  system_remind
+  phone
+  email
+  wechat
+  visit
+  letter
+}
+enum CollectionResult {
+  promised
+  partial
+  refused
+  no_response
+  dispute
+}
+
+// ============ 9. 项目域 ============
+
+model Project {
+  id               Int            @id @default(autoincrement())
+  tenantId         Int            @map("tenant_id")
+  projectNo        String         @map("project_no") @db.VarChar(30)
+  name             String         @db.VarChar(200)
+  contractId       Int?           @map("contract_id")
+  customerId       Int            @map("customer_id")
+  opportunityId    Int?           @map("opportunity_id")
+  projectType      ProjectType    @default(implementation) @map("project_type")
+  stage            ProjectStage   @default(initiation)
+  stageEnteredAt   DateTime       @default(now()) @map("stage_entered_at")
+  status           ProjectStatus  @default(pending_approval)
+  pmId             Int            @map("pm_id")
+  salesOwnerId     Int?           @map("sales_owner_id")
+  teamIds          Json?          @map("team_ids")
+  budgetAmount     Decimal?       @map("budget_amount") @db.Decimal(15, 2)
+  budgetManDays    Decimal?       @map("budget_man_days") @db.Decimal(8, 1)
+  actualManDays    Decimal        @default(0) @map("actual_man_days") @db.Decimal(8, 1)
+  manDayCost       Decimal?       @default(1500) @map("man_day_cost") @db.Decimal(10, 2)
+  actualCost       Decimal        @default(0) @map("actual_cost") @db.Decimal(15, 2)
+  outsourceCost    Decimal        @default(0) @map("outsource_cost") @db.Decimal(15, 2)
+  travelCost       Decimal        @default(0) @map("travel_cost") @db.Decimal(15, 2)
+  grossMargin      Decimal?       @map("gross_margin") @db.Decimal(5, 2)
+  progress         Int            @default(0)
+  plannedStartDate DateTime       @map("planned_start_date") @db.Date
+  plannedEndDate   DateTime       @map("planned_end_date") @db.Date
+  actualStartDate  DateTime?      @map("actual_start_date") @db.Date
+  actualEndDate    DateTime?      @map("actual_end_date") @db.Date
+  delayDays        Int            @default(0) @map("delay_days")
+  healthStatus     ProjectHealth  @default(green) @map("health_status")
+  priority         ProjectPriority @default(medium)
+  approvalId       Int?           @map("approval_id")
+  acceptanceDate   DateTime?      @map("acceptance_date") @db.Date
+  acceptanceDocId  Int?           @map("acceptance_doc_id")
+  satisfactionScore Int?          @map("satisfaction_score")
+  closureNote      String?        @map("closure_note") @db.Text
+  remark           String?        @db.Text
+  createdBy        Int?           @map("created_by")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedBy        Int?           @map("updated_by")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  deletedAt        DateTime?      @map("deleted_at")
+
+  customer         Customer       @relation(fields: [customerId], references: [id])
+  milestones       ProjectMilestone[]
+  tasks            ProjectTask[]
+  timesheets       Timesheet[]
+  documents        ProjectDocument[]
+
+  @@unique([tenantId, projectNo])
+  @@index([tenantId, pmId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
+  @@index([contractId])
+  @@index([tenantId, stage])
+  @@map("projects")
+}
+
+enum ProjectType {
+  implementation
+  outsource
+  maintenance
+  ai_fde
+  saas_deploy
+  other
+}
+enum ProjectStage {
+  initiation
+  blueprint
+  development
+  testing
+  go_live
+  acceptance
+  maintenance
+  closed
+}
+enum ProjectStatus {
+  pending_approval
+  active
+  on_hold
+  completed
+  cancelled
+}
+enum ProjectHealth {
+  green
+  yellow
+  red
+}
+enum ProjectPriority {
+  high
+  medium
+  low
+}
+
+model ProjectMilestone {
+  id                   Int             @id @default(autoincrement())
+  tenantId             Int             @map("tenant_id")
+  projectId            Int             @map("project_id")
+  contractMilestoneId  Int?            @map("contract_milestone_id")
+  name                 String          @db.VarChar(100)
+  stage                String          @db.VarChar(30)
+  sortOrder            Int             @map("sort_order")
+  weight               Int             @default(0)
+  plannedDate          DateTime        @map("planned_date") @db.Date
+  actualDate           DateTime?       @map("actual_date") @db.Date
+  status               MilestoneStatus @default(pending)
+  ownerId              Int?            @map("owner_id")
+  deliverables         String?         @db.Text
+  acceptanceCriteria   String?         @map("acceptance_criteria") @db.Text
+  attachmentIds        Json?           @map("attachment_ids")
+  delayReason          String?         @map("delay_reason") @db.VarChar(200)
+  paymentTriggered     Boolean         @default(false) @map("payment_triggered")
+  completedBy          Int?            @map("completed_by")
+  completedAt          DateTime?       @map("completed_at")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+
+  project              Project         @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([tenantId, status])
+  @@index([plannedDate])
+  @@map("project_milestones")
+}
+
+model ProjectTask {
+  id           Int            @id @default(autoincrement())
+  tenantId     Int            @map("tenant_id")
+  projectId    Int            @map("project_id")
+  milestoneId  Int?           @map("milestone_id")
+  parentTaskId Int?           @map("parent_task_id")
+  title        String         @db.VarChar(200)
+  description  String?        @db.Text
+  assigneeId   Int            @map("assignee_id")
+  status       TaskStatus     @default(todo)
+  priority     TaskPriority   @default(medium)
+  plannedHours Decimal?       @map("planned_hours") @db.Decimal(6, 1)
+  actualHours  Decimal        @default(0) @map("actual_hours") @db.Decimal(6, 1)
+  dueDate      DateTime?      @map("due_date") @db.Date
+  completedAt  DateTime?      @map("completed_at")
+  sortOrder    Int            @default(0) @map("sort_order")
+  tags         Json?
+  createdBy    Int?           @map("created_by")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  deletedAt    DateTime?      @map("deleted_at")
+
+  project      Project        @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([tenantId, assigneeId])
+  @@index([tenantId, status])
+  @@index([milestoneId])
+  @@map("project_tasks")
+}
+
+enum TaskStatus {
+  todo
+  in_progress
+  review
+  done
+  cancelled
+}
+enum TaskPriority {
+  urgent
+  high
+  medium
+  low
+}
+
+model Timesheet {
+  id          Int              @id @default(autoincrement())
+  tenantId    Int              @map("tenant_id")
+  projectId   Int              @map("project_id")
+  taskId      Int?             @map("task_id")
+  userId      Int              @map("user_id")
+  workDate    DateTime         @map("work_date") @db.Date
+  hours       Decimal          @db.Decimal(4, 1)
+  manDays     Decimal          @default(0) @map("man_days") @db.Decimal(4, 2)
+  workType    WorkType         @default(remote) @map("work_type")
+  description String?          @db.VarChar(500)
+  status      TimesheetStatus  @default(draft)
+  approvedBy  Int?             @map("approved_by")
+  approvedAt  DateTime?        @map("approved_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  project     Project          @relation(fields: [projectId], references: [id])
+
+  @@unique([tenantId, userId, workDate, projectId, taskId])
+  @@index([projectId])
+  @@index([tenantId, userId])
+  @@index([status])
+  @@map("timesheets")
+}
+
+enum WorkType {
+  onsite
+  remote
+  training
+  meeting
+  document
+}
+enum TimesheetStatus {
+  draft
+  submitted
+  approved
+  rejected
+}
+
+model ProjectDocument {
+  id         Int              @id @default(autoincrement())
+  tenantId   Int              @map("tenant_id")
+  projectId  Int              @map("project_id")
+  milestoneId Int?            @map("milestone_id")
+  category   DocCategory      @default(other)
+  name       String           @db.VarChar(200)
+  fileUrl    String           @map("file_url") @db.VarChar(500)
+  fileSize   BigInt?          @map("file_size")
+  version    Int              @default(1)
+  uploadedBy Int              @map("uploaded_by")
+  uploadedAt DateTime         @default(now()) @map("uploaded_at")
+  remark     String?          @db.VarChar(200)
+
+  project    Project          @relation(fields: [projectId], references: [id])
+
+  @@index([projectId])
+  @@index([tenantId, category])
+  @@map("project_documents")
+}
+
+enum DocCategory {
+  blueprint
+  design
+  test
+  training
+  acceptance
+  meeting
+  other
+}
+
+// ============ 10. 审批域 ============
+
+model Approval {
+  id                Int            @id @default(autoincrement())
+  tenantId          Int            @map("tenant_id")
+  approvalNo        String         @map("approval_no") @db.VarChar(30)
+  bizType           String         @map("biz_type") @db.VarChar(30)
+  bizId             Int            @map("biz_id")
+  bizNo             String?        @map("biz_no") @db.VarChar(30)
+  title             String         @db.VarChar(200)
+  applicantId       Int            @map("applicant_id")
+  currentNodeId     Int?           @map("current_node_id")
+  status            ApprovalStatus @default(pending)
+  formData          Json?          @map("form_data")
+  startedAt         DateTime       @default(now()) @map("started_at")
+  completedAt       DateTime?      @map("completed_at")
+  dingtalkInstanceId String?       @map("dingtalk_instance_id") @db.VarChar(100)
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  nodes             ApprovalNode[]
+
+  @@unique([tenantId, approvalNo])
+  @@index([bizType, bizId])
+  @@index([tenantId, applicantId])
+  @@index([tenantId, status])
+  @@map("approvals")
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+  cancelled
+  withdrawn
+}
+
+model ApprovalNode {
+  id         Int              @id @default(autoincrement())
+  tenantId   Int              @map("tenant_id")
+  approvalId Int              @map("approval_id")
+  nodeOrder  Int              @map("node_order")
+  nodeName   String           @map("node_name") @db.VarChar(50)
+  approverId Int              @map("approver_id")
+  action     ApprovalAction   @default(pending)
+  comment    String?          @db.Text
+  actedAt    DateTime?        @map("acted_at")
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  approval   Approval         @relation(fields: [approvalId], references: [id])
+
+  @@index([approvalId])
+  @@index([tenantId, approverId, action])
+  @@map("approval_nodes")
+}
+
+enum ApprovalAction {
+  pending
+  approved
+  rejected
+  transferred
+  added
+}
+
+// ============ 11. 里程碑模板域 ============
+
+model MilestoneTemplate {
+  id           Int            @id @default(autoincrement())
+  tenantId     Int            @map("tenant_id")
+  name         String         @db.VarChar(100)
+  contractType ContractType   @map("contract_type")
+  description  String?        @db.VarChar(500)
+  isSystem     Boolean        @default(false) @map("is_system")
+  isActive     Boolean        @default(true) @map("is_active")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  items        MilestoneTemplateItem[]
+
+  @@index([tenantId, contractType])
+  @@map("milestone_templates")
+}
+
+model MilestoneTemplateItem {
+  id               Int            @id @default(autoincrement())
+  tenantId         Int            @map("tenant_id")
+  templateId       Int            @map("template_id")
+  name             String         @db.VarChar(100)
+  sortOrder        Int            @map("sort_order")
+  offsetDays       Int            @default(0) @map("offset_days")
+  amountRatio      Decimal?       @map("amount_ratio") @db.Decimal(5, 2)
+  paymentTrigger   PaymentTrigger @default(none) @map("payment_trigger")
+  paymentDaysAfter Int            @default(0) @map("payment_days_after")
+  deliverables     String?        @db.Text
+  defaultOwnerRole String?        @map("default_owner_role") @db.VarChar(30)
+  isPaymentNode    Boolean        @default(false) @map("is_payment_node")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  template         MilestoneTemplate @relation(fields: [templateId], references: [id])
+
+  @@index([templateId])
+  @@map("milestone_template_items")
+}
+
+// ============ 12. 通知与审计 ============
+
+model Notification {
+  id       Int              @id @default(autoincrement())
+  tenantId Int              @map("tenant_id")
+  userId   Int              @map("user_id")
+  type     String           @db.VarChar(50)
+  title    String           @db.VarChar(200)
+  content  String?          @db.Text
+  bizType  String?          @map("biz_type") @db.VarChar(30)
+  bizId    Int?             @map("biz_id")
+  channel  NotifyChannel    @default(inbox)
+  isRead   Boolean          @default(false) @map("is_read")
+  readAt   DateTime?        @map("read_at")
+  sentAt   DateTime?        @map("sent_at")
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  @@index([tenantId, userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+enum NotifyChannel {
+  inbox
+  dingtalk
+  wecom
+  email
+  sms
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  tenantId   Int      @map("tenant_id")
+  userId     Int?     @map("user_id")
+  action     String   @db.VarChar(50)
+  objectType String   @map("object_type") @db.VarChar(50)
+  objectId   Int?     @map("object_id")
+  objectNo   String?  @map("object_no") @db.VarChar(100)
+  beforeData Json?    @map("before_data")
+  afterData  Json?    @map("after_data")
+  ipAddress  String?  @map("ip_address") @db.VarChar(50)
+  userAgent  String?  @map("user_agent") @db.VarChar(300)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt])
+  @@index([objectType, objectId])
+  @@index([tenantId, userId])
+  @@map("audit_logs")
+}
+
+// ============ 13. 补充表（一致性检查GAP修复） ============
+
+model Dictionary {
+  id        Int       @id @default(autoincrement())
+  tenantId  Int       @map("tenant_id")
+  type      String    @db.VarChar(50)
+  code      String    @db.VarChar(50)
+  name      String    @db.VarChar(100)
+  extra     Json?
+  sortOrder Int       @default(0) @map("sort_order")
+  isSystem  Boolean   @default(false) @map("is_system")
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@unique([tenantId, type, code])
+  @@index([tenantId, type, isActive])
+  @@map("dictionaries")
+}
+
+model SystemSetting {
+  id           Int                 @id @default(autoincrement())
+  tenantId     Int                 @map("tenant_id")
+  settingKey   String              @map("setting_key") @db.VarChar(100)
+  settingValue String              @map("setting_value") @db.Text
+  valueType    SettingValueType    @default(string) @map("value_type")
+  settingGroup String              @map("setting_group") @db.VarChar(50)
+  description  String?             @db.VarChar(200)
+  defaultValue String?             @map("default_value") @db.Text
+  isSystem     Boolean             @default(true) @map("is_system")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  @@unique([tenantId, settingKey])
+  @@index([tenantId, settingGroup])
+  @@map("system_settings")
+}
+
+enum SettingValueType {
+  string
+  number
+  boolean
+  json
+  array
+}
+
+model ApprovalFlow {
+  id            Int      @id @default(autoincrement())
+  tenantId      Int      @map("tenant_id")
+  name          String   @db.VarChar(100)
+  bizType       String   @map("biz_type") @db.VarChar(30)
+  conditionExpr String?  @map("condition_expr") @db.Text
+  priority      Int      @default(0)
+  isActive      Boolean  @default(true) @map("is_active")
+  version       Int      @default(1)
+  createdBy     Int?     @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  nodes         ApprovalFlowNode[]
+
+  @@index([tenantId, bizType, isActive])
+  @@map("approval_flows")
+}
+
+model ApprovalFlowNode {
+  id            Int             @id @default(autoincrement())
+  tenantId      Int             @map("tenant_id")
+  flowId        Int             @map("flow_id")
+  nodeOrder     Int             @map("node_order")
+  nodeName      String          @map("node_name") @db.VarChar(50)
+  approverType  ApproverType    @map("approver_type")
+  approverValue String?         @map("approver_value") @db.VarChar(100)
+  conditionExpr String?         @map("condition_expr") @db.Text
+  isRequired    Boolean         @default(true) @map("is_required")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  flow          ApprovalFlow    @relation(fields: [flowId], references: [id])
+
+  @@index([flowId, nodeOrder])
+  @@map("approval_flow_nodes")
+}
+
+enum ApproverType {
+  role
+  user
+  dept_leader
+  applicant_leader
+}
+
+model AiAuditLog {
+  id            Int             @id @default(autoincrement())
+  tenantId      Int             @map("tenant_id")
+  scene         String          @db.VarChar(30)
+  userId        Int?            @map("user_id")
+  targetType    String?         @map("target_type") @db.VarChar(30)
+  targetId      Int?            @map("target_id")
+  modelUsed     String?         @map("model_used") @db.VarChar(50)
+  inputTokens   Int             @default(0) @map("input_tokens")
+  outputTokens  Int             @default(0) @map("output_tokens")
+  cost          Decimal         @default(0) @db.Decimal(8, 4)
+  inputSummary  String?         @map("input_summary") @db.Text
+  outputSummary String?         @map("output_summary") @db.Text
+  outputFull    Json?           @map("output_full")
+  adopted       Boolean?
+  feedback      String?         @db.VarChar(500)
+  latencyMs     Int?            @map("latency_ms")
+  status        AiCallStatus    @default(success)
+  errorMessage  String?         @map("error_message") @db.Text
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  @@index([tenantId, scene, createdAt])
+  @@index([targetType, targetId])
+  @@index([tenantId, userId])
+  @@map("ai_audit_logs")
+}
+
+enum AiCallStatus {
+  success
+  failed
+  timeout
+  degraded
+}
+
+model NotificationRule {
+  id              Int      @id @default(autoincrement())
+  tenantId        Int      @map("tenant_id")
+  eventName       String   @map("event_name") @db.VarChar(50)
+  name            String   @db.VarChar(100)
+  channels        Json
+  receivers       Json
+  conditionExpr   String?  @map("condition_expr") @db.Text
+  templateCodes   Json?    @map("template_codes")
+  isActive        Boolean  @default(true) @map("is_active")
+  quietHoursStart String   @default("22:00") @map("quiet_hours_start") @db.VarChar(5)
+  quietHoursEnd   String   @default("08:00") @map("quiet_hours_end") @db.VarChar(5)
+  dedupHours      Int      @default(24) @map("dedup_hours")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId, eventName, isActive])
+  @@map("notification_rules")
+}
+
+model NotificationTemplate {
+  id                Int           @id @default(autoincrement())
+  tenantId          Int           @map("tenant_id")
+  code              String        @db.VarChar(50)
+  name              String        @db.VarChar(100)
+  channel           NotifyChannel
+  titleTemplate     String        @map("title_template") @db.VarChar(200)
+  bodyTemplate      String        @map("body_template") @db.Text
+  actionUrlTemplate String?       @map("action_url_template") @db.VarChar(300)
+  variables         Json?
+  isSystem          Boolean       @default(true) @map("is_system")
+  isActive          Boolean       @default(true) @map("is_active")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  @@unique([tenantId, code, channel])
+  @@map("notification_templates")
+}
+
+model File {
+  id           Int       @id @default(autoincrement())
+  tenantId     Int       @map("tenant_id")
+  bizType      String?   @map("biz_type") @db.VarChar(50)
+  bizId        Int?      @map("biz_id")
+  originalName String    @map("original_name") @db.VarChar(200)
+  storedName   String    @map("stored_name") @db.VarChar(200)
+  fileUrl      String    @map("file_url") @db.VarChar(500)
+  fileSize     BigInt    @default(0) @map("file_size")
+  mimeType     String?   @map("mime_type") @db.VarChar(100)
+  extension    String?   @db.VarChar(10)
+  uploadedBy   Int       @map("uploaded_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  @@index([tenantId, bizType, bizId])
+  @@index([uploadedBy])
+  @@map("files")
+}
+
+model CreditCheckLog {
+  id             Int          @id @default(autoincrement())
+  tenantId       Int          @map("tenant_id")
+  customerId     Int          @map("customer_id")
+  orderId        Int?         @map("order_id")
+  docType        String       @default("order") @map("doc_type") @db.VarChar(20)
+  docNo          String?      @map("doc_no") @db.VarChar(30)
+  amount         Decimal      @db.Decimal(15, 2)
+  creditLimit    Decimal      @map("credit_limit") @db.Decimal(15, 2)
+  usedBefore     Decimal      @map("used_before") @db.Decimal(15, 2)
+  available      Decimal      @db.Decimal(15, 2)
+  exceedAmount   Decimal?     @map("exceed_amount") @db.Decimal(15, 2)
+  result         CreditResult
+  overrideReason String?      @map("override_reason") @db.VarChar(200)
+  operatorId     Int          @map("operator_id")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([tenantId, customerId])
+  @@index([orderId])
+  @@index([tenantId, createdAt])
+  @@map("credit_check_logs")
+}

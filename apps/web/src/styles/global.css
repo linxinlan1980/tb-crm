@@ -1,0 +1,30 @@
+:root {
+  --seed-bg: #f8fafc;
+  --seed-fg: #0f172a;
+  --seed-primary: #1e40af;
+  --seed-accent: #3b82f6;
+  --seed-surface: #ffffff;
+  --seed-radius: 3px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'IBM Plex Sans', system-ui, 'Noto Sans SC', 'PingFang SC', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--seed-bg);
+  color: var(--seed-fg);
+}
+
+/* Ant Design overrides for Carbon-like sharp enterprise feel */
+.ant-card { border-radius: var(--seed-radius) !important; }
+.ant-btn { border-radius: var(--seed-radius) !important; }
+.ant-input { border-radius: var(--seed-radius) !important; }
+.ant-table-wrapper .ant-table { border-radius: var(--seed-radius) !important; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
