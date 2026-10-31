@@ -287,7 +287,8 @@ async function main() {
 
   // 4. 用户
   const seedPassword = process.env.SEED_ADMIN_PASSWORD;
-  if (!seedPassword || seedPassword.length < 12) throw new Error('SEED_ADMIN_PASSWORD必须至少12位');
+  const minimumPasswordLength = process.env.DEMO_MODE === 'true' ? 5 : 12;
+  if (!seedPassword || seedPassword.length < minimumPasswordLength) throw new Error(`SEED_ADMIN_PASSWORD必须至少${minimumPasswordLength}位`);
   const passwordHash = await bcrypt.hash(seedPassword, 12);
   const users = [
     { username: 'admin', name: '系统管理员', deptId: 1, position: '管理员', roleCodes: ['super_admin'] },

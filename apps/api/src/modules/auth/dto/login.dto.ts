@@ -13,6 +13,6 @@ export class LoginDto {
   @ApiProperty({ example: 'Abc@2026', description: '密码' })
   @IsString()
   @IsNotEmpty({ message: '密码不能为空' })
-  @MinLength(6, { message: '密码至少6位' })
+  @MinLength(5, { message: '密码至少5位' })
   password!: string;
 }
