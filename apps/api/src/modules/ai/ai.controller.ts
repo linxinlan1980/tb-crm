@@ -1,3 +1,4 @@
+import { ApiExcludeController } from '@nestjs/swagger';
 import { Controller, Post, Get, Body, Param, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AiGatewayService } from './gateway/ai-gateway.service';
@@ -9,6 +10,7 @@ import { CurrentUser, TenantId } from '../../common/decorators/current-user.deco
 
 @ApiTags('AI副驾驶')
 @ApiBearerAuth()
+@ApiExcludeController()
 @Controller('ai')
 export class AiController {
   constructor(

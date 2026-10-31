@@ -7,7 +7,10 @@ import { CAPABILITIES } from './capability.catalog';
 
 @Injectable()
 export class CapabilityService {
-  constructor(private readonly customers: CustomerService, private readonly audit: AuditLogService) {}
+  constructor(
+    private readonly customers: CustomerService,
+    private readonly audit: AuditLogService,
+  ) {}
 
   list(actor: Actor) {
     return CAPABILITIES.filter((entry) => this.allowed(actor, entry.permission));
@@ -35,26 +38,57 @@ export class CapabilityService {
     try {
       let result: unknown;
       if (id === 'customer.search') {
-        const data = await this.customers.findAll(actor.tenantId, {
-          keyword: values.keyword as string | undefined, page: values.page as number | undefined,
-          pageSize: values.pageSize as number | undefined,
-        }, actor);
-        result = { ...data, items: data.items.map((entry) => ({
-          id: entry.id, code: entry.code, name: entry.name, industry: entry.industry, poolType: entry.poolType,
-        })) };
+        const data = await this.customers.findAll(
+          actor.tenantId,
+          {
+            keyword: values.keyword as string | undefined,
+            page: values.page as number | undefined,
+            pageSize: values.pageSize as number | undefined,
+          },
+          actor,
+        );
+        result = {
+          ...data,
+          items: data.items.map((entry) => ({
+            id: entry.id,
+            code: entry.code,
+            name: entry.name,
+            industry: entry.industry,
+            poolType: entry.poolType,
+          })),
+        };
       } else {
         const entry = await this.customers.findOne(actor.tenantId, values.customerId as number, actor);
-        result = { id: entry.id, code: entry.code, name: entry.name, industry: entry.industry,
-          poolType: entry.poolType, status: entry.status, contractAmount: entry.contractAmount, statistics: entry._stats };
+        result = {
+          id: entry.id,
+          code: entry.code,
+          name: entry.name,
+          industry: entry.industry,
+          poolType: entry.poolType,
+          status: entry.status,
+          ...(entry.poolType === 'public' && !actor.roles.some((role) => ['super_admin', 'gm'].includes(role))
+            ? {}
+            : { contractAmount: entry.contractAmount, statistics: entry._stats }),
+        };
       }
-      await this.audit.log({ tenantId: actor.tenantId, userId: actor.userId,
-        action: 'capability.succeeded', objectType: 'capability', objectNo: executionId,
-        afterData: { capabilityId: id, version: definition.version, effect: definition.effect } });
+      await this.audit.log({
+        tenantId: actor.tenantId,
+        userId: actor.userId,
+        action: 'capability.succeeded',
+        objectType: 'capability',
+        objectNo: executionId,
+        afterData: { capabilityId: id, version: definition.version, effect: definition.effect },
+      });
       return { executionId, capabilityId: id, version: definition.version, result };
     } catch (error) {
-      await this.audit.log({ tenantId: actor.tenantId, userId: actor.userId,
-        action: 'capability.failed', objectType: 'capability', objectNo: executionId,
-        afterData: { capabilityId: id, version: definition.version } });
+      await this.audit.log({
+        tenantId: actor.tenantId,
+        userId: actor.userId,
+        action: 'capability.failed',
+        objectType: 'capability',
+        objectNo: executionId,
+        afterData: { capabilityId: id, version: definition.version },
+      });
       throw error;
     }
   }
@@ -66,7 +100,11 @@ export class CapabilityService {
   }
 
   private allowed(actor: Actor, permission: string): boolean {
-    return actor.roles.includes('super_admin') || actor.permissions.some((entry) =>
-      entry === '*' || entry === permission || entry === `${permission.split(':')[0]}:*`);
+    return (
+      actor.roles.includes('super_admin') ||
+      actor.permissions.some(
+        (entry) => entry === '*' || entry === permission || entry === `${permission.split(':')[0]}:*`,
+      )
+    );
   }
 }

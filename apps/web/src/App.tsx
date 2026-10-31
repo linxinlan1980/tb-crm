@@ -1,65 +1,105 @@
-import NotFoundPage from './pages/NotFoundPage';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Result, Spin } from 'antd';
 import { useAuthStore } from './stores/useAuthStore';
 import BasicLayout from './layouts/BasicLayout';
-import LoginPage from './pages/login/LoginPage';
-import DashboardPage from './pages/dashboard/DashboardPage';
-import CustomerListPage from './pages/customer/CustomerListPage';
-import CustomerDetailPage from './pages/customer/CustomerDetailPage';
-import PoolPublicPage from './pages/pool/PoolPublicPage';
-import PoolPrivatePage from './pages/pool/PoolPrivatePage';
-import LeadListPage from './pages/lead/LeadListPage';
-import OpportunityBoardPage from './pages/opportunity/OpportunityBoardPage';
-import OpportunityListPage from './pages/opportunity/OpportunityListPage';
-import ContractListPage from './pages/contract/ContractListPage';
-import PaymentPlanPage from './pages/finance/PaymentPlanPage';
-import ProjectListPage from './pages/project/ProjectListPage';
-import AgingPage from './pages/finance/AgingPage';
-import ApprovalCenterPage from './pages/approval/ApprovalCenterPage';
-import NotificationCenterPage from './pages/notification/NotificationCenterPage';
-import OrderListPage from './pages/order/OrderListPage';
-import InvoiceListPage from './pages/finance/InvoiceListPage';
-
-function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const token = useAuthStore((s) => s.accessToken);
-  if (!token) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+const Login = lazy(() => import('./pages/login/LoginPage'));
+const Dashboard = lazy(() => import('./pages/dashboard/DashboardPage'));
+const Workspace = lazy(() => import('./pages/workspace/WorkspacePage'));
+const Approval = lazy(() => import('./pages/approval/ApprovalCenterPage'));
+const Designer = lazy(() => import('./pages/approval/FlowDesignerPage'));
+const Integration = lazy(() => import('./pages/workspace/IntegrationPage'));
+const System = lazy(() => import('./pages/workspace/SystemPage'));
+const Ai = lazy(() => import('./pages/workspace/AiPage'));
+const Notifications = lazy(() => import('./pages/notification/NotificationCenterPage'));
+const Finance = lazy(() => import('./pages/workspace/FinancePage'));
+const Board = lazy(() => import('./pages/workspace/BoardPage'));
+function Private({ children }: { children: React.ReactNode }) {
+  return useAuthStore((s) => s.accessToken) ? <>{children}</> : <Navigate to="/login" replace />;
 }
-
+function Admin({ children }: { children: React.ReactNode }) {
+  return useAuthStore((s) => s.user?.roles.includes('super_admin')) ? (
+    <>{children}</>
+  ) : (
+    <Result status="403" title="无权访问" subTitle="此功能仅限管理员" />
+  );
+}
+const routes: Record<string, string> = {
+  customers: 'customers',
+  contacts: 'contacts',
+  leads: 'leads',
+  followups: 'followups',
+  actions: 'actions',
+  opportunities: 'opportunities',
+  contracts: 'contracts',
+  orders: 'orders',
+  projects: 'projects',
+  tasks: 'tasks',
+  products: 'products',
+  'finance/payment-plans': 'payment-plans',
+  invoices: 'invoices',
+  receipts: 'receipts',
+};
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/"
-          element={
-            <PrivateRoute>
-              <BasicLayout />
-            </PrivateRoute>
-          }
-        >
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="customers" element={<CustomerListPage />} />
-          <Route path="customers/:id" element={<CustomerDetailPage />} />
-          <Route path="pool/public" element={<PoolPublicPage />} />
-          <Route path="pool/private" element={<PoolPrivatePage />} />
-          <Route path="leads" element={<LeadListPage />} />
-          <Route path="opportunities" element={<OpportunityListPage />} />
-          <Route path="opportunities/board" element={<OpportunityBoardPage />} />
-          <Route path="contracts" element={<ContractListPage />} />
-          <Route path="finance/payment-plans" element={<PaymentPlanPage />} />
-          <Route path="projects" element={<ProjectListPage />} />
-          <Route path="finance/aging" element={<AgingPage />} />
-          <Route path="approvals" element={<ApprovalCenterPage />} />
-          <Route path="notifications" element={<NotificationCenterPage />} />
-          <Route path="orders" element={<OrderListPage />} />
-          <Route path="invoices" element={<InvoiceListPage />} />
-          {/* 待补：projects/:id, contracts/:id, system/*, ai/*, reports/* */}
-          <Route path="*" element={<NotFoundPage />} />
-        </Route>
-      </Routes>
+      <Suspense
+        fallback={
+          <div style={{ padding: 80, textAlign: 'center' }}>
+            <Spin size="large" />
+          </div>
+        }
+      >
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/"
+            element={
+              <Private>
+                <BasicLayout />
+              </Private>
+            }
+          >
+            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            {Object.entries(routes).map(([path, kind]) => (
+              <Route key={path} path={path} element={<Workspace key={kind} kind={kind} />} />
+            ))}
+            <Route path="pool/public" element={<Workspace key="public" kind="customers" poolType="public" />} />
+            <Route path="pool/private" element={<Workspace key="private" kind="customers" poolType="private" />} />
+            <Route path="opportunities/board" element={<Board />} />
+            <Route path="notifications" element={<Notifications />} />
+            <Route path="approvals" element={<Approval />} />
+            <Route
+              path="approval-designer"
+              element={
+                <Admin>
+                  <Designer />
+                </Admin>
+              }
+            />
+            <Route
+              path="integrations"
+              element={
+                <Admin>
+                  <Integration />
+                </Admin>
+              }
+            />
+            <Route
+              path="system"
+              element={
+                <Admin>
+                  <System />
+                </Admin>
+              }
+            />
+            <Route path="ai" element={<Ai />} />
+            <Route path="finance/aging" element={<Finance />} />
+            <Route path="*" element={<Result status="404" title="页面不存在" />} />
+          </Route>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

@@ -2,18 +2,16 @@
 
 面向 B2B 销售与交付的 CRM，沿用 PartnerOS 原型的业务设计。目标是让网页和智能体使用同一套可验证的业务能力。
 
-**当前阶段：开发基线，尚未生产验收。** 原型各模块的文件存在，不代表功能完成。
+**当前阶段：v0.2本地演示与数据测试版，尚未生产验收。**
 
-已实现本轮基础能力：
+- admin、销售主管、销售、老板四角色及按人/团队/租户过滤的数据。
+- 客户、联系人、公私海、线索转化、跟进、行动、商机报价、合同、订单、项目任务和验收主线。
+- 通用审批设计器：表单、顺序节点、条件、版本、发布/预演；合同/订单/立项审批回调，驳回与撤回，站内通知。
+- 财务前端展示与合成数据，明确标记“演示系统，暂无功能”。
+- 7个只读MCP工具、业务HTTP契约，关键写入事务/幂等/并发校验/审计。
+- 钉钉、飞书真实鉴权和通讯录预览接口，企业凭证与实际联调待提供。
 
-- NestJS / React / Prisma 工程可构建；初始 MySQL migration。
-- 全局 JWT 认证、实时角色权限加载、统一响应与错误处理。
-- 租户查询上下文校验及按模型处理软删除。
-- 客户列表与详情的可见范围；工作台使用同一客户能力查询真实数据。
-- 两个只读业务工具：`customer.search`、`customer.get`，含能力目录、参数约束、结果投影与调用审计。
-- 自动化 HTTP 边界测试及状态前置条件测试；CI含独立 MySQL 冒烟流程。
-
-智能体委托凭证、MCP适配、写入动作的幂等与事务、业务事件、完整财务链路仍在建设中。现有其他 REST 模块属于待加固原型。
+[演示操作手册](docs/DEMO_GUIDE.md) · [验证与限制](docs/PROGRESS.md) · [钉钉/飞书配置](docs/INTEGRATIONS.md)
 
 ## 本地开发
 
@@ -23,15 +21,17 @@
 pnpm install --frozen-lockfile
 cp .env.example .env
 # 设置随机 JWT_SECRET、ENCRYPTION_KEY、SEED_ADMIN_PASSWORD；填写 DATABASE_URL。
+# 演示环境设置 DEMO_MODE=true；Docker还需设置MYSQL_ROOT_PASSWORD与MYSQL_PASSWORD。
 docker compose up -d mysql redis
 pnpm --filter @partneros/database generate
 pnpm --filter @partneros/database migrate:deploy
-pnpm db:seed
-pnpm dev
+pnpm demo:seed
+pnpm build
+pnpm demo:start
 ```
 
-Web：`http://localhost:3000`；API文档：`http://localhost:4000/api/docs`。
-初始账号 `admin` / 本地设置的 `SEED_ADMIN_PASSWORD`，租户编码默认 `TINGMENG`。种子数据仅使用演示身份。
+本机也可双击 `启动演示.command`。Web：`http://localhost:3000`；API文档：`http://localhost:4000/api/docs`。
+演示账号：`admin`、`manager`、`sales`、`boss`，密码为本机配置的 `SEED_ADMIN_PASSWORD`；租户编码默认 `TINGMENG`。本机账号说明保存在Git忽略的 `.local/演示账号.md`。
 
 ```sh
 pnpm check   # 类型检查、lint、测试、构建

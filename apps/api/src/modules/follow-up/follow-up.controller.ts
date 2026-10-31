@@ -1,3 +1,4 @@
+import { ApiExcludeController } from '@nestjs/swagger';
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { FollowUpService } from './follow-up.service';
@@ -6,6 +7,7 @@ import { CurrentUser, TenantId } from '../../common/decorators/current-user.deco
 
 @ApiTags('跟进记录')
 @ApiBearerAuth()
+@ApiExcludeController()
 @Controller('follow-ups')
 export class FollowUpController {
   constructor(private readonly followUpService: FollowUpService) {}

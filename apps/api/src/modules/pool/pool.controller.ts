@@ -1,3 +1,4 @@
+import { ApiExcludeController } from '@nestjs/swagger';
 import { Controller, Get, Post, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PoolService } from './pool.service';
@@ -6,6 +7,7 @@ import { CurrentUser, TenantId } from '../../common/decorators/current-user.deco
 
 @ApiTags('公私海管理')
 @ApiBearerAuth()
+@ApiExcludeController()
 @Controller('pool')
 export class PoolController {
   constructor(private readonly poolService: PoolService) {}

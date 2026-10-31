@@ -50,5 +50,5 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   /** Only login, explicit transactions and scheduled scans may use system access. */
   // Prisma invokes subclass getters on its raw target, which has no model delegates.
-  get system() { return this.$extends({}); }
+  get system(): PrismaClient { return this.$extends({}) as unknown as PrismaClient; }
 }

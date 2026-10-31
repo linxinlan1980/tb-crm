@@ -38,6 +38,7 @@ jobs:
       JWT_SECRET: ci-only-synthetic-secret-at-least-32-bytes
       SEED_ADMIN_PASSWORD: CI-Only-Fixture-Password-2026
       SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -51,6 +52,6 @@ jobs:
       - run: cp .env.example .env
       - run: pnpm --filter @partneros/database generate
       - run: pnpm --filter @partneros/database migrate:deploy
-      - run: pnpm db:seed
+      - run: pnpm demo:seed
       - run: pnpm build
       - run: node scripts/smoke.mjs

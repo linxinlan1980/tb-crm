@@ -1,3 +1,4 @@
+import { ApiExcludeController } from '@nestjs/swagger';
 import { Controller, Get, Post, Put, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ContractService } from './contract.service';
@@ -6,6 +7,7 @@ import { CurrentUser, TenantId } from '../../common/decorators/current-user.deco
 
 @ApiTags('合同管理')
 @ApiBearerAuth()
+@ApiExcludeController()
 @Controller('contracts')
 export class ContractController {
   constructor(private readonly contractService: ContractService) {}

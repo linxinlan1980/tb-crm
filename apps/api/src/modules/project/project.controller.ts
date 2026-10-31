@@ -1,3 +1,4 @@
+import { ApiExcludeController } from '@nestjs/swagger';
 import { Controller, Get, Post, Put, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ProjectService } from './project.service';
@@ -6,6 +7,7 @@ import { CurrentUser, TenantId } from '../../common/decorators/current-user.deco
 
 @ApiTags('项目交付')
 @ApiBearerAuth()
+@ApiExcludeController()
 @Controller('projects')
 export class ProjectController {
   constructor(private readonly projectService: ProjectService) {}

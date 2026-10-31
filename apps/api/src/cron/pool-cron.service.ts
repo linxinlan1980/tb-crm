@@ -16,7 +16,7 @@ export class PoolCronService {
   /**
    * JOB-001: 每日01:00 自动回收超期未跟进的私海客户
    */
-  @Cron('0 1 * * *', { timeZone: 'Asia/Shanghai' })
+  @Cron('0 1 * * *', { timeZone: 'Asia/Shanghai', disabled: process.env.ENABLE_LEGACY_CRON !== 'true' })
   async handleAutoRecycle() {
     this.logger.log('JOB-001 开始：公私海自动回收');
     try {
@@ -38,7 +38,7 @@ export class PoolCronService {
   /**
    * JOB-002: 每日09:00 保护期/跟进预警
    */
-  @Cron('0 9 * * *', { timeZone: 'Asia/Shanghai' })
+  @Cron('0 9 * * *', { timeZone: 'Asia/Shanghai', disabled: process.env.ENABLE_LEGACY_CRON !== 'true' })
   async handleProtectCheck() {
     this.logger.log('JOB-002 开始：保护期/跟进预警');
     try {

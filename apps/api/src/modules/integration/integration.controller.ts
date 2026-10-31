@@ -1,52 +1,33 @@
-import { Controller, Get, Post, Put, Body, Param } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Post, Param, Query, BadRequestException } from '@nestjs/common';
 import { Permissions } from '../../common/decorators/permissions.decorator';
-import { TenantId } from '../../common/decorators/current-user.decorator';
-import { DingtalkService } from './dingtalk/dingtalk.service';
-import { YonyouService } from './yonyou/yonyou.service';
-import { EmailService } from './email/email.service';
-import { connectorRegistry } from './connector.interface';
-
-@ApiTags('集成管理')
-@ApiBearerAuth()
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { Actor } from '../../common/types/actor';
+import { PlatformService, platform } from './platform.service';
 @Controller('integrations')
+@Permissions('system:integration')
 export class IntegrationController {
-  constructor(
-    private dingtalk: DingtalkService,
-    private yonyou: YonyouService,
-    private email: EmailService,
+  constructor(private readonly service: PlatformService) {}
+  @Get() list(@CurrentUser() a: Actor) {
+    return this.service.statuses(a);
+  }
+  @Post(':code/test') test(@CurrentUser() a: Actor, @Param('code') code: string) {
+    return this.service.test(platform(code), a);
+  }
+  @Get(':code/directory') directory(
+    @CurrentUser() a: Actor,
+    @Param('code') code: string,
+    @Query() q: Record<string, string>,
   ) {
-    // 注册连接器到全局注册表
-    connectorRegistry.register(dingtalk);
-    connectorRegistry.register(yonyou);
-    connectorRegistry.register(email);
+    return this.service.directory(platform(code), a, q);
   }
-
-  @Get()
-  @Permissions('system:integration')
-  @ApiOperation({ summary: '已启用集成列表' })
-  async list() {
-    const connectors = connectorRegistry.list();
-    const statuses = await connectorRegistry.healthCheckAll();
-    return connectors.map((c) => ({ code: c.code, name: c.name, ...statuses[c.code] }));
+  @Get(':code/departments') departments(
+    @CurrentUser() a: Actor,
+    @Param('code') code: string,
+    @Query() q: Record<string, string>,
+  ) {
+    return this.service.departments(platform(code), a, q);
   }
-
-  @Post(':code/test')
-  @Permissions('system:integration')
-  @ApiOperation({ summary: '连接测试' })
-  async test(@Param('code') code: string) {
-    const connector = connectorRegistry.get(code);
-    if (!connector) return { success: false, error: `连接器 ${code} 不存在` };
-    const status = await connector.healthCheck();
-    return status;
-  }
-
-  @Post(':code/sync')
-  @Permissions('system:integration')
-  @ApiOperation({ summary: '手动触发同步' })
-  async sync(@TenantId() tid: number, @Param('code') code: string, @Body() payload: any) {
-    const connector = connectorRegistry.get(code);
-    if (!connector) return { success: false, error: `连接器 ${code} 不存在` };
-    return connector.sync(payload.direction || 'outbound', payload);
+  @Post(':code/sync') sync() {
+    throw new BadRequestException('请先预览并核对身份映射；自动导入与外发审批同步尚未开放');
   }
 }

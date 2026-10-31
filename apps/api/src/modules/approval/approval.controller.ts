@@ -1,59 +1,70 @@
-import { Controller, Get, Post, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Param, ParseIntPipe } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ApprovalService } from './approval.service';
 import { Permissions } from '../../common/decorators/permissions.decorator';
-import { CurrentUser, TenantId } from '../../common/decorators/current-user.decorator';
-
-@ApiTags('审批中心')
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { Actor } from '../../common/types/actor';
+@ApiTags('审批中心与流程设计器')
 @ApiBearerAuth()
 @Controller('approvals')
 export class ApprovalController {
-  constructor(private readonly approvalService: ApprovalService) {}
-
-  @Get('pending')
-  @ApiOperation({ summary: '我的待审批' })
-  findPending(@TenantId() tid: number, @CurrentUser('userId') userId: number) {
-    return this.approvalService.findPending(tid, userId);
+  constructor(private readonly service: ApprovalService) {}
+  @Get('flows') flows(@CurrentUser() a: Actor) {
+    return this.service.flows(a);
   }
-
-  @Get('pending-count')
-  @ApiOperation({ summary: '待审批数量（角标）' })
-  async pendingCount(@TenantId() tid: number, @CurrentUser('userId') userId: number) {
-    const items = await this.approvalService.findPending(tid, userId);
-    return { count: items.length };
+  @Get('people') @Permissions('approval:design') people(@CurrentUser() a: Actor) {
+    return this.service.people(a);
   }
-
-  @Get('my-initiated')
-  @ApiOperation({ summary: '我发起的审批' })
-  findMyInitiated(@TenantId() tid: number, @CurrentUser('userId') userId: number, @Query() query: any) {
-    return this.approvalService.findMyInitiated(tid, userId, { page: +query.page || 1, pageSize: +query.pageSize || 20, status: query.status });
+  @Post('flows') @Permissions('approval:design') save(@CurrentUser() a: Actor, @Body() b: Record<string, unknown>) {
+    return this.service.saveFlow(a, b);
   }
-
-  @Post()
-  @Permissions('approval:create')
-  @ApiOperation({ summary: '发起审批' })
-  create(@TenantId() tid: number, @CurrentUser('userId') userId: number, @Body() dto: any) {
-    return this.approvalService.create(tid, userId, dto);
+  @Post('flows/:id/publish') @Permissions('approval:design') publish(
+    @CurrentUser() a: Actor,
+    @Param('id', ParseIntPipe) flowId: number,
+    @Body() b: Record<string, unknown>,
+  ) {
+    return this.service.publish(a, flowId, b);
   }
-
-  @Post(':approvalId/nodes/:nodeId/approve')
-  @Permissions('approval:approve')
-  @ApiOperation({ summary: '审批通过' })
-  approve(@TenantId() tid: number, @CurrentUser('userId') userId: number, @Param('approvalId', ParseIntPipe) approvalId: number, @Param('nodeId', ParseIntPipe) nodeId: number, @Body('comment') comment?: string) {
-    return this.approvalService.approve(tid, userId, approvalId, nodeId, comment);
+  @Post('flows/:id/preview') preview(
+    @CurrentUser() a: Actor,
+    @Param('id', ParseIntPipe) flowId: number,
+    @Body() b: Record<string, unknown>,
+  ) {
+    return this.service.preview(a, flowId, b);
   }
-
-  @Post(':approvalId/nodes/:nodeId/reject')
-  @Permissions('approval:reject')
-  @ApiOperation({ summary: '审批驳回' })
-  reject(@TenantId() tid: number, @CurrentUser('userId') userId: number, @Param('approvalId', ParseIntPipe) approvalId: number, @Param('nodeId', ParseIntPipe) nodeId: number, @Body('comment') comment: string) {
-    return this.approvalService.reject(tid, userId, approvalId, nodeId, comment);
+  @Get('pending') pending(@CurrentUser() a: Actor) {
+    return this.service.pending(a);
   }
-
-  @Post(':id/withdraw')
-  @Permissions('approval:withdraw')
-  @ApiOperation({ summary: '撤回审批' })
-  withdraw(@TenantId() tid: number, @CurrentUser('userId') userId: number, @Param('id', ParseIntPipe) id: number) {
-    return this.approvalService.withdraw(tid, userId, id);
+  @Get('pending-count') async count(@CurrentUser() a: Actor) {
+    return { count: (await this.service.pending(a)).length };
+  }
+  @Get('my-initiated') initiated(@CurrentUser() a: Actor) {
+    return this.service.initiated(a);
+  }
+  @Post() @Permissions('approval:create') create(@CurrentUser() a: Actor, @Body() b: Record<string, unknown>) {
+    return this.service.create(a, b);
+  }
+  @Post(':id/nodes/:nodeId/approve') @Permissions('approval:approve') approve(
+    @CurrentUser() a: Actor,
+    @Param('id', ParseIntPipe) approvalId: number,
+    @Param('nodeId', ParseIntPipe) nodeId: number,
+    @Body() b: Record<string, unknown>,
+  ) {
+    return this.service.decide(a, approvalId, nodeId, 'approved', b);
+  }
+  @Post(':id/nodes/:nodeId/reject') @Permissions('approval:reject') reject(
+    @CurrentUser() a: Actor,
+    @Param('id', ParseIntPipe) approvalId: number,
+    @Param('nodeId', ParseIntPipe) nodeId: number,
+    @Body() b: Record<string, unknown>,
+  ) {
+    return this.service.decide(a, approvalId, nodeId, 'rejected', b);
+  }
+  @Post(':id/withdraw') @Permissions('approval:withdraw') withdraw(
+    @CurrentUser() a: Actor,
+    @Param('id', ParseIntPipe) approvalId: number,
+    @Body() b: Record<string, unknown>,
+  ) {
+    return this.service.withdraw(a, approvalId, b);
   }
 }

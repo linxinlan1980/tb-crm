@@ -1,12 +1,13 @@
 import type { Prisma } from '@prisma/client';
 import type { Actor } from '../../common/types/actor';
-
-/** Public customers are visible for claiming; private customers obey the caller's scope. */
-export function customerVisibility(actor: Actor): Prisma.CustomerWhereInput {
-  if (actor.roles.includes('super_admin') || actor.dataScope === 'all') return {};
-  if (['team', 'dept'].includes(actor.dataScope) && actor.deptId !== null) {
-    return { OR: [{ poolType: 'public' }, { ownerId: actor.userId }, { ownerDeptId: actor.deptId }] };
-  }
-  // Custom collaboration scopes are not implemented yet: fall back to own records.
-  return { OR: [{ poolType: 'public' }, { ownerId: actor.userId }] };
+/** Shared web/tool customer policy. Teams follow current owner membership, not stale stored department labels. */
+export function customerVisibility(
+  actor: Actor,
+  teamUserIds?: number[],
+  publicVisible = true,
+): Prisma.CustomerWhereInput {
+  if (actor.roles.includes('super_admin') || actor.roles.includes('gm')) return {};
+  const own: Prisma.CustomerWhereInput =
+    actor.roles.includes('sales_manager') && teamUserIds ? { ownerId: { in: teamUserIds } } : { ownerId: actor.userId };
+  return publicVisible ? { OR: [{ poolType: 'public' }, own] } : own;
 }

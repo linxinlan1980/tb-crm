@@ -1508,6 +1508,8 @@ enum ProjectStage {
   closed
 }
 enum ProjectStatus {
+  draft
+  rejected
   pending_approval
   active
   on_hold
@@ -1874,6 +1876,7 @@ enum SettingValueType {
 }
 
 model ApprovalFlow {
+  definition    Json?
   id            Int      @id @default(autoincrement())
   tenantId      Int      @map("tenant_id")
   name          String   @db.VarChar(100)
@@ -2032,4 +2035,18 @@ model CreditCheckLog {
   @@index([orderId])
   @@index([tenantId, createdAt])
   @@map("credit_check_logs")
+}
+
+// Durable idempotency for authenticated business commands.
+model CommandExecution {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  actorId Int @map("actor_id")
+  requestKey String @map("request_key") @db.VarChar(80)
+  command String @db.VarChar(100)
+  payloadHash String @map("payload_hash") @db.VarChar(64)
+  result Json
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([tenantId, actorId, requestKey])
+  @@map("command_executions")
 }

@@ -31,3 +31,13 @@ HTTP tests use a mocked DB and real NestJS routing/guards/JWT verification. Quer
 ## Known inherited debt
 
 Prototype modules retain untyped DTOs, incomplete row/field permissions, incomplete receipts/approval/event chains, unreviewed raw transactions and missing business tests. Legacy lint exceptions are explicit in eslint.config.mjs; new capability/filter/types code prohibits explicit any. The original 70% overall coverage goal is not achieved by this first baseline.
+
+## v0.2 demo implementation update
+
+The active web adapter now uses WorkspaceService, with a machine-readable resource/operation registry at /workspace/schema. It enforces current role permissions and record scopes, validates allowed fields/references, and wraps writes in Serializable transactions with durable CommandExecution results, payload hashes, expectedUpdatedAt checks and audit records. CustomerService's compatibility read projection and WorkspaceService use the same customer visibility function and current team membership. Legacy business controllers return503 and are excluded from OpenAPI; legacy cron is disabled by default.
+
+The approval designer stores versioned draft definitions, publishes immutable versions, resolves required approvers without auto-approval, snapshots fields/nodes, and processes only the current node. Contract, order and project callbacks run in the same transaction. Form requirements are resolved server-side from the actual document and rendered on submission. Project drafts/rejections are explicit states. Missing/ambiguous approvers, self approval and invalid amount conditions fail closed.
+
+Stateless MCP Streamable HTTP uses maintained SDK v1 (protocol up to2025-11-25). Each request reuses its currently authenticated human Actor; seven read-only tools call the same business services. No independently delegated OAuth identity or agent write tools are supplied. DingTalk/Feishu platform requests are separately tenant-bound and remain unverified against a real enterprise until credentials and scopes are configured.
+
+Finance is deliberately presentation-only at this milestone, as directed by the product owner. Seeded receipts, invoices, plans and allocations are synthetic. Demo replay creates a fresh local database copy and preserves existing databases; no automated destructive reset is used.

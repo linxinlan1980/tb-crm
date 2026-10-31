@@ -10,7 +10,9 @@ import { CapabilityService } from './capability.service';
 export class CapabilityController {
   constructor(private readonly capabilities: CapabilityService) {}
   @Get()
-  list(@CurrentUser() actor: Actor) { return this.capabilities.list(actor); }
+  list(@CurrentUser() actor: Actor) {
+    return this.capabilities.list(actor);
+  }
   @Post(':id/invoke')
   invoke(@CurrentUser() actor: Actor, @Param('id') id: string, @Body() input: unknown) {
     return this.capabilities.invoke(actor, id, input);

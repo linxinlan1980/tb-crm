@@ -27,16 +27,16 @@ async function bootstrap() {
 
   // Swagger / OpenAPI
   const config = new DocumentBuilder()
-    .setTitle('PartnerOS CRM API')
+    .setTitle('伴圆 CRM API')
     .setDescription('多租户SaaS B2B CRM - RESTful API')
-    .setVersion('0.1.0')
+    .setVersion('0.2.0')
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
   const port = process.env.PORT || 4000;
-  await app.listen(port);
+  await app.listen(port, process.env.HOST || '127.0.0.1');
   console.log(`🚀 PartnerOS CRM API running on http://localhost:${port}`);
   console.log(`📖 Swagger docs: http://localhost:${port}/api/docs`);
 }

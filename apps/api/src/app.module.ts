@@ -1,3 +1,5 @@
+import { PrototypeGuard } from './common/guards/prototype.guard';
+import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { CapabilityModule } from './modules/capability/capability.module';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -51,11 +53,13 @@ import configuration from './config/configuration';
     AiModule,
     DashboardModule,
     CapabilityModule,
+    WorkspaceModule,
   ],
   controllers: [HealthController],
   providers: [PoolCronService, FinanceCronService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useClass: PrototypeGuard },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],

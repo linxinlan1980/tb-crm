@@ -1,5 +1,6 @@
+import { customerScope, ownerScope } from '../workspace/access';
+import { Prisma } from '@prisma/client';
 import type { Actor } from '../../common/types/actor';
-import { customerVisibility } from './customer-visibility';
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { AuditLogService } from '../system/audit-logs/audit-log.service';
@@ -20,7 +21,7 @@ export class CustomerService {
     const db = this.prisma.forTenant(tenantId);
     const { page = 1, pageSize = 20, poolType, industry, level, ownerId, status, keyword, tag, sort = 'lastFollowAt', order = 'desc' } = query;
 
-    const where: any = { deletedAt: null, AND: [customerVisibility(actor)] };
+    const where: any = { deletedAt: null, AND: [await customerScope(this.prisma.system, actor)] };
     if (poolType) where.poolType = poolType;
     if (industry) where.industry = industry;
     if (level) where.level = level;
@@ -48,17 +49,18 @@ export class CustomerService {
   async findOne(tenantId: number, id: number, actor: Actor) {
     const db = this.prisma.forTenant(tenantId);
     const customer = await db.customer.findFirst({
-      where: { id, deletedAt: null, AND: [customerVisibility(actor)] },
+      where: { id, deletedAt: null, AND: [await customerScope(this.prisma.system, actor)] },
       include: { contacts: { where: { deletedAt: null }, orderBy: { isPrimary: 'desc' } } },
     });
     if (!customer) throw new NotFoundException({ code: 5, message: '客户不存在' });
 
+    const owned=await ownerScope(this.prisma.system,actor);
     // 聚合统计
     const [openOpps, activeContracts, totalReceived, activeProjects] = await Promise.all([
-      db.opportunity.count({ where: { customerId: id, status: 'open', deletedAt: null } }),
-      db.contract.count({ where: { customerId: id, status: { in: ['signed', 'executing'] }, deletedAt: null } }),
-      db.paymentPlan.aggregate({ where: { contract: { customerId: id }, status: { not: 'cancelled' } }, _sum: { receivedAmount: true } }),
-      db.project.count({ where: { customerId: id, status: 'active', deletedAt: null } }),
+      db.opportunity.count({ where: { customerId: id, status: 'open', deletedAt: null, ...owned } }),
+      db.contract.count({ where: { customerId: id, status: { in: ['signed', 'executing'] }, deletedAt: null, ...owned } }),
+      db.paymentPlan.aggregate({ where: { contract: { customerId: id, ...owned }, status: { not: 'cancelled' } }, _sum: { receivedAmount: true } }),
+      db.project.count({ where: { customerId: id, status: 'active', deletedAt: null, OR:[await ownerScope(this.prisma.system,actor,'salesOwnerId'),await ownerScope(this.prisma.system,actor,'pmId')] } }),
     ]);
 
     return {
@@ -66,8 +68,8 @@ export class CustomerService {
       _stats: {
         openOpportunities: openOpps,
         activeContracts,
-        totalReceived: totalReceived._sum.receivedAmount || 0,
-        totalOutstanding: Number(customer.contractAmount) - Number(totalReceived._sum.receivedAmount || 0),
+        totalReceived: new Prisma.Decimal(String(totalReceived._sum.receivedAmount || 0)).toString(),
+        totalOutstanding: new Prisma.Decimal(customer.contractAmount).sub(String(totalReceived._sum.receivedAmount || 0)).toString(),
         activeProjects,
         contactCount: customer.contacts.length,
       },

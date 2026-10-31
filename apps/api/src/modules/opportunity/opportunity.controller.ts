@@ -1,3 +1,4 @@
+import { ApiExcludeController } from '@nestjs/swagger';
 import { Controller, Get, Post, Put, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { OpportunityService } from './opportunity.service';
@@ -6,6 +7,7 @@ import { CurrentUser, TenantId } from '../../common/decorators/current-user.deco
 
 @ApiTags('商机管理')
 @ApiBearerAuth()
+@ApiExcludeController()
 @Controller('opportunities')
 export class OpportunityController {
   constructor(private readonly oppService: OpportunityService) {}

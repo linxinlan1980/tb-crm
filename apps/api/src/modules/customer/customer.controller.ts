@@ -1,3 +1,4 @@
+import { ApiExcludeController } from '@nestjs/swagger';
 import type { Actor } from '../../common/types/actor';
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -7,6 +8,7 @@ import { CurrentUser, TenantId } from '../../common/decorators/current-user.deco
 
 @ApiTags('客户管理')
 @ApiBearerAuth()
+@ApiExcludeController()
 @Controller('customers')
 export class CustomerController {
   constructor(private readonly customerService: CustomerService) {}

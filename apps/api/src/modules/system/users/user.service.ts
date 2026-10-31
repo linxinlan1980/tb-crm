@@ -1,5 +1,5 @@
 import type { UserStatus } from '@prisma/client';
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
 import * as bcrypt from 'bcrypt';
 
@@ -33,6 +33,8 @@ export class UserService {
 
   /** 创建用户 */
   async create(tenantId: number, data: { username: string; name: string; password: string; phone?: string; email?: string; deptId?: number; position?: string; roleIds?: number[] }) {
+    await this.validateReferences(tenantId, data);
+    if (!/^[a-zA-Z0-9_-]{2,40}$/.test(data.username) || !data.name?.trim() || data.name.length > 50 || typeof data.password !== "string" || data.password.length < 12) throw new BadRequestException("账号、姓名或密码无效（密码至少12位）");
     const db = this.prisma.forTenant(tenantId);
     const existing = await db.user.findFirst({ where: { username: data.username, deletedAt: null } });
     if (existing) throw new ConflictException({ code: 6, message: `用户名 ${data.username} 已存在` });
@@ -53,6 +55,9 @@ export class UserService {
     const existing = await db.user.findFirst({ where: { id, deletedAt: null } });
     if (!existing) throw new NotFoundException({ code: 5, message: '用户不存在' });
 
+    const allowed = ["name", "phone", "email", "deptId", "position", "status", "roleIds"];
+    if (Object.keys(data).some(key => !allowed.includes(key))) throw new BadRequestException("不允许的用户字段");
+    await this.validateReferences(tenantId, data);
     const { roleIds, ...userData } = data;
     if (Object.keys(userData).length) await db.user.update({ where: { id }, data: userData });
     if (roleIds) {
@@ -65,6 +70,7 @@ export class UserService {
   /** 重置密码 */
   async resetPassword(tenantId: number, id: number, newPassword: string) {
     const db = this.prisma.forTenant(tenantId);
+    if (typeof newPassword !== "string" || newPassword.length < 12) throw new BadRequestException("密码至少12位");
     const passwordHash = await bcrypt.hash(newPassword, 12);
     await db.user.update({ where: { id }, data: { passwordHash } });
     return { message: '密码已重置' };
@@ -75,6 +81,11 @@ export class UserService {
     const db = this.prisma.forTenant(tenantId);
     await db.user.update({ where: { id }, data: { deletedAt: new Date(), status: 'resigned' } });
     return { message: '用户已停用' };
+  }
+
+  private async validateReferences(tenantId: number, data: {deptId?: number; roleIds?: number[]}) {
+    if (data.deptId && !await this.prisma.system.department.findFirst({where:{tenantId,id:data.deptId,deletedAt:null}})) throw new BadRequestException("部门不存在");
+    if (data.roleIds && (!Array.isArray(data.roleIds) || data.roleIds.some(id=>!Number.isSafeInteger(id)) || new Set(data.roleIds).size!==data.roleIds.length || await this.prisma.system.role.count({where:{tenantId,id:{in:data.roleIds}}})!==data.roleIds.length)) throw new BadRequestException("角色不存在或不属于当前租户");
   }
 
   private toVO(user: any) {

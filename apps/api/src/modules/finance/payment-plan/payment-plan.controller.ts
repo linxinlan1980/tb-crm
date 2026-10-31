@@ -1,3 +1,4 @@
+import { ApiExcludeController } from '@nestjs/swagger';
 import { Controller, Get, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentPlanService } from './payment-plan.service';
@@ -7,6 +8,7 @@ import { TenantId } from '../../../common/decorators/current-user.decorator';
 
 @ApiTags('财务-回款与账龄')
 @ApiBearerAuth()
+@ApiExcludeController()
 @Controller('finance')
 export class PaymentPlanController {
   constructor(private readonly planService: PaymentPlanService, private readonly agingService: AgingService) {}

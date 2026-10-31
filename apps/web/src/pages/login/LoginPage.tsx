@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Form, Input, Button, Card, message, Typography } from 'antd';
+import { Form, Input, Button, Card, message, Typography, Segmented } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { authApi } from '../../services/auth.api';
@@ -8,6 +8,7 @@ import { authApi } from '../../services/auth.api';
 const { Title, Text } = Typography;
 
 export default function LoginPage() {
+  const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -34,10 +35,10 @@ export default function LoginPage() {
     }}>
       <Card style={{ width: 400, boxShadow: '0 4px 12px rgba(15,23,42,.06)' }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <Title level={4} style={{ marginBottom: 4 }}>PartnerOS CRM</Title>
-          <Text type="secondary">多租户 B2B 客户关系管理平台</Text>
+          <Title level={4} style={{ marginBottom: 4 }}>伴圆 CRM</Title>
+          <Text type="secondary">AI 原生 · 客户经营与销售协同</Text>
         </div>
-        <Form name="login" onFinish={onFinish} size="large" autoComplete="off">
+        <Segmented block style={{ marginBottom: 24 }} options={[{label:"admin",value:"admin"},{label:"销售主管",value:"manager"},{label:"销售",value:"sales"},{label:"老板",value:"boss"}]} onChange={username => form.setFieldsValue({username})}/><Form form={form} initialValues={{username:"admin"}} name="login" onFinish={onFinish} size="large" autoComplete="off">
           <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
             <Input prefix={<UserOutlined />} placeholder="用户名" />
           </Form.Item>
@@ -52,7 +53,7 @@ export default function LoginPage() {
         </Form>
         <div style={{ textAlign: 'center' }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            上海町萌网络科技有限公司 · v0.1.0
+            上海町萌网络科技有限公司 · 演示版 v0.2
           </Text>
         </div>
       </Card>

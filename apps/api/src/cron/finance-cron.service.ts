@@ -16,7 +16,7 @@ export class FinanceCronService {
   constructor(private prisma: PrismaService) {}
 
   /** JOB-005: 每日00:30 重算逾期天数和状态 */
-  @Cron('30 0 * * *', { timeZone: 'Asia/Shanghai' })
+  @Cron('30 0 * * *', { timeZone: 'Asia/Shanghai', disabled: process.env.ENABLE_LEGACY_CRON !== 'true' })
   async handleAgingUpdate() {
     this.logger.log('JOB-005 开始：逾期账龄更新');
     try {
@@ -45,7 +45,7 @@ export class FinanceCronService {
   }
 
   /** JOB-006: 每日02:00 合同过期标记 */
-  @Cron('0 2 * * *', { timeZone: 'Asia/Shanghai' })
+  @Cron('0 2 * * *', { timeZone: 'Asia/Shanghai', disabled: process.env.ENABLE_LEGACY_CRON !== 'true' })
   async handleContractExpire() {
     this.logger.log('JOB-006 开始：合同过期标记');
     try {
@@ -64,7 +64,7 @@ export class FinanceCronService {
   }
 
   /** JOB-008: 每日08:00 里程碑延期检查 */
-  @Cron('0 8 * * *', { timeZone: 'Asia/Shanghai' })
+  @Cron('0 8 * * *', { timeZone: 'Asia/Shanghai', disabled: process.env.ENABLE_LEGACY_CRON !== 'true' })
   async handleMilestoneDelay() {
     this.logger.log('JOB-008 开始：里程碑延期检查');
     try {
@@ -83,7 +83,7 @@ export class FinanceCronService {
   }
 
   /** JOB-003: 每日09:00 商机停滞检查（更新stage_stall_days） */
-  @Cron('0 9 * * *', { timeZone: 'Asia/Shanghai' })
+  @Cron('0 9 * * *', { timeZone: 'Asia/Shanghai', disabled: process.env.ENABLE_LEGACY_CRON !== 'true' })
   async handleStallCheck() {
     this.logger.log('JOB-003 开始：商机停滞检查');
     try {

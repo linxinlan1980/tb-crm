@@ -1,6 +1,6 @@
 {
   "name": "tb-crm",
-  "version": "0.1.0",
+  "version": "0.2.0-demo.1",
   "private": true,
   "description": "PartnerOS CRM - 多租户SaaS B2B CRM",
   "author": "上海町萌网络科技有限公司",
@@ -21,7 +21,11 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "typecheck": "pnpm --filter @partneros/database generate && pnpm --filter @partneros/api exec tsc --noEmit && pnpm --filter @partneros/web exec tsc --noEmit",
-    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "demo:seed": "pnpm db:seed && pnpm --filter @partneros/database seed:demo",
+    "demo:reset": "node --env-file=.env scripts/new-demo.mjs",
+    "demo:test": "node --env-file=.env scripts/new-demo.mjs --test --verify",
+    "demo:start": "node --env-file=.env scripts/start-demo.mjs"
   },
   "devDependencies": {
     "eslint": "^9.39.5",

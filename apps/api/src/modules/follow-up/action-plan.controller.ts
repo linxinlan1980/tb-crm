@@ -1,3 +1,4 @@
+import { ApiExcludeController } from '@nestjs/swagger';
 import { Controller, Get, Post, Put, Body, Param, Query, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ActionPlanService } from './action-plan.service';
@@ -6,6 +7,7 @@ import { CurrentUser, TenantId } from '../../common/decorators/current-user.deco
 
 @ApiTags('行动计划')
 @ApiBearerAuth()
+@ApiExcludeController()
 @Controller('actions')
 export class ActionPlanController {
   constructor(private readonly actionService: ActionPlanService) {}
