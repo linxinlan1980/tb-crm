@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 30
     env:
       SEED_ADMIN_PASSWORD: CI-Fixture-Password-2026
+      DEPLOYMENT_FIXTURE: ci-persistence-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,7 +21,8 @@ jobs:
       - run: docker compose --env-file deploy/.env -f deploy/compose.yml up -d --build --wait --wait-timeout 900
       - name: Check UI, roles and restart persistence
         run: |
-          node deploy/verify.mjs
+          node deploy/verify.mjs --create-fixture
+          docker compose --env-file deploy/.env -f deploy/compose.yml exec -T app node examples/mcp-client.mjs
           docker compose --env-file deploy/.env -f deploy/compose.yml restart app
           docker compose --env-file deploy/.env -f deploy/compose.yml up -d --wait --wait-timeout 120
           node deploy/verify.mjs
