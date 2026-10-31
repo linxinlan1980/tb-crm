@@ -13,15 +13,18 @@
 
 ## 已验证
 
-- pnpm check：类型检查、lint、30项自动化测试、前后端构建通过。
+- pnpm check：类型检查、lint、31项自动化测试、前后端构建通过。
 - 测试使用真实NestJS HTTP/JWT/全局守卫，数据库为替身；另有租户查询扩展与审批前置条件测试。
 - 浏览器打开登录页，空表单显示用户名/密码必填错误。
-- Prisma Client生成及migration SQL生成通过；不等于migration已经在数据库执行。
+- Prisma Client生成及migration SQL生成通过。
+- GitHub Actions [41206278900](https://github.com/linxinlan1980/tb-crm/actions/runs/41206278900) 全部通过；验证代码提交 `55aa095e63cec1672d122baf594c05f16cf57f62`。
+- 独立MySQL 8临时库已执行初始迁移和种子，真实API启动、登录、创建客户、customer.get读取及审计写入成功；未认证访问与伪造tenantId输入被拒绝。
+- CI发现并修复种子bcrypt依赖缺失、Prisma系统访问getter缺少模型代理；增加真实Prisma代理回归检查。后端关闭与清理输出冲突的增量编译。
+- 公开仓库采用MIT许可；开发变更位于草稿PR #1，尚未合并或部署。
 
 ## 待验证
 
 - 本机没有可用Docker/MySQL；尚未进行本机真实数据库联调。
-- CI定义了MySQL 8临时库的迁移、种子、API启动和客户创建→能力读取→审计冒烟测试。以GitHub Actions实际结果为准。
 - 历史代码整体覆盖率70%、性能、移动适配、安全验收、真实业务全链路均未达成。
 
 ## 下一里程碑
