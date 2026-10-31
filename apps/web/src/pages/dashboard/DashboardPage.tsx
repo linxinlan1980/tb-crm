@@ -17,6 +17,7 @@ interface Overview {
   funnel: { name: string; code: string; count: number; amount: string }[];
   actions: RecordRow[];
   financeNotice: string;
+  users: RecordRow[];
 }
 export default function DashboardPage() {
   const [data, setData] = useState<Overview>(),
@@ -114,7 +115,7 @@ export default function DashboardPage() {
           </Col>
           <Col xs={24} lg={10}>
             <Card
-              title="我的下一步"
+              title={data?.role === 'sales' ? '我的下一步' : data?.role === 'manager' ? '团队待办' : '公司待办'}
               extra={
                 <Button type="link" onClick={() => navigate('/actions')}>
                   全部行动
@@ -129,6 +130,15 @@ export default function DashboardPage() {
                   dataSource={data.actions.slice(0, 6)}
                   columns={[
                     { title: '行动', dataIndex: 'title' },
+                    ...(data?.role !== 'sales'
+                      ? [
+                          {
+                            title: '负责人',
+                            dataIndex: 'assigneeId',
+                            render: (v: number) => String(data?.users.find((u) => u.id === v)?.name ?? '待确认'),
+                          },
+                        ]
+                      : []),
                     {
                       title: '日期',
                       dataIndex: 'dueDate',

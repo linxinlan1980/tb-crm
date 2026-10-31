@@ -25,6 +25,18 @@ export function checkVersion(row: { updatedAt: Date }, expected: unknown) {
   if (typeof expected !== 'string' || row.updatedAt.toISOString() !== expected)
     throw new ConflictException('数据已更新，请刷新后重试');
 }
+function canonical(value: unknown, depth = 0): unknown {
+  if (depth > 20) throw new BadRequestException('参数层级过深');
+  if (Array.isArray(value)) return value.map((v) => canonical(v, depth + 1));
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, v]) => v !== undefined)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, canonical(v, depth + 1)]),
+    );
+  return value;
+}
 export async function runCommand(
   prisma: PrismaService,
   actor: Actor,
@@ -33,7 +45,9 @@ export async function runCommand(
   work: (tx: Tx) => Promise<unknown>,
 ) {
   const key = text(body.requestKey, '请求标识', 80);
-  const payloadHash = createHash('sha256').update(JSON.stringify({ command, body })).digest('hex');
+  const payloadHash = createHash('sha256')
+    .update(JSON.stringify(canonical({ command, body })))
+    .digest('hex');
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       return await prisma.system.$transaction(

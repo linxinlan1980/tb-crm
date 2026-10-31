@@ -104,6 +104,8 @@ try {
   const customer = await create(sales, 'customers', payload, requestKey);
   const duplicate = await create(sales, 'customers', payload, requestKey);
   eq(duplicate.id, customer.id, 'Create replay');
+  const reordered = await create(sales, 'customers', { industry: '制造/工业', name }, requestKey);
+  eq(reordered.id, customer.id, 'JSON property order does not change idempotency');
   await call('/workspace/customers', 'POST', { requestKey, data: { name: '不能复用不同内容' } }, sales, 409);
   const foreign = await create(other, 'customers', { name: `跨部门${name}` });
   await call(`/workspace/customers/${foreign.id}`, 'GET', undefined, sales, 404);
@@ -374,18 +376,66 @@ try {
     4,
   );
   eq(JSON.parse(workspaceTool.result.content[0].text).id, contract.id);
-  const specialFlow=(await call('/approvals/flows','POST',{...flowData,requestKey:newKey(),name:`合同补充字段${Date.now()}`,bizType:'contract',priority:999},admin,201)).data;
-  await call(`/approvals/flows/${specialFlow.id}/publish`,'POST',{requestKey:newKey(),expectedUpdatedAt:specialFlow.updatedAt},admin,201);
-  const specialContract=await create(sales,'contracts',{name:`补充表单${name}`,customerId:customer.id,contractType:'implementation',amount:'1000'});
-  const approvalForm=(await call(`/workspace/contracts/${specialContract.id}/approval-form`,'GET',undefined,sales)).data;
-  eq(approvalForm.fields[0].key,'reason','Business form follows designer');
-  await call(`/workspace/contracts/${specialContract.id}/submit`,'POST',{requestKey:newKey(),expectedUpdatedAt:specialContract.updatedAt},sales,400);
-  eq(await db.approval.count({where:{tenantId:customer.tenantId,bizType:'contract',bizId:specialContract.id}}),0,'Invalid form leaves no partial approval');
-  await command(sales,'contracts',specialContract,'submit',{form:{reason:'设计器字段联动验证'}});
-  const pendingContract=await detail(sales,'contracts',specialContract);await call(`/approvals/${pendingContract.approvalId}/withdraw`,'POST',{requestKey:newKey()},sales,201);eq((await detail(sales,'contracts',specialContract)).status,'draft','Withdraw callback');
-  await create(admin,'products',{name:'合成测试产品',code:`P${Date.now()}`,category:'service',unit:'项',listPrice:'1500',taxRate:6});
-  const role=await db.role.findFirstOrThrow({where:{tenantId:customer.tenantId,code:'sales'}});const permissions=role.permissions;
-  try{await db.role.update({where:{id:role.id},data:{permissions:permissions.filter(p=>p!=='customer:read')}});await call('/workspace/customers','GET',undefined,sales,403);}finally{await db.role.update({where:{id:role.id},data:{permissions}});}
+  const specialFlow = (
+    await call(
+      '/approvals/flows',
+      'POST',
+      { ...flowData, requestKey: newKey(), name: `合同补充字段${Date.now()}`, bizType: 'contract', priority: 999 },
+      admin,
+      201,
+    )
+  ).data;
+  await call(
+    `/approvals/flows/${specialFlow.id}/publish`,
+    'POST',
+    { requestKey: newKey(), expectedUpdatedAt: specialFlow.updatedAt },
+    admin,
+    201,
+  );
+  const specialContract = await create(sales, 'contracts', {
+    name: `补充表单${name}`,
+    customerId: customer.id,
+    contractType: 'implementation',
+    amount: '1000',
+  });
+  const approvalForm = (await call(`/workspace/contracts/${specialContract.id}/approval-form`, 'GET', undefined, sales))
+    .data;
+  eq(approvalForm.fields[0].key, 'reason', 'Business form follows designer');
+  await call(
+    `/workspace/contracts/${specialContract.id}/submit`,
+    'POST',
+    { requestKey: newKey(), expectedUpdatedAt: specialContract.updatedAt },
+    sales,
+    400,
+  );
+  eq(
+    await db.approval.count({ where: { tenantId: customer.tenantId, bizType: 'contract', bizId: specialContract.id } }),
+    0,
+    'Invalid form leaves no partial approval',
+  );
+  await command(sales, 'contracts', specialContract, 'submit', { form: { reason: '设计器字段联动验证' } });
+  const pendingContract = await detail(sales, 'contracts', specialContract);
+  await call(`/approvals/${pendingContract.approvalId}/withdraw`, 'POST', { requestKey: newKey() }, sales, 201);
+  eq((await detail(sales, 'contracts', specialContract)).status, 'draft', 'Withdraw callback');
+  await create(admin, 'products', {
+    name: '合成测试产品',
+    code: `P${Date.now()}`,
+    category: 'service',
+    unit: '项',
+    listPrice: '1500',
+    taxRate: 6,
+  });
+  const role = await db.role.findFirstOrThrow({ where: { tenantId: customer.tenantId, code: 'sales' } });
+  const permissions = role.permissions;
+  try {
+    await db.role.update({
+      where: { id: role.id },
+      data: { permissions: permissions.filter((p) => p !== 'customer:read') },
+    });
+    await call('/workspace/customers', 'GET', undefined, sales, 403);
+  } finally {
+    await db.role.update({ where: { id: role.id }, data: { permissions } });
+  }
   const audits = await db.auditLog.count({ where: { tenantId: customer.tenantId, userId: salesUser.id } });
   assert(audits > 10);
   checks++;
