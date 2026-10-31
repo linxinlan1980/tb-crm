@@ -7,7 +7,7 @@
     "rootDir": "./src",
     "target": "ES2022",
     "sourceMap": true,
-    "incremental": true,
+    "incremental": false,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "declaration": false,

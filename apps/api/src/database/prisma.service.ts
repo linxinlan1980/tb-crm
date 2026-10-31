@@ -12,8 +12,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       throw new ForbiddenException({ code: 13, message: '有效租户上下文缺失' });
     }
     // Callback receivers are owned by Prisma, so retain the original client explicitly.
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const client = this;
+    const client = this.$extends({});
     return this.$extends({ query: { $allModels: {
       async $allOperations({ model, operation, args, query }) {
         const fields = Prisma.dmmf.datamodel.models.find((entry) => entry.name === model)?.fields || [];
@@ -39,7 +38,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         if (hasSoftDelete && ['delete', 'deleteMany'].includes(operation)) {
           const delegateName = model[0].toLowerCase() + model.slice(1);
           // Runtime-selected delegate; where is always scoped above.
-            const delegate = (client as any)[delegateName];
+          const delegate = (client as any)[delegateName];
           return delegate[operation === 'delete' ? 'update' : 'updateMany']({
             where: scoped.where, data: { deletedAt: new Date() },
           });
@@ -50,5 +49,6 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   }
 
   /** Only login, explicit transactions and scheduled scans may use system access. */
-  get system(): PrismaService { return this; }
+  // Prisma invokes subclass getters on its raw target, which has no model delegates.
+  get system() { return this.$extends({}); }
 }

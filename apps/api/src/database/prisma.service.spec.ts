@@ -3,12 +3,18 @@ import { PrismaService } from './prisma.service';
 describe('Prisma tenant boundary (query extension)', () => {
   const prisma = new PrismaService();
   afterAll(async () => { await prisma.$disconnect(); });
+  it('preserves generated model delegates through the real system accessor', () => {
+    expect(typeof prisma.system.user.findFirst).toBe('function');
+    expect(typeof prisma.system.auditLog.create).toBe('function');
+    expect(typeof prisma.forTenant(1).customer.findMany).toBe('function');
+  });
   it.each([undefined, 0, -1, NaN, 1.5])('fails closed for missing or invalid tenant %p', (tenant) => {
     expect(() => prisma.forTenant(tenant as number)).toThrow('有效租户上下文缺失');
   });
   async function intercept(model: string, operation: string, args: Record<string, unknown>) {
     let handler: (input: unknown) => Promise<unknown> = async () => null;
     const spy = jest.spyOn(prisma, '$extends').mockImplementation((extension) => {
+      if (!extension || typeof extension !== 'object' || !('query' in extension)) return {} as never;
       handler = (extension as { query: { $allModels: { $allOperations: typeof handler } } }).query.$allModels.$allOperations;
       return {} as never;
     });
