@@ -21,3 +21,7 @@ keys/*.pem
 # Internal source materials are kept locally, never published
 docs/reference/
 .artifacts/
+
+# Local demo credentials and machine-specific notes
+.local/
+deploy/.env
