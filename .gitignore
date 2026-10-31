@@ -1,0 +1,23 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+!.env.example
+.idea/
+.vscode/
+*.swp
+.DS_Store
+*.log
+logs/
+docker-data/
+tmp/
+keys/*.pem
+
+# Internal source materials are kept locally, never published
+docs/reference/
+.artifacts/
