@@ -2,9 +2,9 @@
   "name": "tb-crm",
   "version": "0.1.0",
   "private": true,
-  "description": "PartnerOS CRM - \u591a\u79df\u6237SaaS B2B CRM",
-  "author": "\u4e0a\u6d77\u753a\u840c\u7f51\u7edc\u79d1\u6280\u6709\u9650\u516c\u53f8",
-  "license": "UNLICENSED",
+  "description": "PartnerOS CRM - 多租户SaaS B2B CRM",
+  "author": "上海町萌网络科技有限公司",
+  "license": "MIT",
   "engines": {
     "node": ">=24 <25",
     "pnpm": ">=11 <12"

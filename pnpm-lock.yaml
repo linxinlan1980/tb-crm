@@ -182,6 +182,12 @@ importers:
         specifier: ^6.1.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
+      '@types/bcrypt':
+        specifier: ^5.0.2
+        version: 5.0.2
+      bcrypt:
+        specifier: ^5.1.1
+        version: 5.1.1(supports-color@8.1.1)
       prisma:
         specifier: ^6.1.0
         version: 6.19.3(typescript@5.9.3)

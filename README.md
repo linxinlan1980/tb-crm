@@ -47,3 +47,7 @@ pnpm check   # 类型检查、lint、测试、构建
 - [建设路线](docs/ROADMAP.md)
 
 内部需求资料保留在本机 `docs/reference/`，由 Git 忽略；公开仓库不包含真实客户资料、个人联系信息或运行密钥。
+
+## 开源许可
+
+本项目采用 [MIT License](LICENSE)。工作区包的 `private: true` 用于防止误发布到 npm，不影响 GitHub 仓库的公开状态。
