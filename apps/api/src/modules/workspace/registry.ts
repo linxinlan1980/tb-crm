@@ -32,6 +32,10 @@ export const resources: Record<string, Resource> = {
     name: 'name',
     fields: [
       f('name', '客户名称', 'text', true),
+      f('shortName', '客户简称'),
+      f('creditCode', '统一社会信用代码'),
+      f('companyPhone', '企业联系电话'),
+      f('legalPerson', '法定代表人'),
       f('industry', '行业'),
       f('level', '级别', 'select', false, { options: ['重点客户', '普通客户', '潜在客户'] }),
       f('region', '地区'),
@@ -203,7 +207,7 @@ export function cleanInput(kind: string, value: unknown, partial = false): Recor
         field.label,
         (
           {
-            customers: { name: 200, industry: 50, level: 20, region: 50, address: 500, website: 200, remark: 3000 },
+            customers: { name: 200, shortName: 100, creditCode: 40, companyPhone: 50, legalPerson: 50, industry: 50, level: 20, region: 50, address: 500, website: 200, remark: 3000 },
             leads: { companyName: 200, contactName: 50, industry: 50, demand: 3000 },
           } as Record<string, Record<string, number>>
         )[kind]?.[field.key] ?? (field.type === 'textarea' ? 3000 : field.key === 'code' ? 30 : 200),

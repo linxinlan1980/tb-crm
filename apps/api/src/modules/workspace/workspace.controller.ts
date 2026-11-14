@@ -35,8 +35,17 @@ export class WorkspaceController {
   ) {
     return this.service.deliveryRecipients(a, kind, recordId);
   }
+  @Get('customers/:id/assignment-people') assignmentPeople(
+    @CurrentUser() a: Actor,
+    @Param('id', ParseIntPipe) recordId: number,
+  ) {
+    return this.service.assignmentRecipients(a, recordId);
+  }
   @Post(':kind') create(@CurrentUser() a: Actor, @Param('kind') kind: string, @Body() b: Record<string, unknown>) {
     return this.service.save(a, kind, b);
+  }
+  @Post('customers/duplicate-check') duplicateCheck(@CurrentUser() a: Actor, @Body() b: Record<string, unknown>) {
+    return this.service.duplicateCheck(a, b);
   }
   @Put(':kind/:id') update(
     @CurrentUser() a: Actor,

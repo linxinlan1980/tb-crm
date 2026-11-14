@@ -45,6 +45,10 @@ const labels: Record<string, string> = {
   actualHours: '累计实际工时',
   milestoneId: '关联里程碑',
   name: '名称',
+  shortName: '客户简称',
+  creditCode: '统一社会信用代码',
+  companyPhone: '企业联系电话',
+  legalPerson: '法定代表人',
   code: '编码',
   companyName: '企业名称',
   content: '内容',
@@ -263,6 +267,45 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
         for (const f of spec.fields)
           if (!f.required && (data[f.key] === undefined || data[f.key] === '')) data[f.key] = null;
       setBusy(true);
+      if (kind === 'customers') {
+        const fields = Object.fromEntries(
+          ['name', 'shortName', 'creditCode', 'companyPhone', 'website', 'address', 'legalPerson']
+            .filter((k) => data[k] !== undefined)
+            .map((k) => [k, data[k]]),
+        );
+        const check = await post<{
+          hardDuplicate: boolean;
+          restrictedMatch: boolean;
+          matches: { id: number; name: string; reasons: string[] }[];
+        }>('/workspace/customers/duplicate-check', { ...fields, ...(editing ? { excludeId: editing.id } : {}) });
+        if (check.hardDuplicate) {
+          message.error('存在同名或相同统一社会信用代码的客户，请联系主管核对');
+          return;
+        }
+        if (check.matches.length || check.restrictedMatch) {
+          const proceed = await new Promise<boolean>((resolve) =>
+            Modal.confirm({
+              title: '发现可能重复的客户',
+              content: (
+                <div>
+                  {check.matches.map((r) => (
+                    <p key={r.id}>
+                      {r.name}：{r.reasons.join('、')}
+                    </p>
+                  ))}
+                  {check.restrictedMatch && <p>另有权限范围外的相似记录，请联系主管核对。</p>}
+                  <p>共享电话、网站或相近名称可能属于不同主体，请确认后再保存。</p>
+                </div>
+              ),
+              okText: '确认不同主体，继续保存',
+              cancelText: '返回核对',
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+            }),
+          );
+          if (!proceed) return;
+        }
+      }
       const body = { data, requestKey: editRequestKey.current, expectedUpdatedAt: editing?.updatedAt };
       if (editing) await put(`/workspace/${kind}/${editing.id}`, body);
       else await post(`/workspace/${kind}`, body);
@@ -307,8 +350,8 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     }
     if (action === 'assign')
       try {
-        const overview = await get<{ users: RecordRow[] }>('/workspace/overview');
-        setOptions({ users: overview.users });
+        const users = await get<RecordRow[]>(`/workspace/customers/${row.id}/assignment-people`);
+        setOptions({ users });
       } catch (e) {
         message.error(errorText(e));
       }

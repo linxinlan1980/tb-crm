@@ -79,7 +79,7 @@ export default function CustomerOperationsPage() {
                       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                         <Alert
                           type="info"
-                          message="UTF-8 CSV：最多200条、1MiB。新客户进入公海；重复记录明确跳过，错误记录需修正后重新预检。"
+                          message="UTF-8 CSV：最多200条、1MiB。新客户归导入人私海，可再分配或退回公海；同名或同证照记录明确跳过，错误记录需修正后重新预检。"
                         />
                         <Space>
                           <Button
@@ -87,7 +87,7 @@ export default function CustomerOperationsPage() {
                               const url = URL.createObjectURL(
                                 new Blob(
                                   [
-                                    '\uFEFF客户名称,行业,级别,地区,地址,官网,备注\r\n示例企业（请替换）,制造/工业,普通客户,上海,,,首次导入\r\n',
+                                    '\uFEFF客户名称,行业,级别,地区,地址,官网,备注,客户简称,统一社会信用代码,企业联系电话,法定代表人\r\n请替换为实际企业,制造/工业,普通客户,上海,,,首次导入,,,,\r\n',
                                   ],
                                   { type: 'text/csv;charset=utf-8' },
                                 ),
@@ -178,7 +178,7 @@ export default function CustomerOperationsPage() {
                         {receipt && (
                           <Alert
                             type="success"
-                            message={`已导入${receipt.imported}条公海客户，跳过${receipt.skippedDuplicates}条重复记录。`}
+                            message={`已导入${receipt.imported}条本人客户，跳过${receipt.skippedDuplicates}条重复记录。`}
                           />
                         )}
                         {preview && (

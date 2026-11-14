@@ -59,7 +59,7 @@ export const commercialCapabilities = [
     guards: [
       'administrator only',
       'column whitelist',
-      'normalized-name duplicate report',
+      'normalized-name and credit-code duplicate report',
       'no business records written',
     ],
   },
@@ -81,6 +81,7 @@ export const commercialCapabilities = [
       'fresh duplicate recheck',
       'quota',
       'atomic batch',
+      'creator owns imported private customers; public pool requires explicit return',
     ],
   },
   {
@@ -159,7 +160,7 @@ export const commercialCapabilities = [
   },
 ].map((c) => ({
   ...c,
-  version: '1.0',
+  version: c.id.startsWith('customer.import.') ? '2.0' : '1.0',
   route: routes[c.id],
   ...(routes[c.id].includes(':id')
     ? { pathSchema: { type: 'object', required: ['id'], properties: { id: integer } } }

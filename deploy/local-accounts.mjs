@@ -14,10 +14,11 @@ const { PrismaClient } = require('@prisma/client');
 const hex = () => randomBytes(32).toString('hex');
 const error = (status, message) => Object.assign(new Error(message), { status });
 export function accountInput(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((k) => !['code', 'name'].includes(k))) throw error(400, '只允许公司编码和名称');
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((k) => !['code', 'name', 'purpose'].includes(k))) throw error(400, '只允许公司编码、名称和用途');
   if (typeof value.code !== 'string' || !/^[A-Z][A-Z0-9_-]{1,29}$/.test(value.code)) throw error(400, '公司编码为2至30位大写字母、数字、下划线或短横线');
   if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 100 || /[\x00-\x1f\x7f]/.test(value.name)) throw error(400, '公司名称为1至100位有效文字');
-  return { code: value.code, name: value.name.trim() };
+  if (value.purpose !== undefined && !['business', 'test'].includes(value.purpose)) throw error(400, '帐套用途无效');
+  return { code: value.code, name: value.name.trim(), ...(value.purpose ? { purpose: value.purpose } : {}) };
 }
 export function remoteInput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((k) => !['mode', 'url'].includes(k))) throw error(400, '入口参数无效');
@@ -35,10 +36,12 @@ export function proxyConfiguration(remote, port) {
   return `# 部署前先安装证书并验证 nginx -t；此配置不会自动生效。\nserver {\n    listen ${url.port || 443} ssl;\n    server_name ${url.hostname};\n    ssl_certificate /etc/nginx/certs/crm.crt;\n    ssl_certificate_key /etc/nginx/certs/crm.key;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    client_max_body_size 3m;\n    location ^~ /__accounts { deny all; }\n    location / {\n        proxy_pass http://127.0.0.1:${port};\n        proxy_set_header Host $http_host;\n        proxy_set_header X-Forwarded-Proto https;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_read_timeout 60s;\n    }\n}\n`;
 }
 export class LocalAccountStore {
-  constructor({ dir = join(project, '.local/accounts'), rootUrl, webPort = 3000, basePort = 4300, test = false } = {}) {
+  constructor({ dir = join(project, '.local/accounts'), rootUrl, webPort = 3000, basePort = 4300, test = false, sqlAccountHost = '127.0.0.1' } = {}) {
     this.dir = resolve(dir); this.rootUrl = rootUrl; this.webPort = webPort; this.basePort = basePort; this.test = test;
     if (![webPort, basePort].every((p) => Number.isInteger(p) && p >= 1024 && p <= 65525)) throw error(400, '端口配置无效');
     this.workers = new Map(); this.tail = Promise.resolve();
+    if (sqlAccountHost !== '127.0.0.1' && !(test && sqlAccountHost === '%')) throw error(400, '正式安装仅允许本机数据库账号；通配主机仅用于隔离CI容器测试');
+    this.sqlAccountHost = sqlAccountHost;
   }
   async init() {
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
@@ -58,12 +61,12 @@ export class LocalAccountStore {
   persist() {
     const temp = this.registryFile + '.tmp'; writeFileSync(temp, JSON.stringify(this.registry, null, 2), { mode: 0o600 }); renameSync(temp, this.registryFile);
   }
-  records() { return this.registry.accounts.map(({ code, name, database, dbUser, createdAt, status, port }) => ({ code, name, database, dbUser, createdAt, status, running: this.workers.has(code), port })); }
+  records() { return this.registry.accounts.map(({ code, name, database, dbUser, createdAt, status, port, purpose }) => ({ code, name, database, dbUser, createdAt, status, purpose: purpose || 'business', running: this.workers.has(code), port })); }
   create(value) {
     const input = accountInput(value);
     const work = this.tail.then(() => this.provision(input)); this.tail = work.catch(() => {}); return work;
   }
-  async provision({ code, name }) {
+  async provision({ code, name, purpose = 'business' }) {
     if (this.registry.accounts.some((a) => a.code === code)) throw error(409, '公司编码已存在；不会覆盖已有帐套');
     if (this.registry.accounts.length >= 10) throw error(409, '本机已达到10个帐套的容量配置，请先评估资源再扩容');
     const id = createHash('sha256').update(code + randomBytes(16).toString('hex')).digest('hex').slice(0, 16);
@@ -72,17 +75,17 @@ export class LocalAccountStore {
     const dbPassword = hex();
     const u = new URL(this.rootUrl); u.username = dbUser; u.password = dbPassword; u.pathname = '/' + database;
     const initialPassword = 'CrmA7' + randomBytes(16).toString('hex');
-    const config = { DEMO_MODE: 'false', TENANT_CODE: code, TENANT_NAME: name, ADMIN_USERNAME: 'admin', SEED_ADMIN_PASSWORD: initialPassword,
+    const config = { DEMO_MODE: 'false', ACCOUNT_PURPOSE: purpose, TENANT_CODE: code, TENANT_NAME: name, ADMIN_USERNAME: 'admin', SEED_ADMIN_PASSWORD: initialPassword,
       DATABASE_URL: u.href, JWT_SECRET: hex(), ENCRYPTION_KEY: hex(), BACKUP_KEY: hex(), APP_URL: `http://localhost:${this.webPort}`, WEB_PORT: String(this.webPort) };
-    const entry = { code, name, database, dbUser, port: this.basePort + this.registry.accounts.length,
+    const entry = { code, name, database, dbUser, purpose, port: this.basePort + this.registry.accounts.length,
       configFile: join(this.dir, code + '.json'), createdAt: new Date().toISOString(), status: 'creating' };
     // All SQL identifiers and passwords below are generated ASCII, never interpolated company input.
     writeFileSync(entry.configFile, JSON.stringify(config, null, 2), { mode: 0o600, flag: 'wx' });
     this.registry.accounts.push(entry); this.persist();
     try {
       await this.root.$executeRawUnsafe(`CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-      await this.root.$executeRawUnsafe(`CREATE USER '${dbUser}'@'127.0.0.1' IDENTIFIED BY '${dbPassword}'`);
-      await this.root.$executeRawUnsafe(`GRANT ALL PRIVILEGES ON \`${database}\`.* TO '${dbUser}'@'127.0.0.1'`);
+      await this.root.$executeRawUnsafe(`CREATE USER '${dbUser}'@'${this.sqlAccountHost}' IDENTIFIED BY '${dbPassword}'`);
+      await this.root.$executeRawUnsafe(`GRANT ALL PRIVILEGES ON \`${database}\`.* TO '${dbUser}'@'${this.sqlAccountHost}'`);
       await new Promise((done, fail) => {
         const output = openSync(join(this.dir, code + '-初始化.log'), 'a', 0o600);
         const migration = spawn('pnpm', ['--filter', '@partneros/database', 'migrate:deploy'], { cwd: project, env: { ...process.env, ...config }, stdio: ['ignore', output, output] });
@@ -200,7 +203,7 @@ async function main() {
   const command = process.argv[2] || 'serve';
   if (command === 'create') {
     try {
-      const created = await store.create({ code: process.env.NEW_COMPANY_CODE, name: process.env.NEW_COMPANY_NAME });
+      const created = await store.create({ code: process.env.NEW_COMPANY_CODE, name: process.env.NEW_COMPANY_NAME, purpose: process.env.NEW_COMPANY_PURPOSE });
       console.log(`帐套 ${created.account.code} 已创建；账号说明位于本机帐套目录。`);
     } finally { await store.stop(); }
     return;

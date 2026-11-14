@@ -1,10 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
-import { accountInput, remoteInput, accountServer, proxyConfiguration } from './local-accounts.mjs';
+import { accountInput, remoteInput, accountServer, proxyConfiguration, LocalAccountStore } from './local-accounts.mjs';
+import { populateTestCompany } from '../scripts/seed-test-company.mjs';
 const cases = [null, [], { code: 'x', name: 'X' }, { code: 'A;DROP_DB', name: 'X' }, { code: 'AA', name: '' }, { code: 'AA', name: 'X', database: 'mysql' }, { code: 'AA', name: 'X\nY' }];
 for (const value of cases) test('reject invalid account input ' + JSON.stringify(value), () => assert.throws(() => accountInput(value)));
 test('company name remains data, code has strict grammar', () => assert.deepEqual(accountInput({ code: 'MY_COMPANY', name: " A 'quoted' company " }), { code: 'MY_COMPANY', name: "A 'quoted' company" }));
+test('purpose is explicit and invalid purpose is rejected', () => { assert.equal(accountInput({code:'TEST',name:'测试帐套',purpose:'test'}).purpose,'test'); assert.throws(()=>accountInput({code:'AA',name:'A',purpose:'anything'})); });
+test('wildcard SQL account host only admitted in isolated container test mode', () => { assert.throws(()=>new LocalAccountStore({sqlAccountHost:'%'})); assert.doesNotThrow(()=>new LocalAccountStore({test:true,sqlAccountHost:'%'})); });
+test('fixture initializer rejects missing write authorization before accessing any account', async () => { const before = process.env.SMOKE_ALLOW_WRITES; delete process.env.SMOKE_ALLOW_WRITES; try { await assert.rejects(populateTestCompany(), /authorization/); } finally { if(before===undefined)delete process.env.SMOKE_ALLOW_WRITES;else process.env.SMOKE_ALLOW_WRITES=before; } });
+test('fixture initializer cannot target a business company even with write flag', async () => { const before = process.env.SMOKE_ALLOW_WRITES; process.env.SMOKE_ALLOW_WRITES='true'; try { await assert.rejects(populateTestCompany({code:'TINGMENG'}), /restricted/); } finally { if(before===undefined)delete process.env.SMOKE_ALLOW_WRITES;else process.env.SMOKE_ALLOW_WRITES=before; } });
 for (const input of [{ mode: 'bad' }, { mode: 'https-proxy', url: 'http://crm.example.com' }, { mode: 'vpn', url: 'https://u:p@crm.example.com' }, { mode: 'https-proxy', url: 'https://crm.example.com/path' }]) test('reject unsafe remote config ' + JSON.stringify(input), () => assert.throws(() => remoteInput(input)));
 test('remote config records an origin without claiming connection', () => { assert.deepEqual(remoteInput({ mode: 'none', url: 'unused' }), { mode: 'none', url: '' }); assert.equal(remoteInput({ mode: 'https-proxy', url: 'https://crm.example.com' }).url, 'https://crm.example.com'); });
 test('proxy output preserves authority and denies remote account administration', () => {

@@ -206,6 +206,8 @@ model Customer {
   establishedDate   DateTime?    @map("established_date") @db.Date
   legalPerson       String?      @map("legal_person") @db.VarChar(50)
   creditCode        String?      @map("credit_code") @db.VarChar(18)
+  companyPhone      String?      @map("company_phone") @db.VarChar(50)
+  creditFingerprint String?      @map("credit_fingerprint") @db.Char(64)
   employeeCount     String?      @map("employee_count") @db.VarChar(20)
   yonyouProduct     String?      @map("yonyou_product") @db.VarChar(100)
   yonyouModules     String?      @map("yonyou_modules") @db.Text
@@ -236,6 +238,7 @@ model Customer {
 
   @@unique([tenantId, code])
   @@unique([tenantId, nameFingerprint])
+  @@unique([tenantId, creditFingerprint], map: "customers_tenant_credit_key")
   @@index([tenantId, ownerId])
   @@index([tenantId, poolType])
   @@index([tenantId, industry])

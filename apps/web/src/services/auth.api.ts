@@ -17,6 +17,7 @@ export interface LoginResult {
     avatar?: string;
     dept?: { id: number; name: string } | null;
     roles: string[];
+    company?: { code: string; name: string; purpose: 'test' | 'business' };
   };
 }
 

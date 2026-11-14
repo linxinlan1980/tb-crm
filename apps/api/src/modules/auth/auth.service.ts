@@ -317,6 +317,11 @@ export class AuthService {
         avatar: user.avatarUrl,
         dept: user.department ? { id: user.department.id, name: user.department.name } : null,
         roles,
+        company: {
+          code: user.tenant.code,
+          name: user.tenant.name,
+          purpose: process.env.ACCOUNT_PURPOSE === 'test' ? 'test' : 'business',
+        },
       },
     };
   }

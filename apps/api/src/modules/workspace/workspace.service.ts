@@ -23,7 +23,9 @@ import {
   requirePermission,
 } from './access';
 import { cleanInput, resource, resources } from './registry';
-import { uniqueCustomer } from './customer-policy';
+import { uniqueCustomerIdentity } from './customer-identity';
+import { creditCode, identityMatch, type IdentityInput } from './customer-matching';
+import { businessDay } from './analytics-policy';
 import { recalculateCustomerContracts } from './contract-change-policy';
 import { paymentSchedule, paymentScheduleSchema } from './payment-schedule';
 import { financeEventsForActor, hideReceiptCorrectionFields } from './finance-policy';
@@ -38,7 +40,7 @@ import {
   taskProject,
   validateTaskMilestone,
 } from './delivery-policy';
-import { checkVersion, id, object, runCommand, text, json, type Tx, type Row } from './command-runner';
+import { checkVersion, id, object, runCommand, text, json, validateActor, type Tx, type Row } from './command-runner';
 
 // Runtime registry delegates are constrained to resource(), while payloads are validated by cleanInput().
 interface Delegate {
@@ -112,6 +114,78 @@ export class WorkspaceService {
           canEdit,
           actions,
           operations: [
+            ...(key === 'customers' && canCreate
+              ? [
+                  {
+                    id: 'customers.duplicate.check',
+                    version: '1.0',
+                    effect: 'read',
+                    permission: 'customer:create or customer:update; current scope',
+                    route: 'POST /workspace/customers/duplicate-check',
+                    inputSchema: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        name: { type: 'string', maxLength: 200 },
+                        shortName: { type: 'string', maxLength: 100 },
+                        creditCode: { type: 'string' },
+                        companyPhone: { type: 'string', maxLength: 50 },
+                        website: { type: 'string', maxLength: 200 },
+                        address: { type: 'string', maxLength: 500 },
+                        legalPerson: { type: 'string', maxLength: 50 },
+                        excludeId: { type: 'integer', minimum: 1 },
+                      },
+                    },
+                    outputSchema: {
+                      type: 'object',
+                      required: ['hardDuplicate', 'matches', 'restrictedMatch'],
+                      properties: {
+                        hardDuplicate: { type: 'boolean' },
+                        restrictedMatch: { type: 'boolean' },
+                        matches: { type: 'array', maxItems: 20 },
+                      },
+                    },
+                    guards: [
+                      'live actor; tenant only',
+                      'excluded record must be visible',
+                      'protected matches reveal no identifiers, names or owners',
+                      '10000 row budget; no silent truncation',
+                    ],
+                    evidence: ['visible reason projection; hard duplicate enforcement repeated on writes'],
+                  },
+                ]
+              : []),
+            ...(key === 'customers' && (admin(a) || manager(a))
+              ? [
+                  {
+                    id: 'customers.assignment.people',
+                    version: '1.0',
+                    effect: 'read',
+                    permission: 'customer:update; admin or sales_manager',
+                    route: 'GET /workspace/customers/{recordId}/assignment-people',
+                    inputSchema: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['recordId'],
+                      properties: { recordId: { type: 'integer', minimum: 1 } },
+                    },
+                    outputSchema: {
+                      type: 'array',
+                      maxItems: 200,
+                      items: { type: 'object', required: ['id', 'name', 'deptId'] },
+                    },
+                    guards: [
+                      'live authenticated actor',
+                      'customer visibility',
+                      'active sales accounts; same department for manager',
+                      'bounded eligible recipient projection; no credentials',
+                    ],
+                    evidence: [
+                      'recipient id and department; assignment separately rechecks permissions and customer version',
+                    ],
+                  },
+                ]
+              : []),
             ...(['projects', 'tasks'].includes(key) && canEdit
               ? [
                   {
@@ -567,6 +641,82 @@ export class WorkspaceService {
       flow.definition && typeof flow.definition === 'object' && !Array.isArray(flow.definition) ? flow.definition : {};
     return { name: flow.name, version: flow.version, fields: definition.fields ?? [] };
   }
+  async duplicateCheck(a: Actor, body: Record<string, unknown>) {
+    const { excludeId, ...input } = object(body);
+    if (
+      Object.keys(input).some(
+        (k) => !['name', 'shortName', 'creditCode', 'companyPhone', 'website', 'address', 'legalPerson'].includes(k),
+      )
+    )
+      throw new BadRequestException('存在未定义查重参数');
+    const recordId = excludeId === undefined ? undefined : id(excludeId);
+    requirePermission(a, 'customers', recordId ? 'update' : 'create');
+    const normalized = cleanInput('customers', input, true) as IdentityInput;
+    normalized.creditCode = creditCode(normalized.creditCode);
+    return this.prisma.system.$transaction(
+      async (tx) => {
+        await validateActor(tx, a);
+        if (recordId) await this.require(tx, a, 'customers', recordId);
+        const rows = await tx.customer.findMany({
+          where: { tenantId: a.tenantId, ...(recordId ? { id: { not: recordId } } : {}) },
+          select: {
+            id: true,
+            name: true,
+            shortName: true,
+            creditCode: true,
+            companyPhone: true,
+            website: true,
+            address: true,
+            legalPerson: true,
+          },
+          take: 10001,
+        });
+        if (rows.length > 10000) throw new BadRequestException('客户查重超过10000条预算，请联系管理员');
+        const visible = new Set(
+          (await tx.customer.findMany({ where: await this.scope(tx, a, 'customers'), select: { id: true } })).map(
+            (r) => r.id,
+          ),
+        );
+        const matches: { id: number; name: string; hard: boolean; reasons: string[] }[] = [];
+        let hardDuplicate = false,
+          restrictedMatch = false;
+        for (const row of rows) {
+          const match = identityMatch(normalized, row);
+          if (!match.reasons.length) continue;
+          hardDuplicate ||= match.hard;
+          if (!visible.has(row.id)) restrictedMatch = true;
+          else if (matches.length < 20) matches.push({ id: row.id, name: row.name, ...match });
+        }
+        return { hardDuplicate, restrictedMatch, matches };
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
+  }
+  async assignmentRecipients(a: Actor, recordId: number) {
+    requirePermission(a, 'customers', 'update');
+    if (!admin(a) && !manager(a)) throw new ForbiddenException('仅管理员或主管可分配客户');
+    return this.prisma.system.$transaction(
+      async (tx) => {
+        await validateActor(tx, a);
+        await this.require(tx, a, 'customers', recordId);
+        const users = await tx.user.findMany({
+          where: {
+            tenantId: a.tenantId,
+            status: 'active',
+            deletedAt: null,
+            ...(!admin(a) ? { deptId: a.deptId } : {}),
+            roles: { some: { tenantId: a.tenantId, role: { code: 'sales' } } },
+          },
+          select: { id: true, name: true, deptId: true },
+          take: 201,
+          orderBy: { id: 'asc' },
+        });
+        if (users.length > 200) throw new BadRequestException('可分配人员超过本批页面上限，请联系管理员');
+        return users;
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
+  }
   async deliveryRecipients(a: Actor, kind: string, recordId: number) {
     allowWrite(a);
     if (!['projects', 'tasks'].includes(kind)) throw new BadRequestException('仅用于交付人员交接');
@@ -641,8 +791,20 @@ export class WorkspaceService {
           }))
         )
           throw new ConflictException('关联合同变更审批中，请先完成或撤回');
-        if (kind === 'customers' && typeof data.name === 'string')
-          data.nameFingerprint = await uniqueCustomer(tx, a.tenantId, data.name, recordId);
+        if (kind === 'customers')
+          Object.assign(
+            data,
+            await uniqueCustomerIdentity(
+              tx,
+              a.tenantId,
+              {
+                name: String(data.name ?? row?.name),
+                creditCode: (data.creditCode === undefined ? row?.creditCode : data.creditCode) as
+                  string | null | undefined,
+              },
+              recordId,
+            ),
+          );
         const base = { tenantId: a.tenantId, ...(kind === 'products' ? {} : { createdBy: a.userId }) };
         const defaults: Record<string, unknown> = {};
         if (kind === 'products') defaults.category = 'service';
@@ -896,7 +1058,10 @@ export class WorkspaceService {
               tenantId: a.tenantId,
               code: code('KH'),
               name: String(row.companyName),
-              nameFingerprint: await uniqueCustomer(tx, a.tenantId, String(row.companyName)),
+              ...(await uniqueCustomerIdentity(tx, a.tenantId, {
+                name: String(row.companyName),
+                creditCode: row.creditCode as string | null,
+              })),
               industry: row.industry as string | null,
               ownerId: a.userId,
               ownerDeptId: a.deptId,
@@ -1279,6 +1444,7 @@ export class WorkspaceService {
       where: { tenantId: a.tenantId, isActive: true },
       orderBy: { sortOrder: 'asc' },
     });
+    const today = new Date(businessDay(new Date()) + 'T00:00:00.000Z');
     return {
       role: admin(a) ? 'admin' : boss(a) ? 'boss' : manager(a) ? 'manager' : 'sales',
       customers: customers.length,
@@ -1289,15 +1455,13 @@ export class WorkspaceService {
       ),
       received: sum(plans.map((p) => p.receivedAmount)),
       outstanding: sum(plans.map((p) => p.outstandingAmount)),
-      overdue: sum(
-        plans.filter((p) => p.dueDate < new Date() && p.status !== 'cancelled').map((p) => p.outstandingAmount),
-      ),
+      overdue: sum(plans.filter((p) => p.dueDate < today && p.status !== 'cancelled').map((p) => p.outstandingAmount)),
       projects: projects.length,
       funnel: stages.map((s) => ({
         name: s.name,
         code: s.code,
-        count: opps.filter((o) => o.stage === s.code).length,
-        amount: sum(opps.filter((o) => o.stage === s.code).map((o) => o.amount)),
+        count: opps.filter((o) => o.status === 'open' && o.stage === s.code).length,
+        amount: sum(opps.filter((o) => o.status === 'open' && o.stage === s.code).map((o) => o.amount)),
       })),
       actions,
       users,

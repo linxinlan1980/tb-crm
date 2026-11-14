@@ -11,6 +11,7 @@ import type { Actor } from '../../common/types/actor';
 import { admin, manager } from './access';
 import { runCommand, object, text, id, checkVersion, json, type Tx } from './command-runner';
 import { csvRecords, customerNames, nameKey, type ImportData } from './customer-policy';
+import { creditFingerprint } from './customer-matching';
 import { Prisma, type Contract } from '@prisma/client';
 import { WorkspaceService } from './workspace.service';
 import { ApprovalService } from '../approval/approval.service';
@@ -208,11 +209,20 @@ export class CommercialService {
     const csv = body.csv,
       parsed = csvRecords(csv);
     return runCommand(this.prisma, a, 'customer.import.preview', body, async (tx) => {
-      const known = new Set((await customerNames(tx, a.tenantId)).map((r) => r.key));
+      const identities = await customerNames(tx, a.tenantId);
+      const known = new Set(identities.map((r) => r.key));
+      const knownCredits = new Set(identities.map((r) => r.creditCode).filter(Boolean));
       const rows: PreviewRow[] = parsed.map((r) => {
         const key = nameKey(r.data.name ?? '');
-        const status = r.error ? 'error' : known.has(key) ? 'duplicate' : 'ready';
-        if (status === 'ready') known.add(key);
+        const status = r.error
+          ? 'error'
+          : known.has(key) || !!(r.data.creditCode && knownCredits.has(r.data.creditCode))
+            ? 'duplicate'
+            : 'ready';
+        if (status === 'ready') {
+          known.add(key);
+          if (r.data.creditCode) knownCredits.add(r.data.creditCode);
+        }
         return { ...r, status };
       });
       const previewId = randomUUID(),
@@ -262,18 +272,27 @@ export class CommercialService {
         tenant.maxCustomers
       )
         throw new ConflictException('企业客户额度不足');
-      const known = new Set((await customerNames(tx, a.tenantId)).map((r) => r.key));
-      if (ready.some((r) => known.has(nameKey(r.data.name))))
-        throw new ConflictException('预检后已有同名客户创建，本次未写入任何客户，请重新预检');
+      const identities = await customerNames(tx, a.tenantId);
+      const known = new Set(identities.map((r) => r.key));
+      const knownCredits = new Set(identities.map((r) => r.creditCode).filter(Boolean));
+      if (
+        ready.some(
+          (r) => known.has(nameKey(r.data.name)) || !!(r.data.creditCode && knownCredits.has(r.data.creditCode)),
+        )
+      )
+        throw new ConflictException('预检后已有同名或同证照客户创建，本次未写入任何客户，请重新预检');
       const ids: number[] = [];
       for (const r of ready) {
         const c = await tx.customer.create({
           data: {
             ...r.data,
             nameFingerprint: nameKey(r.data.name),
+            creditFingerprint: creditFingerprint(r.data.creditCode ?? null),
             tenantId: a.tenantId,
             code: 'KH' + randomUUID().replaceAll('-', '').slice(0, 16),
-            poolType: 'public',
+            poolType: 'private',
+            ownerId: a.userId,
+            ownerDeptId: a.deptId,
             createdBy: a.userId,
           },
         });
@@ -285,7 +304,9 @@ export class CommercialService {
         imported: ids.length,
         skippedDuplicates: rows.filter((r) => r.status === 'duplicate').length,
         customerIds: ids,
-        poolType: 'public',
+        poolType: 'private',
+        ownerId: a.userId,
+        ownerDeptId: a.deptId,
         sourceHash: preview.sourceHash,
       };
     });

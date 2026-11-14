@@ -89,7 +89,7 @@ export default function DashboardPage() {
         <Row gutter={[20, 20]} style={{ marginTop: 24 }}>
           <Col xs={24} lg={14}>
             <Card
-              title="销售漏斗"
+              title="开放商机漏斗"
               extra={
                 <Button type="link" onClick={() => navigate('/opportunities/board')}>
                   查看商机

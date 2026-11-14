@@ -114,9 +114,15 @@ export default function BasicLayout() {
         width={232}
         breakpoint="lg"
         collapsedWidth={mobile ? 0 : 80}
-        onBreakpoint={(broken) => { setMobile(broken); setCollapsed(broken); }}
+        onBreakpoint={(broken) => {
+          setMobile(broken);
+          setCollapsed(broken);
+        }}
         theme="light"
-        style={{ borderRight: '1px solid #e2e8f0', ...(mobile ? { position: 'fixed', height: '100dvh', zIndex: 1000, overflow: 'auto' } : {}) }}
+        style={{
+          borderRight: '1px solid #e2e8f0',
+          ...(mobile ? { position: 'fixed', height: '100dvh', zIndex: 1000, overflow: 'auto' } : {}),
+        }}
       >
         <div className="brand" onClick={() => navigate('/dashboard')}>
           <div className="brand-mark">伴</div>
@@ -152,10 +158,24 @@ export default function BasicLayout() {
           }}
         >
           <div>
-            {mobile && <Button aria-label="打开导航" icon={<MenuOutlined />} onClick={() => setCollapsed(!collapsed)} style={{ marginRight: 8 }} />}
+            {mobile && (
+              <Button
+                aria-label="打开导航"
+                icon={<MenuOutlined />}
+                onClick={() => setCollapsed(!collapsed)}
+                style={{ marginRight: 8 }}
+              />
+            )}
             <Typography.Text strong>客户经营与销售协同</Typography.Text>
-            <Tag style={{ marginLeft: 12 }} color="blue">
-              企业工作空间
+            <Tag
+              className="company-badge"
+              style={{ marginLeft: 12 }}
+              color={user?.company?.purpose === 'test' ? 'orange' : 'blue'}
+            >
+              {user?.company?.purpose === 'test' ? '测试帐套' : '正式帐套'} ·{' '}
+              {mobile || user?.company?.purpose === 'test'
+                ? (user?.company?.code ?? sessionStorage.getItem('companyCode'))
+                : (user?.company?.name ?? sessionStorage.getItem('companyCode'))}
             </Tag>
           </div>
           <Dropdown

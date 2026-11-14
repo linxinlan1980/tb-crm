@@ -6,6 +6,8 @@
 
 新增[销售预测与回款操作说明](docs/reporting/OPERATIONS.md)：精确到分的阶段预测、月度计划/实收、账龄和年度矩阵；签约须填写真实分期条款。新增[本地多公司安装与外网配置](docs/LOCAL_COMPANY_INSTALL.md)，公司独立MySQL库及账号，网页适配手机H5。
 
+新增[组织与客户质量规则](docs/ORG_CUSTOMER_QUALITY.md)及[正式/测试帐套操作说明](docs/TEST_COMPANY_GUIDE.md)：部门树、人员角色、创建人归属、客户分配/整体交接、同名/证照查重和其他相似提示。正式业务与丰富测试资料使用独立数据库。
+
 2026-11-15 新增[Salesforce销售CRM对齐设计与工程计划](docs/design/salesforce-alignment/README.md)：含完整功能待办、蓝白灰界面设计、操作便利性、分批建设和验收；大部分仍为设计待办；已实现范围以当前进度和操作说明为准。
 
 
