@@ -63,7 +63,7 @@ const command = async (kind, row, action, extra = {}, t = sales, expected = 201)
     await call(
       `/workspace/${kind}/${row.id}/${action}`,
       'POST',
-      { requestKey: randomUUID(), expectedUpdatedAt: row.updatedAt, ...extra },
+      { requestKey: randomUUID(), expectedUpdatedAt: row.updatedAt, ...(kind === 'contracts' && action === 'sign' ? { paymentSchedule: [{ amount: String(row.amount), dueDate: '2026-12-31', condition: 'Synthetic fixture agreed payment terms' }] } : {}), ...extra },
       t,
       expected,
     )
@@ -842,6 +842,21 @@ try {
     (await detail('opportunities', wonOpp)).contractId === wonContract.id,
     'Second sign cannot replace winning contract',
   );
+  const installments = await create('contracts', { name: 'Explicit installments synthetic test', customerId: closureCustomer.id, contractType: 'implementation', amount: '0.30' });
+  await command('contracts', await detail('contracts', installments), 'submit');
+  await approve((await detail('contracts', installments)).approvalId);
+  const approvedSchedule = await detail('contracts', installments);
+  const signPath = `/workspace/contracts/${installments.id}/sign`;
+  const signBody = { requestKey: randomUUID(), expectedUpdatedAt: approvedSchedule.updatedAt };
+  await call(signPath, 'POST', signBody, sales, 400);
+  await call(signPath, 'POST', { ...signBody, requestKey: randomUUID(), paymentSchedule: [{ amount: '0.29', dueDate: '2026-12-01', condition: 'Wrong total' }] }, sales, 400);
+  ok((await detail('contracts', installments)).status === 'approved', 'Invalid terms leave contract approved');
+  ok(await db.paymentPlan.count({ where: { contractId: installments.id } }) === 0, 'Invalid terms create no plans');
+  const explicit = { ...signBody, requestKey: randomUUID(), paymentSchedule: [{ amount: '0.10', dueDate: '2026-12-01', condition: 'First actual term' }, { amount: '0.20', dueDate: '2027-01-31', condition: 'Acceptance balance' }] };
+  await Promise.all([call(signPath, 'POST', explicit, sales, 201), call(signPath, 'POST', explicit, sales, 201)]);
+  const generated = await db.paymentPlan.findMany({ where: { contractId: installments.id }, orderBy: { dueDate: 'asc' } });
+  ok(generated.length === 2 && generated[0].amount.toFixed(2) === '0.10' && generated[1].outstandingAmount.toFixed(2) === '0.20', 'Explicit installments generated exactly once');
+  ok(generated[1].dueDate.toISOString().slice(0, 10) === '2027-01-31' && generated[1].triggerCondition === 'Acceptance balance', 'Actual dates and conditions preserved across years');
   console.log(
     JSON.stringify({
       checks,

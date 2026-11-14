@@ -203,7 +203,7 @@ export default function FinanceLedgerPage() {
         showIcon
         style={{ marginBottom: 20 }}
         message="本地收款台账：登记 → 另一管理员复核 → 核销 → 撤销/作废"
-        description="仅记录业务已取得的到账凭据，不连接银行、不转账、不退款、不执行税务开票或会计记账。历史演示记录保持只读；当前写操作仅限管理员。"
+        description="仅记录业务已取得的到账凭据，不连接银行、不转账、不退款、不执行税务开票或会计记账。历史未纳入台账的记录保持只读；当前写操作仅限管理员。"
       />
       <Tabs
         items={[

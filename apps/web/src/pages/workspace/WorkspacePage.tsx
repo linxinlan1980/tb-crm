@@ -323,6 +323,10 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     if (!command) return;
     try {
       const fields = await actionForm.validateFields();
+      if (command.action === 'sign' && Array.isArray(fields.paymentSchedule))
+        fields.paymentSchedule = fields.paymentSchedule.map(
+          (p: { amount: unknown; dueDate: string; condition: string }) => ({ ...p, amount: String(p.amount) }),
+        );
       setBusy(true);
       const result = await post<RecordRow & { kind?: string }>(
         `/workspace/${kind}/${command.row.id}/${command.action}`,
@@ -487,7 +491,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           style={{ marginBottom: 16 }}
           type="warning"
           showIcon
-          message={kind === 'invoices' ? '演示系统，暂无税务开票功能' : '当前页面为只读查询'}
+          message={kind === 'invoices' ? '税务开票服务尚未开通' : '当前页面为只读查询'}
           description="本页不执行业务处理；独立收款台账支持登记及核销，银行、税务与会计接口仍未开放。"
           action={<Button href="/finance/ledger">收款登记与核销</Button>}
         />
@@ -518,7 +522,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           columns={columns}
           scroll={{ x: 900 }}
           pagination={{ current: page, pageSize: 20, total, onChange: setPage, showTotal: (n) => `共 ${n} 条` }}
-          locale={{ emptyText: <Empty description="暂无数据，可新建或初始化演示数据" /> }}
+          locale={{ emptyText: <Empty description="暂无业务数据" /> }}
         />
       </Card>
       <Drawer width={760} title={`${spec?.title}详情`} open={!!detail} onClose={() => setDetail(undefined)}>
@@ -695,6 +699,54 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
       >
         <Typography.Paragraph>对象：{String(command?.row[primary] ?? '')}。此操作会保存业务变更。</Typography.Paragraph>
         <Form form={actionForm} layout="vertical">
+          {kind === 'contracts' && command?.action === 'sign' && (
+            <>
+              <Alert
+                type="info"
+                showIcon
+                message={`合同金额 ${String(command.row.amount)}。请按实际付款条款填写各期金额、到期日和条件；合计须等于合同金额。`}
+                style={{ marginBottom: 16 }}
+              />
+              <Form.List name="paymentSchedule" initialValue={[{}]}>
+                {(fields, { add, remove }) => (
+                  <>
+                    {fields.map((field, index) => (
+                      <Card
+                        key={field.key}
+                        size="small"
+                        title={`第${index + 1}期`}
+                        extra={
+                          fields.length > 1 ? (
+                            <Button type="link" onClick={() => remove(field.name)}>
+                              删除
+                            </Button>
+                          ) : null
+                        }
+                        style={{ marginBottom: 12 }}
+                      >
+                        <Form.Item name={[field.name, 'amount']} label="本期金额" rules={[{ required: true }]}>
+                          <InputNumber stringMode min="0.01" precision={2} style={{ width: '100%' }} />
+                        </Form.Item>
+                        <Form.Item name={[field.name, 'dueDate']} label="实际到期日" rules={[{ required: true }]}>
+                          <Input type="date" />
+                        </Form.Item>
+                        <Form.Item
+                          name={[field.name, 'condition']}
+                          label="付款条件"
+                          rules={[{ required: true, whitespace: true }]}
+                        >
+                          <Input maxLength={200} placeholder="按合同填写，例如签约首款或验收尾款" />
+                        </Form.Item>
+                      </Card>
+                    ))}
+                    <Button onClick={() => add()} disabled={fields.length >= 24} block>
+                      追加一期
+                    </Button>
+                  </>
+                )}
+              </Form.List>
+            </>
+          )}
           {command?.action === 'submit' && approvalForm && (
             <>
               <Alert

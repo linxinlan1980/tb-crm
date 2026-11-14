@@ -120,7 +120,39 @@ export default function SystemPage() {
       </Button>
       {error && <Alert message={error} type="error" showIcon />}
       <Tabs
+        defaultActiveKey="users"
         items={[
+          {
+            key: 'network',
+            label: '公司帐套 / 外网配置',
+            children: (
+              <Card title="本地、局域网与外网访问配置">
+                <Typography.Paragraph>
+                  系统当前支持本机和局域网。服务器管理员可配置HTTPS域名或VPN入口、生成反向代理配置，并检查公司服务状态。
+                </Typography.Paragraph>
+                <Alert
+                  type="info"
+                  showIcon
+                  message="外网配置影响整台服务器上的公司帐套，须在服务器本机使用独立管理口令操作。公司业务密码不能代替本机管理口令。"
+                  style={{ marginBottom: 16 }}
+                />
+                <Button
+                  type="primary"
+                  href="/__accounts#remote"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  disabled={!['localhost', '127.0.0.1'].includes(window.location.hostname)}
+                >
+                  打开外网配置页面
+                </Button>
+                {!['localhost', '127.0.0.1'].includes(window.location.hostname) && (
+                  <Typography.Paragraph style={{ marginTop: 12 }}>
+                    请在服务器本机浏览器打开 http://localhost:{window.location.port || '3000'}/__accounts#remote。
+                  </Typography.Paragraph>
+                )}
+              </Card>
+            ),
+          },
           {
             key: 'users',
             label: '用户账号',

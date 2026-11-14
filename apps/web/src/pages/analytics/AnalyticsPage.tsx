@@ -1,0 +1,693 @@
+import { useEffect, useRef, useState } from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Drawer,
+  Empty,
+  InputNumber,
+  Row,
+  Select,
+  Space,
+  Spin,
+  Statistic,
+  Table,
+  Tabs,
+  Tag,
+  Typography,
+} from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
+import { get, money, errorText } from '../../services/workspace';
+type Detail = {
+  id: number;
+  name?: string;
+  contractNo?: string;
+  receiptNo?: string;
+  planNo?: string;
+  contractName?: string;
+  ownerName?: string;
+  amount: string;
+  weighted?: string | null;
+  stageName?: string;
+  expectedCloseDate?: string | null;
+  risk?: string;
+  planned?: string;
+  received?: string;
+  currentOutstanding?: string;
+  currentOverdue?: string;
+  allocatedAmount?: string;
+  unallocatedAmount?: string;
+  receiptDate?: string;
+  dueDate?: string;
+  outstandingAmount?: string;
+  receivedAmount?: string;
+  nextAction?: string | null;
+  status?: string;
+  closedAt?: string | null;
+  months?: { month: number; planned: string; received: string }[];
+};
+type Paginated = { items: Detail[]; meta: { page: number; pageSize: number; total: number } };
+type Report = {
+  version: string;
+  generatedAt: string;
+  summary: Record<string, string | number | null>;
+  notices: string[];
+  balanceAsOf?: string;
+  excludedCurrencyContracts?: number;
+  stages?: { stage: string; name: string; count: number; amount: string; weighted: string; excluded: number }[];
+  owners?: {
+    ownerId: number;
+    name: string;
+    open: string;
+    weighted: string;
+    won: string;
+    wonCount: number;
+    lostCount: number;
+    planned?: string;
+    received?: string;
+    currentOutstanding?: string;
+    currentOverdue?: string;
+  }[];
+  monthly: { month: number; amount?: string; weighted?: string; won?: string; planned?: string; received?: string }[];
+  aging?: { name: string; count: number; amount: string }[];
+  details?: Paginated;
+  matrix?: Paginated;
+  receipts?: Paginated;
+  plans?: Paginated;
+  balances?: Paginated;
+  overdue?: Paginated;
+};
+type Options = {
+  owners: { id: number; name: string; deptId: number | null }[];
+  departments: { id: number; name: string }[];
+  canForecast: boolean;
+  canCollections: boolean;
+};
+const m = (v: unknown) => money(v);
+const day = (v?: string | null) => v?.slice(0, 10) || '待确认';
+function Trend({ rows, forecast }: { rows: Report['monthly']; forecast: boolean }) {
+  const max = Math.max(
+    1,
+    ...rows.flatMap((r) => [Number(forecast ? r.weighted : r.planned), Number(forecast ? r.won : r.received)]),
+  );
+  return (
+    <>
+      <Space>
+        <Tag color="blue">{forecast ? '阶段加权' : '到期计划'}</Tag>
+        <Tag>{forecast ? '已赢单' : '已复核到账'}</Tag>
+      </Space>
+      <div
+        style={{ display: 'flex', gap: 12, height: 140, overflowX: 'auto', alignItems: 'flex-end', margin: '16px 0' }}
+      >
+        {rows.map((r) => (
+          <div
+            key={r.month}
+            style={{ minWidth: 32, flex: 1 }}
+            title={`${r.month}月：${m(forecast ? r.weighted : r.planned)} / ${m(forecast ? r.won : r.received)}`}
+          >
+            <div style={{ height: 105, display: 'flex', alignItems: 'flex-end', gap: 3 }}>
+              <div
+                style={{
+                  flex: 1,
+                  background: '#2563eb',
+                  minHeight: 1,
+                  height: (Number(forecast ? r.weighted : r.planned) / max) * 100,
+                }}
+              />
+              <div
+                style={{
+                  flex: 1,
+                  background: '#94a3b8',
+                  minHeight: 1,
+                  height: (Number(forecast ? r.won : r.received) / max) * 100,
+                }}
+              />
+            </div>
+            <small>{r.month}月</small>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+function exportCsv(rows: Detail[], name: string, columns: ColumnsType<Detail>) {
+  const keys = columns.flatMap((c) =>
+    'dataIndex' in c && typeof c.dataIndex === 'string'
+      ? [{ title: String(c.title), key: c.dataIndex as keyof Detail }]
+      : [],
+  );
+  const cell = (v: unknown) => {
+    let s = String(v ?? '');
+    if (/^[=+@\-\t\r]/.test(s)) s = "'" + s;
+    return '"' + s.replace(/"/g, '""') + '"';
+  };
+  const months = rows.some((r) => r.months);
+  const csv = [
+    [
+      ...keys.map((c) => c.title),
+      ...(months ? Array.from({ length: 12 }, (_, i) => [`${i + 1}月计划`, `${i + 1}月已回`]).flat() : []),
+    ],
+    ...rows.map((r) => [
+      ...keys.map((c) => r[c.key]),
+      ...(months
+        ? Array.from({ length: 12 }, (_, i) => [
+            r.months?.[i]?.planned ?? '0.00',
+            r.months?.[i]?.received ?? '0.00',
+          ]).flat()
+        : []),
+    ]),
+  ]
+    .map((r) => r.map(cell).join(','))
+    .join('\r\n');
+  const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name + '-当前页.csv';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+export default function AnalyticsPage() {
+  const [options, setOptions] = useState<Options>();
+  const [kind, setKind] = useState(new URLSearchParams(window.location.search).get('tab') === 'collections' ? 'collections' : 'forecast'),
+    [section, setSection] = useState('contracts');
+  const [year, setYear] = useState(
+    Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric' }).format(new Date())),
+  );
+  const [month, setMonth] = useState(0),
+    [ownerId, setOwnerId] = useState<number>(),
+    [source, setSource] = useState('managed');
+  const [bucket, setBucket] = useState('open');
+  const [deptId, setDeptId] = useState<number>();
+  const [page, setPage] = useState(1),
+    [data, setData] = useState<Report>(),
+    [error, setError] = useState(''),
+    [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Detail>();
+  const seq = useRef(0);
+  useEffect(() => {
+    get<Options>('/analytics/options')
+      .then((o) => {
+        setOptions(o);
+        if (!o.canForecast && o.canCollections) setKind('collections');
+      })
+      .catch((e) => setError(errorText(e)));
+  }, []);
+  const load = async () => {
+    const id = ++seq.current;
+    setBusy(true);
+    setError('');
+    setData(undefined);
+    setSelected(undefined);
+    try {
+      const r = await get<Report>('/analytics/' + kind, {
+        year,
+        month,
+        ownerId,
+        deptId,
+        source,
+        page,
+        pageSize: 20,
+        detail: section,
+        bucket,
+      });
+      if (id === seq.current) setData(r);
+    } catch (e) {
+      if (id === seq.current) setError(errorText(e));
+    } finally {
+      if (id === seq.current) setBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (options && (kind === 'forecast' ? options.canForecast : options.canCollections)) void load();
+    return () => {
+      seq.current++;
+    };
+  }, [options, kind, year, month, ownerId, deptId, source, page, section, bucket]);
+  const reset = (fn: () => void) => {
+    fn();
+    setPage(1);
+  };
+  const forecast = kind === 'forecast';
+  const detailData = forecast
+    ? data?.details
+    : section === 'receipts'
+      ? data?.receipts
+      : section === 'plans'
+        ? data?.plans
+        : section === 'balances'
+          ? data?.balances
+          : section === 'overdue'
+            ? data?.overdue
+            : data?.matrix;
+  const monetary = (title: string, key: keyof Detail): ColumnsType<Detail>[number] => ({
+    title,
+    dataIndex: key,
+    align: 'right',
+    render: (v: unknown) => m(v),
+  });
+  const titleColumn: ColumnsType<Detail>[number] = {
+    title: forecast ? '商机' : section === 'contracts' ? '合同 / 项目' : section === 'receipts' ? '收款单' : '付款计划',
+    dataIndex: forecast || section === 'contracts' ? 'name' : section === 'receipts' ? 'receiptNo' : 'planNo',
+    fixed: 'left',
+    width: 210,
+    render: (v: string, r: Detail) => (
+      <Button
+        type="link"
+        onClick={() => setSelected(r)}
+        style={{ padding: 0, whiteSpace: 'normal', textAlign: 'left' }}
+      >
+        {v}
+      </Button>
+    ),
+  };
+  const columns: ColumnsType<Detail> = [
+    titleColumn,
+    ...(forecast
+      ? [
+          { title: '负责人', dataIndex: 'ownerName' },
+          { title: '阶段', dataIndex: 'stageName' },
+          {
+            title: '状态',
+            dataIndex: 'status',
+            render: (v: string) => ({ open: '进行中', won: '已赢单', lost: '已输单' })[v] ?? v,
+          },
+          monetary('商机金额', 'amount'),
+          {
+            title: '阶段加权额',
+            dataIndex: 'weighted',
+            render: (v: string | null) => (v === null ? '不纳入加权' : m(v)),
+          },
+          { title: '预计成交', dataIndex: 'expectedCloseDate', render: day },
+          { title: '下一步', dataIndex: 'nextAction' },
+          { title: '关注事项', dataIndex: 'risk', render: (v: string) => (v ? <Tag>{v}</Tag> : '—') },
+        ]
+      : section === 'contracts'
+        ? [
+            { title: '负责人', dataIndex: 'ownerName' },
+            monetary('合同金额', 'amount'),
+            monetary('期间计划', 'planned'),
+            monetary('期间到账', 'received'),
+            monetary('当前未收', 'currentOutstanding'),
+            monetary('当前逾期', 'currentOverdue'),
+            ...Array.from({ length: 12 }, (_, i) => ({
+              title: `${i + 1}月 · 计划 / 已回`,
+              width: 165,
+              render: (_: unknown, r: Detail) => {
+                const cell = r.months?.[i];
+                return (
+                  <div>
+                    <span>{m(cell?.planned)}</span>
+                    <br />
+                    <Typography.Text type="secondary">{m(cell?.received)}</Typography.Text>
+                  </div>
+                );
+              },
+            })),
+          ]
+        : section === 'receipts'
+          ? [
+              { title: '合同', dataIndex: 'contractName' },
+              { title: '到账日期', dataIndex: 'receiptDate', render: day },
+              monetary('到账金额', 'amount'),
+              monetary('其中当前已核销', 'allocatedAmount'),
+              monetary('其中当前未核销', 'unallocatedAmount'),
+            ]
+          : [
+              { title: '合同', dataIndex: 'contractName' },
+              { title: '到期日', dataIndex: 'dueDate', render: day },
+              monetary('计划金额', 'amount'),
+              monetary('当前已核销', 'receivedAmount'),
+              monetary('当前未收', 'outstandingAmount'),
+            ]),
+  ];
+  const cards = forecast
+    ? [
+        ['期间开放商机', 'open'],
+        ['阶段加权签约预测', 'weighted'],
+        ['期间已赢单', 'won'],
+        ['关闭商机赢单率', 'winRate'],
+      ]
+    : [
+        ['期间到期计划', 'planned'],
+        ['期间已复核到账', 'received'],
+        ['当前未收余额 · 全期间', 'currentOutstanding'],
+        ['当前逾期余额 · 全期间', 'currentOverdue'],
+      ];
+  return (
+    <div>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">SALES & CASH ANALYTICS</div>
+          <h1>销售预测与回款分析</h1>
+          <Typography.Text type="secondary">从商机、计划到实际到账，按同一权限范围核对每个数字。</Typography.Text>
+        </div>
+        <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={!options || busy}>
+          刷新
+        </Button>
+      </div>
+      <Tabs
+        activeKey={kind}
+        onChange={(k) => reset(() => setKind(k))}
+        items={[
+          ...(options?.canForecast ? [{ key: 'forecast', label: '销售预测' }] : []),
+          ...(options?.canCollections ? [{ key: 'collections', label: '回款、应收与项目矩阵' }] : []),
+        ]}
+      />
+      <Card size="small" style={{ marginBottom: 18 }}>
+        <Space wrap>
+          <span>年份</span>
+          <InputNumber
+            aria-label="报表年份"
+            min={2000}
+            max={2100}
+            value={year}
+            onChange={(v) => v && reset(() => setYear(v))}
+          />
+          <Select
+            aria-label="报表月份"
+            style={{ width: 130 }}
+            value={month}
+            onChange={(v) => reset(() => setMonth(v))}
+            options={[
+              { value: 0, label: '全年' },
+              ...Array.from({ length: 12 }, (_, i) => ({ value: i + 1, label: `${i + 1}月` })),
+            ]}
+          />
+          <Select
+            aria-label="负责人"
+            showSearch
+            optionFilterProp="label"
+            style={{ width: 190 }}
+            value={ownerId}
+            allowClear
+            placeholder="全部可见负责人"
+            onChange={(v) => reset(() => setOwnerId(v))}
+            options={options?.owners.map((u) => ({ value: u.id, label: u.name }))}
+          />
+          <Select
+            aria-label="部门团队"
+            style={{ width: 180 }}
+            value={deptId}
+            allowClear
+            placeholder="全部可见部门"
+            onChange={(v) =>
+              reset(() => {
+                setDeptId(v);
+                setOwnerId(undefined);
+              })
+            }
+            options={options?.departments.map((d) => ({ value: d.id, label: d.name }))}
+          />
+          {!forecast && (
+            <Select
+              aria-label="收款来源"
+              style={{ width: 180 }}
+              value={source}
+              onChange={(v) => reset(() => setSource(v))}
+              options={[
+                { value: 'managed', label: '本地管理台账' },
+                { value: 'legacy', label: '历史只读记录' },
+              ]}
+            />
+          )}
+        </Space>
+      </Card>
+      {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
+      <Spin spinning={busy}>
+        {data ? (
+          <>
+            <Row gutter={[16, 16]}>
+              {cards.map(([title, key]) => (
+                <Col xs={24} sm={12} xl={6} key={key}>
+                  <Card
+                    hoverable
+                    onClick={() =>
+                      reset(() =>
+                        forecast
+                          ? setBucket(key === 'won' ? 'won' : key === 'winRate' ? 'closed' : 'open')
+                          : setSection(
+                              key === 'planned'
+                                ? 'plans'
+                                : key === 'received'
+                                  ? 'receipts'
+                                  : key === 'currentOutstanding'
+                                    ? 'balances'
+                                    : 'overdue',
+                            ),
+                      )
+                    }
+                  >
+                    <Statistic
+                      title={title}
+                      value={
+                        key === 'winRate'
+                          ? data.summary[key] === null
+                            ? '暂无关闭商机'
+                            : `${data.summary[key]}%`
+                          : m(data.summary[key])
+                      }
+                      prefix={key === 'winRate' ? undefined : '¥'}
+                    />
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+            <Alert
+              style={{ margin: '16px 0' }}
+              type="info"
+              showIcon
+              message={
+                forecast
+                  ? `待确认成交日期 ${data.summary.undatedCount} 个；不纳入加权 ${data.summary.unweightedCount} 个；缺关闭日期 ${data.summary.unknownClosedCount} 个`
+                  : `当前余额日期 ${data.balanceAsOf}；未绑定合同到账 ¥${m(data.summary.unboundReceived)}；排除非CNY合同 ${data.excludedCurrencyContracts} 份`
+              }
+              description={data.notices.join(' ')}
+            />
+            <Row gutter={[16, 16]}>
+              <Col xs={24} xl={15}>
+                <Card title={forecast ? '每月预测 / 已赢单' : '每月到期计划 / 实际到账'}>
+                  <Trend rows={data.monthly} forecast={forecast} />
+                  <Table
+                    size="small"
+                    pagination={false}
+                    rowKey="month"
+                    dataSource={data.monthly}
+                    columns={[
+                      { title: '月份', dataIndex: 'month', render: (v: number) => `${v}月` },
+                      {
+                        title: forecast ? '开放商机' : '到期计划',
+                        dataIndex: forecast ? 'amount' : 'planned',
+                        align: 'right',
+                        render: m,
+                      },
+                      ...(forecast
+                        ? [{ title: '阶段加权', dataIndex: 'weighted', align: 'right' as const, render: m }]
+                        : []),
+                      {
+                        title: forecast ? '已赢单' : '已复核到账',
+                        dataIndex: forecast ? 'won' : 'received',
+                        align: 'right',
+                        render: m,
+                      },
+                    ]}
+                  />
+                </Card>
+              </Col>
+              <Col xs={24} xl={9}>
+                <Card title={forecast ? '负责人预测分布' : '当前余额账龄 · 不限计划期间'}>
+                  {forecast ? (
+                    <Table
+                      size="small"
+                      pagination={false}
+                      rowKey="ownerId"
+                      dataSource={data.owners}
+                      scroll={{ x: 460 }}
+                      columns={[
+                        {
+                          title: '负责人',
+                          dataIndex: 'name',
+                          render: (v: string, r: { ownerId: number }) => (
+                            <Button type="link" onClick={() => reset(() => setOwnerId(r.ownerId))}>
+                              {v}
+                            </Button>
+                          ),
+                        },
+                        { title: '开放金额', dataIndex: 'open', render: m },
+                        { title: '加权', dataIndex: 'weighted', render: m },
+                        { title: '赢单', dataIndex: 'won', render: m },
+                      ]}
+                    />
+                  ) : (
+                    <>
+                      <Table
+                        size="small"
+                        pagination={false}
+                        rowKey="name"
+                        dataSource={data.aging}
+                        columns={[
+                          { title: '账龄', dataIndex: 'name' },
+                          { title: '笔数', dataIndex: 'count' },
+                          { title: '当前余额', dataIndex: 'amount', align: 'right', render: m },
+                        ]}
+                      />
+                      <p style={{ marginTop: 16 }}>
+                        期间到账中，当前已核销 ¥{m(data.summary.currentAllocatedOfReceipts)}；当前未核销 ¥
+                        {m(data.summary.currentUnallocatedOfReceipts)}。二者不再加到到账总额。
+                      </p>
+                    </>
+                  )}
+                </Card>
+              </Col>
+            </Row>
+            {!forecast && (
+              <Card title="负责人回款与应收 · 未绑定合同款单列" style={{ marginTop: 18 }}>
+                <Table
+                  size="small"
+                  rowKey="ownerId"
+                  pagination={{ pageSize: 10 }}
+                  dataSource={data.owners}
+                  scroll={{ x: 700 }}
+                  columns={[
+                    {
+                      title: '负责人',
+                      dataIndex: 'name',
+                      render: (v: string, r: { ownerId: number }) => (
+                        <Button type="link" onClick={() => reset(() => setOwnerId(r.ownerId))}>
+                          {v}
+                        </Button>
+                      ),
+                    },
+                    { title: '期间计划', dataIndex: 'planned', render: m },
+                    { title: '期间到账', dataIndex: 'received', render: m },
+                    { title: '当前未收', dataIndex: 'currentOutstanding', render: m },
+                    { title: '当前逾期', dataIndex: 'currentOverdue', render: m },
+                  ]}
+                />
+              </Card>
+            )}
+            {forecast && (
+              <Card title="开放阶段分布" style={{ marginTop: 18 }}>
+                <Table
+                  size="small"
+                  pagination={false}
+                  rowKey="stage"
+                  dataSource={data.stages}
+                  columns={[
+                    { title: '阶段', dataIndex: 'name' },
+                    { title: '数量', dataIndex: 'count' },
+                    { title: '金额', dataIndex: 'amount', render: m },
+                    { title: '加权', dataIndex: 'weighted', render: m },
+                    { title: '未加权数量', dataIndex: 'excluded' },
+                  ]}
+                />
+              </Card>
+            )}
+            <Card
+              style={{ marginTop: 18 }}
+              title={forecast ? '商机明细 · 所选口径' : '项目 / 计划 / 到账明细'}
+              extra={
+                <Button
+                  icon={<DownloadOutlined />}
+                  onClick={() =>
+                    exportCsv(
+                      detailData?.items ?? [],
+                      `${year}-${month || '全年'}-${forecast ? '销售预测' : section}`,
+                      columns,
+                    )
+                  }
+                >
+                  导出当前页
+                </Button>
+              }
+            >
+              {forecast && (
+                <Select
+                  aria-label="商机明细范围"
+                  style={{ width: 240, marginBottom: 16 }}
+                  value={bucket}
+                  onChange={(v) => reset(() => setBucket(v))}
+                  options={[
+                    { value: 'open', label: '期间开放商机' },
+                    { value: 'won', label: '期间已赢单' },
+                    { value: 'lost', label: '期间已输单' },
+                    { value: 'closed', label: '期间全部已关闭' },
+                    { value: 'undated', label: '全部待确认成交日期' },
+                  ]}
+                />
+              )}
+              {!forecast && (
+                <Tabs
+                  activeKey={section}
+                  onChange={(k) => reset(() => setSection(k))}
+                  items={[
+                    { key: 'contracts', label: '项目月度矩阵' },
+                    { key: 'plans', label: '期间到期计划' },
+                    { key: 'receipts', label: '期间到账流水' },
+                    { key: 'balances', label: '当前未收 · 全期间' },
+                    { key: 'overdue', label: '当前逾期 · 全期间' },
+                  ]}
+                />
+              )}
+              <Table<Detail>
+                rowKey="id"
+                size="small"
+                dataSource={detailData?.items}
+                columns={columns}
+                scroll={{ x: forecast ? 1100 : section === 'contracts' ? 2800 : 900 }}
+                pagination={{
+                  current: page,
+                  pageSize: 20,
+                  total: detailData?.meta.total ?? 0,
+                  showSizeChanger: false,
+                  onChange: setPage,
+                  showTotal: (n) => `共 ${n} 条；导出仅当前页`,
+                }}
+              />
+            </Card>
+            <Typography.Paragraph type="secondary" style={{ marginTop: 12 }}>
+              口径版本 {data.version} · 生成时间 {new Date(data.generatedAt).toLocaleString('zh-CN')} ·
+              当前归属权限；历史快照与预测提报见建设计划。
+            </Typography.Paragraph>
+          </>
+        ) : !busy && !error ? (
+          <Empty
+            description={
+              options && !options.canForecast && !options.canCollections ? '当前账号没有报表读取权限' : '请选择报表'
+            }
+          />
+        ) : null}
+      </Spin>
+      <Drawer
+        title={selected?.name ?? selected?.receiptNo ?? selected?.planNo ?? '明细'}
+        open={!!selected}
+        onClose={() => setSelected(undefined)}
+        width={640}
+      >
+        {selected && (
+          <>
+            <p>金额：¥{m(selected.amount)}</p>
+            {selected.ownerName && <p>负责人：{selected.ownerName}</p>}
+            {selected.contractName && <p>合同：{selected.contractName}</p>}
+            {selected.expectedCloseDate && <p>预计成交：{day(selected.expectedCloseDate)}</p>}
+            {selected.nextAction && <p>下一步：{selected.nextAction}</p>}
+            {selected.months && (
+              <Table
+                size="small"
+                rowKey="month"
+                pagination={false}
+                dataSource={selected.months}
+                columns={[
+                  { title: '月份', dataIndex: 'month' },
+                  { title: '计划', dataIndex: 'planned', render: m },
+                  { title: '已回', dataIndex: 'received', render: m },
+                ]}
+              />
+            )}
+          </>
+        )}
+      </Drawer>
+    </div>
+  );
+}

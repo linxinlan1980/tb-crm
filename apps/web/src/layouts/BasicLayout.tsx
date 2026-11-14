@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Avatar, Dropdown, Tag, Typography, message } from 'antd';
+import { Layout, Menu, Avatar, Dropdown, Tag, Typography, message, Button } from 'antd';
 import { authApi } from '../services/auth.api';
 import {
   DashboardOutlined,
@@ -14,6 +14,7 @@ import {
   RobotOutlined,
   LogoutOutlined,
   ApiOutlined,
+  MenuOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../stores/useAuthStore';
 const { Header, Sider, Content } = Layout;
@@ -21,6 +22,7 @@ export default function BasicLayout() {
   const [collapsed, setCollapsed] = useState(false),
     navigate = useNavigate(),
     location = useLocation();
+  const [mobile, setMobile] = useState(false);
   const { user, logout } = useAuthStore();
   const roles = user?.roles ?? [],
     isAdmin = roles.includes('super_admin'),
@@ -33,6 +35,7 @@ export default function BasicLayout() {
           : '销售';
   const items = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: '经营工作台' },
+    { key: '/analytics', icon: <DashboardOutlined />, label: '销售预测与回款分析' },
     {
       key: 'customer',
       icon: <TeamOutlined />,
@@ -85,10 +88,10 @@ export default function BasicLayout() {
       label: '财务中心',
       children: [
         { key: '/finance/ledger', label: '收款登记与核销' },
-        { key: '/finance/payment-plans', label: '回款计划 · 演示' },
-        { key: '/invoices', label: '发票记录 · 演示' },
-        { key: '/receipts', label: '收款记录 · 演示' },
-        { key: '/finance/aging', label: '财务功能展示' },
+        { key: '/finance/payment-plans', label: '回款计划' },
+        { key: '/invoices', label: '发票记录' },
+        { key: '/receipts', label: '历史收款记录' },
+        { key: '/finance/aging', label: '财务服务' },
       ],
     },
     { key: '/notifications', icon: <AuditOutlined />, label: '站内通知' },
@@ -109,8 +112,11 @@ export default function BasicLayout() {
         collapsed={collapsed}
         onCollapse={setCollapsed}
         width={232}
+        breakpoint="lg"
+        collapsedWidth={mobile ? 0 : 80}
+        onBreakpoint={(broken) => { setMobile(broken); setCollapsed(broken); }}
         theme="light"
-        style={{ borderRight: '1px solid #e2e8f0' }}
+        style={{ borderRight: '1px solid #e2e8f0', ...(mobile ? { position: 'fixed', height: '100dvh', zIndex: 1000, overflow: 'auto' } : {}) }}
       >
         <div className="brand" onClick={() => navigate('/dashboard')}>
           <div className="brand-mark">伴</div>
@@ -127,6 +133,7 @@ export default function BasicLayout() {
           defaultOpenKeys={['customer', 'sales']}
           items={items}
           onClick={({ key }) => {
+            if (mobile) setCollapsed(true);
             if (key.startsWith('/')) navigate(key);
           }}
           style={{ border: 0 }}
@@ -145,15 +152,17 @@ export default function BasicLayout() {
           }}
         >
           <div>
+            {mobile && <Button aria-label="打开导航" icon={<MenuOutlined />} onClick={() => setCollapsed(!collapsed)} style={{ marginRight: 8 }} />}
             <Typography.Text strong>客户经营与销售协同</Typography.Text>
             <Tag style={{ marginLeft: 12 }} color="blue">
-              商用建设预览
+              企业工作空间
             </Tag>
           </div>
           <Dropdown
             menu={{
               items: [
                 { key: 'account', label: '账号与安全' },
+                { key: 'switch-company', label: '切换公司帐套' },
                 { key: 'logout', label: '退出登录', icon: <LogoutOutlined /> },
               ],
               onClick: async ({ key }) => {
@@ -179,7 +188,7 @@ export default function BasicLayout() {
           </Dropdown>
         </Header>
         <Content style={{ padding: 28, background: '#f5f7fb', minWidth: 0 }}>
-          <Outlet key={user?.id} />
+          <Outlet key={`${sessionStorage.getItem('companyCode')}:${user?.id}`} />
         </Content>
       </Layout>
     </Layout>

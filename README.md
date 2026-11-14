@@ -2,9 +2,11 @@
 
 面向 B2B 销售与交付的 CRM，沿用 PartnerOS 原型的业务设计。目标是让网页和智能体使用同一套可验证的业务能力。
 
-**当前阶段：v0.2本地演示与数据测试版，尚未生产验收。**
+**当前版本：0.3.0本地公司帐套与销售回款分析候选，完整商用验收尚未完成。**
 
-2026-11-15 新增[Salesforce销售CRM对齐设计与工程计划](docs/design/salesforce-alignment/README.md)：含完整功能待办、蓝白灰界面设计、操作便利性、分批建设和验收；属于设计候选，尚未实现。
+新增[销售预测与回款操作说明](docs/reporting/OPERATIONS.md)：精确到分的阶段预测、月度计划/实收、账龄和年度矩阵；签约须填写真实分期条款。新增[本地多公司安装与外网配置](docs/LOCAL_COMPANY_INSTALL.md)，公司独立MySQL库及账号，网页适配手机H5。
+
+2026-11-15 新增[Salesforce销售CRM对齐设计与工程计划](docs/design/salesforce-alignment/README.md)：含完整功能待办、蓝白灰界面设计、操作便利性、分批建设和验收；大部分仍为设计待办；已实现范围以当前进度和操作说明为准。
 
 
 继续建设以[商用验收清单与阻断项](docs/COMMERCIAL_ACCEPTANCE.md)为准；依赖修复和CI门槛见[依赖安全说明](docs/DEPENDENCY_SECURITY.md)。
@@ -38,35 +40,23 @@
 - 7个只读MCP工具、业务HTTP契约，关键写入事务/幂等/并发校验/审计。
 - 钉钉、飞书真实鉴权和通讯录预览接口，企业凭证与实际联调待提供。
 
-[演示操作手册](docs/DEMO_GUIDE.md) · [验证与限制](docs/PROGRESS.md) · [钉钉/飞书配置](docs/INTEGRATIONS.md)
+[验证与限制](docs/PROGRESS.md) · [钉钉/飞书配置](docs/INTEGRATIONS.md)
 
 接收方部署优先阅读[交付与Docker启动说明](docs/DELIVERY.md)。[C11新版材料](docs/releases/C11/README.md)提供24页可编辑PPT和四套操作/演示/AI接入/部署手册；总包包含原九张总体截图及15张专题截图。首次安装需要联网，不是通用离线首装包。
 
-## 本地开发
+## 本地安装与访问
 
-需要 Node.js 24、pnpm 11.25.0、MySQL 8（可通过 Docker Compose 启动）。
+先阅读[公司帐套、手机H5及外网配置说明](docs/LOCAL_COMPANY_INSTALL.md)。需要Node.js 24、pnpm 11.25.0和本机MySQL 8。
 
 ```sh
 pnpm install --frozen-lockfile
-cp .env.example .env
-# 设置随机 JWT_SECRET、ENCRYPTION_KEY、SEED_ADMIN_PASSWORD；填写 DATABASE_URL。
-# 演示环境设置 DEMO_MODE=true；Docker还需设置MYSQL_ROOT_PASSWORD与MYSQL_PASSWORD。
-docker compose up -d mysql redis
 pnpm --filter @partneros/database generate
-pnpm --filter @partneros/database migrate:deploy
-pnpm demo:seed
-pnpm build
-pnpm demo:start
+pnpm local:start
 ```
 
-本机也可双击 `启动演示.command`。Web：`http://localhost:3000`；API文档：`http://localhost:4000/api/docs`。
-演示账号：`admin`、`manager`、`sales`、`boss`，密码为本机配置的 `SEED_ADMIN_PASSWORD`；租户编码默认 `TINGMENG`。本机账号说明保存在Git忽略的 `.local/演示账号.md`。
+本机可双击`启动系统.command`。业务入口为`http://localhost:3000`，服务器本机管理入口为`http://localhost:3000/__accounts`。公司帐套独立数据库、独立连接用户和登录密钥。首次创建只初始化必要主数据与管理员，业务为空；员工通过公司编码登录。局域网地址由配置页面按当前网卡显示。
 
-```sh
-pnpm check   # 类型检查、lint、测试、构建
-```
-
-真实数据库冒烟测试仅允许写入名称含 `test` 的临时数据库：完成 migration/seed/build 后，设置 `SMOKE_ALLOW_WRITES=true`，运行 `node --env-file=.env scripts/smoke.mjs`。
+系统管理提供“公司帐套 / 外网配置”入口；支持保存HTTPS/VPN入口、生成代理配置及本机自检。当前没有外部入口，实际外网与手机网络联通待验证。保存域名不会自动部署VPN或证书。
 
 ## 开发与接续
 

@@ -22,7 +22,7 @@ export interface LoginResult {
 
 export const authApi = {
   login: (params: LoginParams): Promise<LoginResult> =>
-    request.post('/auth/login', params),
+    request.post('/auth/login', params, { headers: { 'X-Company-Code': params.tenantCode ?? '' } }),
 
   dingtalkLogin: (authCode: string): Promise<LoginResult> =>
     request.post('/auth/dingtalk/login', { authCode }),

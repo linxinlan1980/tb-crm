@@ -74,7 +74,7 @@ export default function DashboardPage() {
             { title: '销售管道金额', value: money(data?.pipeline), prefix: '¥', path: '/opportunities/board' },
             { title: '已签合同额', value: money(data?.signedAmount), prefix: '¥', path: '/contracts' },
             { title: '交付项目', value: data?.projects, path: '/projects' },
-            { title: '未收金额 · 演示', value: money(data?.outstanding), prefix: '¥', path: '/finance/payment-plans' },
+            { title: '当前未收金额', value: money(data?.outstanding), prefix: '¥', path: '/finance/payment-plans' },
           ].map((k) => (
             <Col xs={24} sm={12} xl={8} key={k.title}>
               <Card className="metric-card" onClick={() => navigate(k.path)} hoverable>
@@ -155,11 +155,11 @@ export default function DashboardPage() {
                 <Button onClick={() => navigate('/ai')}>AI工作台</Button>
               </Space>
             </Card>
-            <Card title="演示财务概览" style={{ marginTop: 20 }}>
+            <Card title="当前应收概览" style={{ marginTop: 20 }}>
               <Statistic title="逾期未收" prefix="¥" value={money(data?.overdue)} />
               <Alert
                 type="info"
-                message="演示系统，暂无财务处理功能"
+                message="收款与核销使用本地业务台账"
                 description={data?.financeNotice}
                 style={{ marginTop: 16 }}
               />

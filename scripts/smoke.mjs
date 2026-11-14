@@ -48,7 +48,7 @@ const command = async (t, k, r, action, extra = {}) =>
     await call(
       `/workspace/${k}/${r.id}/${action}`,
       'POST',
-      { requestKey: newKey(), expectedUpdatedAt: r.updatedAt, ...extra },
+      { requestKey: newKey(), expectedUpdatedAt: r.updatedAt, ...(k === 'contracts' && action === 'sign' ? { paymentSchedule: [{ amount: String(r.amount), dueDate: '2026-12-31', condition: 'Synthetic fixture agreed terms' }] } : {}), ...extra },
       t,
       201,
     )

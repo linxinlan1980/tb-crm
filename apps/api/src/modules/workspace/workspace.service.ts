@@ -25,6 +25,7 @@ import {
 import { cleanInput, resource, resources } from './registry';
 import { uniqueCustomer } from './customer-policy';
 import { recalculateCustomerContracts } from './contract-change-policy';
+import { paymentSchedule, paymentScheduleSchema } from './payment-schedule';
 import { financeEventsForActor, hideReceiptCorrectionFields } from './finance-policy';
 import { deliveryPeople, handoverProjectManager } from './delivery-staff-policy';
 import {
@@ -231,7 +232,8 @@ export class WorkspaceService {
               : []),
             ...actions.map((action) => ({
               id: `${key}.${action}`,
-              version: key === 'projects' || key === 'tasks' ? '2.0' : '1.0',
+              version:
+                key === 'projects' || key === 'tasks' || (key === 'contracts' && action === 'sign') ? '2.0' : '1.0',
               effect: 'write',
               permission: resourcePermission(key, 'update'),
               inputSchema: {
@@ -239,6 +241,7 @@ export class WorkspaceService {
                 required: [
                   'requestKey',
                   'expectedUpdatedAt',
+                  ...(key === 'contracts' && action === 'sign' ? ['paymentSchedule'] : []),
                   ...((key === 'projects' &&
                     ['advance', 'request_acceptance', 'reject_acceptance', 'accept', 'handover_pm'].includes(action)) ||
                   key === 'tasks'
@@ -249,6 +252,7 @@ export class WorkspaceService {
                 ],
                 properties: {
                   ...commandProperties,
+                  ...(key === 'contracts' && action === 'sign' ? { paymentSchedule: paymentScheduleSchema } : {}),
                   ...(action === 'submit'
                     ? {
                         form: {
@@ -281,7 +285,9 @@ export class WorkspaceService {
                   ? ['open opportunity; closedAt and zero weightedAmount atomically']
                   : []),
                 ...(key === 'contracts' && action === 'sign'
-                  ? ['approved contract; linked opportunity must be open; atomic won closedAt/winDate']
+                  ? [
+                      'approved contract; linked opportunity must be open; atomic won closedAt/winDate; explicit installments sum to contract amount',
+                    ]
                   : []),
                 'serializable transaction',
                 'durable idempotency',
@@ -596,7 +602,7 @@ export class WorkspaceService {
     if (!r.readonly) requirePermission(a, kind, recordId ? 'update' : 'create');
     if (Object.keys(body).some((k) => !['requestKey', 'expectedUpdatedAt', 'data'].includes(k)))
       throw new BadRequestException('存在未定义参数');
-    if (r.readonly) throw new BadRequestException('演示系统，暂无财务写入功能');
+    if (r.readonly) throw new BadRequestException('该模块当前只读，写入功能尚未开通');
     if (kind === 'products' && !admin(a)) throw new ForbiddenException('产品目录仅管理员可维护');
     const data = cleanInput(kind, body.data, !!recordId);
     return runCommand(
@@ -789,7 +795,17 @@ export class WorkspaceService {
     if (
       Object.keys(body).some(
         (k) =>
-          !['requestKey', 'expectedUpdatedAt', 'userId', 'reason', 'note', 'items', 'form', 'actualHours'].includes(k),
+          ![
+            'requestKey',
+            'expectedUpdatedAt',
+            'userId',
+            'reason',
+            'note',
+            'items',
+            'form',
+            'actualHours',
+            ...(kind === 'contracts' && action === 'sign' ? ['paymentSchedule'] : []),
+          ].includes(k),
       )
     )
       throw new BadRequestException('存在未定义参数');
@@ -958,6 +974,9 @@ export class WorkspaceService {
             await this.db(tx, kind).update({ where, data: { status: 'pending_approval', approvalId: approval.id } });
           } else if (action === 'sign' && kind === 'contracts') {
             if (row.status !== 'approved') throw new BadRequestException('合同必须先审批通过');
+            const schedule = paymentSchedule(body.paymentSchedule, String(row.amount));
+            if (await tx.paymentPlan.count({ where: { tenantId: a.tenantId, contractId: recordId } }))
+              throw new ConflictException('合同已有回款计划，请先核对历史数据，系统不会重复生成');
             if (row.opportunityId) {
               const closed = await tx.opportunity.updateMany({
                 where: { id: id(row.opportunityId), tenantId: a.tenantId, deletedAt: null, status: 'open' },
@@ -973,19 +992,17 @@ export class WorkspaceService {
             }
             await tx.contract.update({ where, data: { status: 'signed', signDate: writeStamp } });
             await recalculateCustomerContracts(tx, a.tenantId, id(row.customerId));
-            const amount = new Prisma.Decimal(String(row.amount));
-            await tx.paymentPlan.create({
-              data: {
-                tenantId: a.tenantId,
-                contractId: recordId,
-                planNo: code('HK'),
-                amount,
-                outstandingAmount: amount,
-                dueDate: new Date(Date.now() + 30 * 86400000),
-                status: 'pending',
-                triggerCondition: '演示：合同签约后30天',
-              },
-            });
+            for (const installment of schedule)
+              await tx.paymentPlan.create({
+                data: {
+                  tenantId: a.tenantId,
+                  contractId: recordId,
+                  planNo: code('HK'),
+                  ...installment,
+                  outstandingAmount: installment.amount,
+                  status: 'pending',
+                },
+              });
           } else if (action === 'order' && kind === 'contracts') {
             if (!['signed', 'executing'].includes(String(row.status)))
               throw new BadRequestException('签约后才可创建订单');
@@ -1284,7 +1301,7 @@ export class WorkspaceService {
       })),
       actions,
       users,
-      financeNotice: '财务数据为合成演示数据，暂无真实财务处理功能',
+      financeNotice: '本地收款台账支持登记、复核、核销及更正；银行、税务和会计连接尚未开通。',
     };
   }
 }

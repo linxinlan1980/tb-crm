@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Form, Input, Button, Card, message, Typography, Segmented } from 'antd';
+import { Form, Input, Button, Card, message, Typography } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { authApi } from '../../services/auth.api';
@@ -17,6 +17,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await authApi.login(values);
+      sessionStorage.setItem('companyCode', values.tenantCode);
       setAuth(res.accessToken, res.refreshToken, res.user);
       message.success(`欢迎回来，${res.user.name}`);
       navigate('/dashboard', { replace: true });
@@ -33,13 +34,12 @@ export default function LoginPage() {
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: '#f1f5f9',
     }}>
-      <Card style={{ width: 400, boxShadow: '0 4px 12px rgba(15,23,42,.06)' }}>
+      <Card style={{ width: 400, maxWidth: 'calc(100vw - 32px)', boxShadow: '0 4px 12px rgba(15,23,42,.06)' }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <Title level={4} style={{ marginBottom: 4 }}>伴圆 CRM</Title>
           <Text type="secondary">AI 原生 · 客户经营与销售协同</Text>
         </div>
-        <Text type="secondary">演示账号快捷填入</Text>
-        <Segmented block style={{ marginBottom: 24 }} options={[{label:"admin",value:"admin"},{label:"销售主管",value:"manager"},{label:"销售",value:"sales"},{label:"老板",value:"boss"}]} onChange={username => form.setFieldsValue({username})}/><Form form={form} initialValues={{tenantCode:"TINGMENG",username:"admin"}} name="login" onFinish={onFinish} size="large" autoComplete="on">
+        <Form form={form} initialValues={{tenantCode: new URLSearchParams(window.location.search).get('company') ?? undefined, username:"admin"}} name="login" onFinish={onFinish} size="large" autoComplete="on">
           <Form.Item name="tenantCode" rules={[{ required: true, message: '请输入企业编码' }, { pattern: /^[A-Z][A-Z0-9_-]{1,29}$/, message: '企业编码为2至30位大写字母、数字、下划线或短横线' }]}>
             <Input placeholder="企业编码（安装时设置）" aria-label="企业编码" autoComplete="organization" />
           </Form.Item>

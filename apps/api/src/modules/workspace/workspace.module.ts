@@ -1,3 +1,5 @@
+import { AnalyticsController } from './analytics.controller';
+import { AnalyticsService } from './analytics.service';
 import { Module } from '@nestjs/common';
 import { ApprovalModule } from '../approval/approval.module';
 import { WorkspaceController } from './workspace.controller';
@@ -12,8 +14,22 @@ import { AttachmentController } from './attachment.controller';
 import { AttachmentService } from './attachment.service';
 @Module({
   imports: [ApprovalModule],
-  controllers: [WorkspaceController, CommercialController, FinanceController, ServiceTicketController, AttachmentController],
-  providers: [WorkspaceService, CommercialService, FinanceService, ServiceTicketService, AttachmentService],
+  controllers: [
+    AnalyticsController,
+    WorkspaceController,
+    CommercialController,
+    FinanceController,
+    ServiceTicketController,
+    AttachmentController,
+  ],
+  providers: [
+    AnalyticsService,
+    WorkspaceService,
+    CommercialService,
+    FinanceService,
+    ServiceTicketService,
+    AttachmentService,
+  ],
   exports: [WorkspaceService],
 })
 export class WorkspaceModule {}
