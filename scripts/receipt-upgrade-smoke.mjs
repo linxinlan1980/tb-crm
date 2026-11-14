@@ -88,6 +88,7 @@ try {
   const principal = await db.user.findFirstOrThrow({ where: { tenantId: tenant.id, username: 'admin' } });
   const customer = await db.customer.create({
     data: { tenantId: tenant.id, code: 'UPGRADE-C', name: '升级保留客户', ownerId: principal.id },
+    select: { id: true, name: true, updatedAt: true },
   });
   const fingerprint = createHash('sha256').update('UPGRADE-BANK-ID').digest('hex');
   await db.$executeRaw`INSERT INTO receipts (tenant_id,receipt_no,customer_id,amount,allocated_amount,unallocated_amount,receipt_date,status,ledger_managed,reference_key,serial_no,created_by,updated_at) VALUES (${tenant.id},'UPGRADE-ROOT',${customer.id},5.00,0.00,5.00,'2026-11-01','draft',true,${fingerprint},'UPGRADE-BANK-ID',${principal.id},CURRENT_TIMESTAMP(3))`;
@@ -97,6 +98,8 @@ try {
     await db.$queryRaw`SELECT id,receipt_no,amount,status,reference_key,updated_at FROM receipts ORDER BY id`;
   await auditColumns(false);
   run('pnpm', ['--filter', '@partneros/database', 'migrate:deploy']);
+  const upgradedCustomer = await db.customer.findUniqueOrThrow({ where: { id: customer.id } });
+  ok(upgradedCustomer.companyPhone === null && upgradedCustomer.creditFingerprint === null && upgradedCustomer.name === customer.name && upgradedCustomer.updatedAt.getTime() === customer.updatedAt.getTime(), 'Identity migration preserves historical customer with nullable new fields');
   const receipts = await db.receipt.findMany({ where: { tenantId: tenant.id }, orderBy: { id: 'asc' } });
   ok(receipts.length === 3, 'Populated old receipts preserved');
   for (let i = 0; i < 3; i++) {

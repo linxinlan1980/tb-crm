@@ -116,6 +116,8 @@ try {
       ownerId: owner.id,
       poolType: 'private',
     },
+    // This fixture is intentionally created before the identity migration.
+    select: { id: true, name: true, updatedAt: true },
   });
   await start();
   const human = (
@@ -173,6 +175,8 @@ try {
     commandCount = await db.commandExecution.count();
   await auditColumns(false);
   run('pnpm', ['--filter', '@partneros/database', 'migrate:deploy']);
+  const upgradedCustomer = await db.customer.findUniqueOrThrow({ where: { id: customer.id } });
+  ok(upgradedCustomer.companyPhone === null && upgradedCustomer.creditFingerprint === null && upgradedCustomer.name === customer.name && upgradedCustomer.updatedAt.getTime() === customer.updatedAt.getTime(), 'Identity migration preserves historical customer with nullable new fields');
   assert.deepEqual(
     await db.$queryRaw`SELECT id,tenant_id,grant_id,owner_id,capability_id,request_key,input_hash,status,result,error_code,duration_ms,created_at,completed_at FROM agent_executions ORDER BY id`,
     oldRows,
