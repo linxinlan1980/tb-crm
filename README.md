@@ -4,6 +4,9 @@
 
 **当前阶段：v0.2本地演示与数据测试版，尚未生产验收。**
 
+2026-11-15 新增[Salesforce销售CRM对齐设计与工程计划](docs/design/salesforce-alignment/README.md)：含完整功能待办、蓝白灰界面设计、操作便利性、分批建设和验收；属于设计候选，尚未实现。
+
+
 继续建设以[商用验收清单与阻断项](docs/COMMERCIAL_ACCEPTANCE.md)为准；依赖修复和CI门槛见[依赖安全说明](docs/DEPENDENCY_SECURITY.md)。
 
 2026-11-01 开始商用建设，按[分批计划与验收门槛](docs/COMMERCIAL_PLAN.md)推进。新增[正式安装与加密备份恢复基础候选](docs/PRODUCTION_INSTALL.md)，独立空企业初始化，不灌入演示业务；整套商用闭环尚未完成。每次较大改进验证后同步 `osborn-studio/os-crm` 的功能分支和 PR。

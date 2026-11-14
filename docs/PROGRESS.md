@@ -1,5 +1,14 @@
 # 当前进度 · 2026-11-01
 
+## 2026-11-15 Salesforce销售CRM对齐设计候选
+
+按产品负责人要求，新增[Salesforce对齐设计包](design/salesforce-alignment/README.md)：26项官方来源台账、48项功能追踪矩阵、PRD、17类页面与18条便利性规范、蓝白灰设计token、13个工程里程碑、48项验收条件及可点击设计示意。覆盖工作台、客户/线索、活动、商机阶段和联系人角色、管道与预测、报价合同、权限/配置、报表、自动化、AI、迁移、本地交付及销售扩展待办。
+
+基线f157410；原型预测/AI等入口已被PrototypeGuard停用，不把遗留字段/代码计为当前可用。当前合同固定30天全额计划、看板lost标签和漏斗口径差异进入M0优先修复计划。高级区域/伙伴/节奏/CPQ仅完成目录研究，M11实施前必须补专项来源、设计与验证。公开帮助文档不等于登录Salesforce租户实操或全部生态已研究完成。
+
+本轮仅文档与合成界面示意，不包含业务代码、数据库迁移或生产部署，不重写下文历史检查结果。拟建功能均未按已实现报告。后续每个大批次按分支/PR、必要检查、业务验收和GitHub同步推进。
+
+
 ## B3 / design §4.0：受信系统命令原语（未验收）
 
 新增 `runSystemCommand` 与不可由 JSON/复制对象伪造的服务端 `SystemPrincipal`；固定任务策略绑定单租户、jobName、能力白名单、policyVersion、jobRunId。只预留 renewal/forecast 策略，不实现业务任务、Worker、cron 或 HTTP/MCP 入口。两类命令共享原有 Serializable、15秒超时及 P2034/P2002 最多三次尝试；人工 validateActor、beforeReplay、哈希与回执行为保留。系统事务重检企业状态，按规范化 payload hash 拒绝换参重用 requestKey；跨 jobRunId 重放返回原结果。
