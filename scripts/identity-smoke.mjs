@@ -339,10 +339,19 @@ try {
     assert(workerCalls.length > 0);
     assert.equal(workerSource.match(/createSystemPrincipal\(\s*[^,]+,\s*'dingtalk'/g)?.length, workerCalls.length);
     assert.doesNotMatch(workerSource, /'renewal'|'forecast'/);
+    const nativeWorkerUrl=new URL('../apps/api/src/modules/integration/native-approval.service.ts',import.meta.url);
+    const nativeWorker=readFileSync(nativeWorkerUrl,'utf8');
+    assert.equal(nativeWorker.match(/createSystemPrincipal\(/g)?.length,1);
+    assert.match(nativeWorker,/createSystemPrincipal\(\s*r\.tenantId,\s*'dingtalk_approval',\s*randomUUID\(\),?\s*\)/);
+    const nativePrincipal=createSystemPrincipal(user.tenantId,'dingtalk_approval',randomUUID());
+    assert.deepEqual(nativePrincipal.allowedCapabilities,['approval.native.result']);
+    await assert.rejects(runSystemCommand(commandDb,nativePrincipal,'renewal.generate',{requestKey:randomUUID()},work));
+    checks++;
     const systemFiles = new Set([
       new URL('../apps/api/src/modules/workspace/command-runner.ts', import.meta.url).href,
       new URL('../apps/api/src/modules/workspace/system-principal.ts', import.meta.url).href,
       workerUrl.href,
+      nativeWorkerUrl.href,
     ]);
     function assertNoSystemCallers(dir) {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
