@@ -41,14 +41,18 @@ async function call(path, method = 'GET', body, token, expected = 200) {
   ok(r.status === expected, `${method} ${path}: ${r.status} ${out.message ?? ''}`);
   return out.data;
 }
-// The current client and API write AuditLog.source/principal_label, which the prior release predates.
+// The current client needs audit metadata and employee_no, which the prior release predates.
 // Add them only while seeding through current code, then restore the exact prior shape before migrating.
-const auditColumns = (add) =>
-  db.$executeRawUnsafe(
+const auditColumns = async (add) => {
+  await db.$executeRawUnsafe(
     add
       ? "ALTER TABLE audit_logs ADD COLUMN source ENUM('human','agent','system','import') NOT NULL DEFAULT 'human', ADD COLUMN principal_label VARCHAR(100) NULL"
       : 'ALTER TABLE audit_logs DROP COLUMN source, DROP COLUMN principal_label',
   );
+  await db.$executeRawUnsafe(add
+    ? 'ALTER TABLE users ADD COLUMN employee_no VARCHAR(40) NULL'
+    : 'ALTER TABLE users DROP COLUMN employee_no');
+};
 try {
   const archive = run('git', ['archive', prior, 'packages/database/prisma'], { encoding: null }).stdout;
   run('tar', ['-xf', '-', '-C', scratch], { input: archive });
@@ -129,6 +133,10 @@ try {
     (await db.user.findUniqueOrThrow({ where: { id: principal.id } })).passwordHash === principal.passwordHash,
     'Upgrade preserves passwords',
   );
+  const migratedStaff = await db.user.findUniqueOrThrow({ where: { id: principal.id } });
+  ok(migratedStaff.employeeNo === 'RY' + String(principal.id).padStart(6, '0') &&
+    migratedStaff.updatedAt.getTime() === principal.updatedAt.getTime(),
+    'Personnel migration backfills unique identifier without changing the user version');
   run('pnpm', ['--filter', '@partneros/database', 'migrate:deploy']);
   ok((await db.receiptVoucher.count()) === 2, 'Repeated migration does not duplicate roots');
   api = spawn(process.execPath, ['apps/api/dist/main.js'], {
