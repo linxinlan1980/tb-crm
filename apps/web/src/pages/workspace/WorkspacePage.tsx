@@ -1,3 +1,5 @@
+import type { SpreadsheetCell } from '../../utils/xlsx';
+import { csvCell } from '../../utils/csv';
 import { useEffect, useState, useRef } from 'react';
 import {
   Alert,
@@ -387,18 +389,24 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
       setBusy(false);
     }
   };
-  const exportData = () => {
+  const exportData = async (format: 'xlsx' | 'csv' = 'xlsx') => {
     const columns = Object.keys(rows[0] ?? {}).filter((k) => labels[k]);
+    if (format === 'xlsx') {
+      try {
+        const numeric = new Set(['amount', 'totalAmount', 'receivedAmount', 'allocatedAmount', 'unallocatedAmount', 'price', 'unitPrice', 'quantity']);
+        const values: SpreadsheetCell[][] = rows.map(r => columns.map(k => {
+          const v = r[k];
+          if (numeric.has(k) && typeof v === 'string' && /^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(v)) return { decimal: v };
+          return typeof v === 'number' || typeof v === 'boolean' ? v : v == null ? '' : String(v);
+        }));
+        await (await import('../../utils/xlsx')).downloadSpreadsheet(`${kind}-当前页`, columns.map(k => labels[k]), values);
+      } catch (e) { message.error(errorText(e)); }
+      return;
+    }
     const csv =
       '\uFEFF' +
       [columns.map((k) => labels[k]), ...rows.map((r) => columns.map((k) => String(r[k] ?? '')))]
-        .map((line) =>
-          line
-            .map(
-              (c) => '"' + (/^[\s]*[=+\-@]/.test(c) || /^[\t\r\n]/.test(c) ? "'" : '') + c.split('"').join('""') + '"',
-            )
-            .join(','),
-        )
+        .map((line) => line.map(csvCell).join(','))
         .join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
@@ -516,9 +524,10 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           </Typography.Text>
         </div>
         <Space>
-          <Button icon={<ExportOutlined />} disabled={!rows.length} onClick={exportData}>
-            导出当前页
+          <Button icon={<ExportOutlined />} disabled={!rows.length} onClick={() => void exportData()}>
+            导出 Excel
           </Button>
+          <Button disabled={!rows.length} onClick={() => void exportData('csv')}>导出 CSV</Button>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>
             刷新
           </Button>

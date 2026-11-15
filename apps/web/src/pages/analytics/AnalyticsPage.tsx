@@ -1,3 +1,5 @@
+import type { SpreadsheetCell } from '../../utils/xlsx';
+import { csvCell } from '../../utils/csv';
 import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -16,6 +18,7 @@ import {
   Tabs,
   Tag,
   Typography,
+  message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
@@ -132,41 +135,36 @@ function Trend({ rows, forecast }: { rows: Report['monthly']; forecast: boolean 
     </>
   );
 }
-function exportCsv(rows: Detail[], name: string, columns: ColumnsType<Detail>) {
+async function exportDetail(rows: Detail[], name: string, columns: ColumnsType<Detail>, format: 'xlsx' | 'csv' = 'xlsx') {
   const keys = columns.flatMap((c) =>
     'dataIndex' in c && typeof c.dataIndex === 'string'
       ? [{ title: String(c.title), key: c.dataIndex as keyof Detail }]
       : [],
   );
-  const cell = (v: unknown) => {
-    let s = String(v ?? '');
-    if (/^[=+@\-\t\r]/.test(s)) s = "'" + s;
-    return '"' + s.replace(/"/g, '""') + '"';
-  };
+  const numeric = new Set(['amount', 'weighted', 'planned', 'received', 'currentOutstanding', 'currentOverdue', 'allocatedAmount', 'unallocatedAmount', 'outstandingAmount', 'receivedAmount']);
   const months = rows.some((r) => r.months);
-  const csv = [
-    [
-      ...keys.map((c) => c.title),
-      ...(months ? Array.from({ length: 12 }, (_, i) => [`${i + 1}月计划`, `${i + 1}月已回`]).flat() : []),
-    ],
-    ...rows.map((r) => [
-      ...keys.map((c) => r[c.key]),
-      ...(months
-        ? Array.from({ length: 12 }, (_, i) => [
-            r.months?.[i]?.planned ?? '0.00',
-            r.months?.[i]?.received ?? '0.00',
-          ]).flat()
-        : []),
-    ]),
-  ]
-    .map((r) => r.map(cell).join(','))
-    .join('\r\n');
-  const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name + '-当前页.csv';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const headers = [...keys.map(c => c.title), ...(months ? Array.from({length:12}, (_,i)=>[`${i+1}月计划`,`${i+1}月已回`]).flat() : [])];
+  const values: SpreadsheetCell[][] = rows.map(r => [
+    ...keys.map(c => {
+      const v = r[c.key];
+      if (c.key === 'status' && typeof v === 'string') return ({open:'进行中',won:'已赢单',lost:'已输单',confirmed:'已复核',pending:'待处理',voided:'已作废'})[v] ?? v;
+      if (c.key === 'weighted' && v === null) return '不纳入加权';
+      if (['expectedCloseDate','receiptDate','dueDate','closedAt'].includes(c.key)) return typeof v === 'string' ? v.slice(0,10) : '待确认';
+      if (numeric.has(c.key) && typeof v === 'string') return { decimal: v };
+      return typeof v === 'number' ? v : v == null ? '' : String(v);
+    }),
+    ...(months ? Array.from({length:12},(_,i)=>[{decimal:r.months?.[i]?.planned??'0.00'},{decimal:r.months?.[i]?.received??'0.00'}]).flat() : []),
+  ]);
+  try {
+    if (format === 'xlsx') {
+      await (await import('../../utils/xlsx')).downloadSpreadsheet(name + '-当前页', headers, values);
+      return;
+    }
+    const csv = [headers, ...values.map(row => row.map(v => v && typeof v === 'object' ? v.decimal : v))].map(row => row.map(csvCell).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = name + '-当前页.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) { message.error(errorText(e)); }
 }
 export default function AnalyticsPage() {
   const [options, setOptions] = useState<Options>();
@@ -588,18 +586,12 @@ export default function AnalyticsPage() {
               style={{ marginTop: 18 }}
               title={forecast ? '商机明细 · 所选口径' : '项目 / 计划 / 到账明细'}
               extra={
-                <Button
-                  icon={<DownloadOutlined />}
-                  onClick={() =>
-                    exportCsv(
-                      detailData?.items ?? [],
-                      `${year}-${month || '全年'}-${forecast ? '销售预测' : section}`,
-                      columns,
-                    )
-                  }
-                >
-                  导出当前页
-                </Button>
+                <Space wrap>
+                  <Button icon={<DownloadOutlined />} disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${year}-${month || '全年'}-${forecast ? '销售预测' : section}`, columns)}>
+                    导出 Excel
+                  </Button>
+                  <Button disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${year}-${month || '全年'}-${forecast ? '销售预测' : section}`, columns, 'csv')}>导出 CSV</Button>
+                </Space>
               }
             >
               {forecast && (
