@@ -1,5 +1,6 @@
+import DingTalkBridge from './DingTalkBridge';
 import { useState, useEffect } from 'react';
-import { Alert, Button, Card, Input, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Input, Space, Table, Tag, Tabs, Typography, message } from 'antd';
 import { get, post, errorText, type RecordRow } from '../../services/workspace';
 interface Platform {
   code: string;
@@ -8,7 +9,7 @@ interface Platform {
   message: string;
   connected: boolean | null;
 }
-export default function IntegrationPage() {
+function AppIntegrations() {
   const [platforms, setPlatforms] = useState<Platform[]>([]),
     [rows, setRows] = useState<RecordRow[]>([]),
     [dept, setDept] = useState(''),
@@ -104,6 +105,25 @@ export default function IntegrationPage() {
           ]}
         />
       </Card>
+    </div>
+  );
+}
+
+export default function IntegrationPage() {
+  return (
+    <div>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">CONNECTED WORKSPACE</div>
+          <h1>集成与同步</h1>
+        </div>
+      </div>
+      <Tabs
+        items={[
+          { key: 'bridge', label: '钉钉本机同步', children: <DingTalkBridge /> },
+          { key: 'apps', label: '企业应用接口（高级）', children: <AppIntegrations /> },
+        ]}
+      />
     </div>
   );
 }

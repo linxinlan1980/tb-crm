@@ -18,7 +18,7 @@ describe('HTTP authorization and capability boundary', () => {
   const writeAudit = jest.fn();
   const tenantDb = { customer: { findMany: findCustomers, count: jest.fn().mockResolvedValue(1), findFirst: findCustomer } };
   const prisma = { onModuleInit: jest.fn(), onModuleDestroy: jest.fn(),
-    system: { user: { findFirst: findUser }, authSession: { findFirst: jest.fn().mockResolvedValue({ id: 'fixture-session' }) }, auditLog: { create: writeAudit } },
+    system: { integrationRun: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) }, user: { findFirst: findUser }, authSession: { findFirst: jest.fn().mockResolvedValue({ id: 'fixture-session' }) }, auditLog: { create: writeAudit } },
     forTenant: jest.fn().mockReturnValue(tenantDb) };
 
   beforeAll(async () => {

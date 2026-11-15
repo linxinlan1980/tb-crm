@@ -11,6 +11,50 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// DingTalk bridge: each company database owns its settings, previews and crosswalks.
+model IntegrationConnection {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  provider String @db.VarChar(30)
+  enabled Boolean @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, provider])
+  @@map("integration_connections")
+}
+
+model IntegrationRun {
+  id String @id @db.VarChar(36)
+  tenantId Int @map("tenant_id")
+  provider String @db.VarChar(30)
+  kind String @db.VarChar(30)
+  status String @db.VarChar(30)
+  actorId Int @map("actor_id")
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  snapshot Json?
+  summary Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([tenantId, provider, createdAt])
+  @@map("integration_runs")
+}
+
+model IntegrationMapping {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  provider String @db.VarChar(30)
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  kind String @db.VarChar(30)
+  externalId String @map("external_id") @db.VarChar(100)
+  localId Int @map("local_id")
+  externalName String @map("external_name") @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, provider, kind, externalId])
+  @@unique([tenantId, provider, kind, localId])
+  @@map("integration_mappings")
+}
+
 // ============ 1. 租户与权限域 ============
 
 model Tenant {

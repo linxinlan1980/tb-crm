@@ -134,34 +134,46 @@ export class UserService {
     const name = text(data.name, '姓名', 50),
       hash = await bcrypt.hash(password(data.password), 12);
     return runCommand(this.prisma, actor, 'identity.user.create', body, async (tx) => {
-      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: actor.tenantId } });
-      // Serializes administrator and seat changes with other personnel commands.
-      await tx.tenant.update({ where: { id: actor.tenantId }, data: { updatedAt: new Date() } });
-      if (
-        (await tx.user.count({ where: { tenantId: actor.tenantId, status: 'active', deletedAt: null } })) >=
-        tenant.maxUsers
-      )
-        throw new ConflictException('企业可用账号数量已达上限');
-      if (await tx.user.findFirst({ where: { tenantId: actor.tenantId, username } }))
-        throw new ConflictException('账号已存在');
-      const refs = await this.references(tx, actor.tenantId, data, true);
-      const user = await tx.user.create({
-        data: {
-          tenantId: actor.tenantId,
-          username,
-          name,
-          passwordHash: hash,
-          deptId: refs.deptId,
-          email: data.email ? text(data.email, '邮箱', 100) : null,
-          position: data.position ? text(data.position, '职位', 50) : null,
-          createdBy: actor.userId,
-        },
-      });
-      await tx.userRole.createMany({
-        data: refs.roleIds!.map((roleId) => ({ tenantId: actor.tenantId, userId: user.id, roleId })),
-      });
-      return view(await tx.user.findUniqueOrThrow({ where: { id: user.id }, include }));
+      return this.createInTransaction(tx, actor, { ...data, username, name }, hash);
     });
+  }
+  /** The directory importer can only use this to provision inactive accounts with random unknown passwords. */
+  async createInTransaction(
+    tx: Tx,
+    actor: Actor,
+    data: Record<string, unknown>,
+    hash: string,
+    status: 'active' | 'inactive' = 'active',
+  ) {
+    administrator(actor);
+    const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: actor.tenantId } });
+    // Serializes administrator and seat changes with other personnel commands.
+    await tx.tenant.update({ where: { id: actor.tenantId }, data: { updatedAt: new Date() } });
+    if (
+      (await tx.user.count({ where: { tenantId: actor.tenantId, status: 'active', deletedAt: null } })) >=
+      tenant.maxUsers
+    )
+      throw new ConflictException('企业可用账号数量已达上限');
+    if (await tx.user.findFirst({ where: { tenantId: actor.tenantId, username: text(data.username, '账号', 40) } }))
+      throw new ConflictException('账号已存在');
+    const refs = await this.references(tx, actor.tenantId, data, true);
+    const user = await tx.user.create({
+      data: {
+        tenantId: actor.tenantId,
+        username: text(data.username, '账号', 40),
+        name: text(data.name, '姓名', 50),
+        passwordHash: hash,
+        status,
+        deptId: refs.deptId,
+        email: data.email ? text(data.email, '邮箱', 100) : null,
+        position: data.position ? text(data.position, '职位', 50) : null,
+        createdBy: actor.userId,
+      },
+    });
+    await tx.userRole.createMany({
+      data: refs.roleIds!.map((roleId) => ({ tenantId: actor.tenantId, userId: user.id, roleId })),
+    });
+    return view(await tx.user.findUniqueOrThrow({ where: { id: user.id }, include }));
   }
   async update(actor: Actor, target: number, body: Record<string, unknown>) {
     administrator(actor);
