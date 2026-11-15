@@ -1,0 +1,53 @@
+import type { Actor } from '../../common/types/actor';
+import { hasPermission } from './access';
+const inputSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    year: { type: 'integer', minimum: 2000, maximum: 2100 },
+    month: { type: 'integer', minimum: 0, maximum: 12 },
+    ownerId: { type: 'integer', minimum: 1, maximum: 2147483647 },
+    deptId: { type: 'integer', minimum: 1, maximum: 2147483647 },
+    contractId: { type: 'integer', minimum: 1, maximum: 2147483647 },
+    page: { type: 'integer', minimum: 1, maximum: 1000000 },
+    pageSize: { type: 'integer', minimum: 1, maximum: 100 },
+    source: { enum: ['managed', 'legacy'] },
+    detail: { enum: ['contracts', 'plans', 'receipts', 'balances', 'overdue'] },
+    bucket: { enum: ['open', 'won', 'lost', 'closed', 'undated'] },
+  },
+};
+export const analyticsCapabilities = [
+  {
+    id: 'report.sales.forecast',
+    description: '读取当前权限下销售管道、阶段加权、赢单与明细；规则预测，不是AI销售承诺。',
+    version: '1.0',
+    permission: 'opportunity:read',
+    effect: 'read',
+    endpoint: 'GET /analytics/forecast',
+    inputSchema,
+  },
+  {
+    id: 'report.cash.collections',
+    description: '读取当前权限下回款计划、实收、未收/逾期/账龄与明细；不执行财务写入。',
+    version: '1.0',
+    permission: 'finance:read',
+    effect: 'read',
+    endpoint: 'GET /analytics/collections',
+    inputSchema,
+    additionalPermissions: ['contract:read'],
+  },
+].map((c) => ({
+  ...c,
+  outputSchema: { type: 'object', required: ['version', 'generatedAt', 'summary', 'monthly', 'notices'] },
+  guards: [
+    'authenticated tenant/actor',
+    'object and record visibility',
+    'RepeatableRead snapshot',
+    'read-only; no state effect',
+    'bounded query rejects truncation',
+  ],
+}));
+
+export function allowedReportCapabilities(actor: Actor) {
+  return analyticsCapabilities.filter(c => hasPermission(actor,c.permission) && (!('additionalPermissions' in c) || c.additionalPermissions?.every(p=>hasPermission(actor,p))));
+}

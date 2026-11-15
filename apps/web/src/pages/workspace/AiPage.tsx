@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Input, Select, Space, Typography, message } from 'antd';
 import { get, post, errorText, type RecordRow } from '../../services/workspace';
+import { useAuthStore } from '../../stores/useAuthStore';
 import AgentControlPanel from './AgentControlPanel';
 export default function AiPage() {
+  const user = useAuthStore(s => s.user);
+  const canReadCustomer = user?.roles.includes('super_admin') || user?.permissions?.some(p => ['*','customer:*','customer:read'].includes(p));
   const [rows, setRows] = useState<RecordRow[]>([]),
     [selected, setSelected] = useState<number>(),
     [summary, setSummary] = useState(''),
@@ -10,10 +13,13 @@ export default function AiPage() {
     [keyword, setKeyword] = useState(''),
     [busy, setBusy] = useState(false);
   useEffect(() => {
-    get<{ items: RecordRow[] }>('/workspace/customers', { pageSize: 100 })
-      .then((r) => setRows(r.items))
-      .catch((e) => message.error(errorText(e)));
-  }, []);
+    let active = true;
+    setRows([]); setSelected(undefined); setSummary(''); setResult('');
+    if (canReadCustomer) void get<{ items: RecordRow[] }>('/workspace/customers', { pageSize: 100 })
+      .then(r => { if(active) setRows(r.items); })
+      .catch(e => { if(active) message.error(errorText(e)); });
+    return () => { active = false; };
+  }, [canReadCustomer]);
   const summarize = async () => {
     if (!selected) return;
     setBusy(true);
@@ -53,9 +59,10 @@ export default function AiPage() {
         type="info"
         showIcon
         message="当前摘要为规则生成，未调用大模型"
-        description="可创建独立限时委托，智能体提出行动建议，人工核对后才能执行；查询和执行均保留回执。规则摘要仍未接大模型。"
+        description="可单独委托销售预测/回款只读分析，也可让智能体提出行动建议，人工核对后才能执行；查询和执行均保留回执。规则摘要仍未接大模型。"
         style={{ marginBottom: 20 }}
       />
+      {canReadCustomer && <>
       <Card title="客户摘要与跟进建议">
         <Space wrap>
           <Select
@@ -91,6 +98,7 @@ export default function AiPage() {
           </pre>
         )}
       </Card>
+      </>}
       <AgentControlPanel />
     </div>
   );

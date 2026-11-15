@@ -5,6 +5,7 @@ import { Module } from '@nestjs/common';
 import { CustomerModule } from '../customer/customer.module';
 import { CapabilityController } from './capability.controller';
 import { CapabilityService } from './capability.service';
+import { ReportCapabilityService } from './report-capability.service';
 import { AgentService } from './agent.service';
 import { AgentControlController, AgentRuntimeController } from './agent.controller';
 import { AgentMcpController } from './agent-mcp.controller';
@@ -18,6 +19,6 @@ import { AgentMcpController } from './agent-mcp.controller';
     AgentRuntimeController,
     AgentMcpController,
   ],
-  providers: [CapabilityService, AgentService],
+  providers: [CapabilityService, AgentService, ReportCapabilityService],
 })
 export class CapabilityModule {}

@@ -1,3 +1,6 @@
+import { allowedReportCapabilities } from '../workspace/analytics.contract';
+import { ReportCapabilityService } from './report-capability.service';
+import { reportMcpInput } from './report-mcp-schema';
 import { approvalCatalog } from '../approval/approval.catalog';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { ApprovalService } from '../approval/approval.service';
@@ -16,10 +19,11 @@ export class McpController {
     private readonly capabilities: CapabilityService,
     private readonly workspace: WorkspaceService,
     private readonly approvals: ApprovalService,
+    private readonly reports: ReportCapabilityService,
   ) {}
   @Post()
   async handle(@CurrentUser() actor: Actor, @Req() req: Request, @Res() res: Response, @Body() body: unknown) {
-    const server = new McpServer({ name: 'tb-crm', version: '0.2.0' });
+    const server = new McpServer({ name: 'tb-crm', version: '0.3.0' });
     const definitions = this.capabilities.list(actor);
     const invoke = async (name: string, args: unknown) => {
       try {
@@ -111,6 +115,9 @@ export class McpController {
       },
       (args) => read(() => this.workspace.detail(actor, args.kind, args.recordId)),
     );
+    for (const report of allowedReportCapabilities(actor)) {
+      server.registerTool(report.id, { description: report.description, inputSchema: reportMcpInput, annotations: {readOnlyHint:true,destructiveHint:false} }, args => read(()=>this.reports.invoke(actor,report.id,args)));
+    }
     server.registerTool(
       'workspace.overview',
       {

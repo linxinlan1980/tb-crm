@@ -54,6 +54,8 @@
 
 新增[原生Excel与CSV导出](docs/operations/SPREADSHEET_EXPORT.md)：文本与金额明确类型，表头冻结筛选，当前权限与当前页范围。
 
+新增[AI智能体读取预测与回款](docs/operations/AGENT_REPORT_READS.md)：独立限时/限预算委托、当前权限及跨公司隔离，HTTP/MCP共用业务报表，只有明确选择才能读取。
+
 ## 本地安装与访问
 
 先阅读[公司帐套、手机H5及外网配置说明](docs/LOCAL_COMPANY_INSTALL.md)。需要Node.js 24、pnpm 11.25.0和本机MySQL 8。

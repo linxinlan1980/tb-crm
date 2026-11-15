@@ -1,5 +1,6 @@
 import type { Actor } from '../../common/types/actor';
 import { admin, hasPermission } from '../workspace/access';
+import { allowedReportCapabilities } from '../workspace/analytics.contract';
 import { CAPABILITIES } from './capability.catalog';
 const uuid = { type: 'string', format: 'uuid' };
 const object = (properties: Record<string, unknown>, required: string[]) => ({
@@ -18,9 +19,9 @@ const actionInput = object(
   ['title', 'targetId'],
 );
 export function agentCatalog(a: Actor) {
-  const tools = CAPABILITIES.filter((c) => hasPermission(a, c.permission)).map((c) => ({
+  const tools = [...CAPABILITIES.filter((c) => hasPermission(a, c.permission)), ...allowedReportCapabilities(a)].map((c) => ({
     ...c,
-    guards: ['live delegated owner scope', 'call budget', 'no raw SQL', 'fresh read; unique attempt UUID'],
+    guards: [...('guards' in c ? c.guards : []), 'live delegated owner scope', 'call budget', 'no raw SQL', 'fresh read; unique attempt UUID'],
     evidence: ['executionId', 'grantId', 'businessExecutionId'],
   }));
   const canWrite =

@@ -32,6 +32,6 @@ import { AttachmentService } from './attachment.service';
     ServiceTicketService,
     AttachmentService,
   ],
-  exports: [WorkspaceService],
+  exports: [WorkspaceService, AnalyticsService],
 })
 export class WorkspaceModule {}

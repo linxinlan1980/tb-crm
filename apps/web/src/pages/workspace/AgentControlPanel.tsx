@@ -62,6 +62,8 @@ interface Execution {
 }
 const empty = <T,>(): Page<T> => ({ items: [], nextCursor: null });
 const names: Record<string, string> = {
+  'report.sales.forecast': '读取销售预测（含明细，只读）',
+  'report.cash.collections': '读取回款与应收（含明细，只读）',
   'customer.search': '查询客户摘要',
   'customer.get': '读取客户概况',
   'action.propose': '预演客户行动（不创建业务）',
@@ -256,7 +258,7 @@ export default function AgentControlPanel() {
         type="info"
         showIcon
         message="独立凭证调用，人工核对后执行"
-        description="只开放受限客户查询和客户行动计划。委托不超过当前账号的数据范围；退出登录、权限变化、到期或撤销会停止委托。没有调用大模型，也没有开放金额、审批决定或对外发送。"
+        description="开放受限客户查询、销售预测/回款只读分析，以及人工批准后的客户行动计划。委托不超过当前账号的数据范围；退出登录、权限变化、到期或撤销会停止委托。没有调用大模型，也不允许修改金额、处理审批决定或对外发送。"
         style={{ marginBottom: 16 }}
       />
       {error && <Alert type="error" message={error} showIcon />}

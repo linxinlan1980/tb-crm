@@ -1,3 +1,4 @@
+import { verifyAgentReports } from './agent-report-scenarios.mjs';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomUUID, randomBytes } from 'node:crypto';
@@ -90,9 +91,10 @@ try {
   eq((await call('/analytics/collections?year=2099&ownerId=' + a.id, xt)).summary.received, '0.00', 'cash tenant isolation');
   const schemas = await call('/analytics/schema', at); eq(schemas.length, 2, 'versioned report catalog');
   const options = await call('/analytics/options', mt); ok(!options.owners.some((u) => u.id === b.id), 'no other-team options');
+  const delegatedReports = await verifyAgentReports({db,url,actors:[{token:at},{token:mt},{token:adt},{token:gt}],owner:a,outsider:b,password,hash,tenantId:tid,deptId:deptA.id,alienToken:xt});
   await db.opportunity.createMany({ data: Array.from({ length: 10001 }, (_, i) => ({ tenantId: tid, code: 'B' + suffix + i, name: 'Synthetic bounded query', ownerId: b.id, customerId: customerB.id, stage: stage.code, amount: '0.01', expectedCloseDate: future })) });
   await call('/analytics/forecast?year=2099', bt, 400);
   await db.user.update({ where: { id: a.id }, data: { status: 'inactive' } });
   const revoked = await fetch(url + '/analytics/forecast?year=2099', { headers: { Authorization: 'Bearer ' + at } }); ok([401, 403].includes(revoked.status), 'revoked principal denied');
-  console.log(JSON.stringify({ result: 'PASS', checks, database: new URL(process.env.DATABASE_URL).pathname, fixtures: 'synthetic only', port: process.env.ANALYTICS_SMOKE_PORT || '4137' }));
+  console.log(JSON.stringify({ result: 'PASS', checks, delegatedReports, database: new URL(process.env.DATABASE_URL).pathname, fixtures: 'synthetic only', port: process.env.ANALYTICS_SMOKE_PORT || '4137' }));
 } finally { api?.kill('SIGTERM'); await db.$disconnect(); }
