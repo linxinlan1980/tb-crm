@@ -1,0 +1,110 @@
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../database/prisma.service';
+import type { Actor } from '../../common/types/actor';
+import { checkVersion, id, object, runCommand, text, validateActor } from '../workspace/command-runner';
+import { allowWrite, requirePermission } from '../workspace/access';
+export function exactFields(body: Record<string, unknown>, fields: string[]) {
+  object(body);
+  if (Object.keys(body).some((key) => !fields.includes(key))) throw new BadRequestException('不允许的日程或同步字段');
+}
+export function calendarDate(value: unknown) {
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(value) ||
+    !Number.isFinite(Date.parse(value))
+  )
+    throw new BadRequestException('请填写带时区的日程时间');
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  if (
+    new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) !== value.slice(0, 10) ||
+    Number(value.slice(11, 13)) > 23
+  )
+    throw new BadRequestException('日程日期或时间不存在');
+  return new Date(Math.floor(Date.parse(value) / 1000) * 1000);
+}
+@Injectable()
+export class CalendarService {
+  constructor(private prisma: PrismaService) {}
+  async list(a: Actor, from: unknown, until: unknown) {
+    requirePermission(a, 'actions', 'read');
+    const start = calendarDate(from),
+      end = calendarDate(until);
+    if (end <= start || end.getTime() - start.getTime() > 93 * 86400000)
+      throw new BadRequestException('日程查询范围须为1—93天');
+    return this.prisma.system.$transaction(async (tx) => {
+      await validateActor(tx, a);
+      const items = await tx.calendarEntry.findMany({
+        where: { tenantId: a.tenantId, ownerId: a.userId, startsAt: { lt: end }, endsAt: { gt: start } },
+        orderBy: { startsAt: 'asc' },
+        take: 1001,
+      });
+      if (items.length > 1000) throw new BadRequestException('日程超过1000条，请缩小时间范围');
+      return { items, timeZone: 'Asia/Shanghai' };
+    });
+  }
+  save(a: Actor, entryId: number | null, body: Record<string, unknown>) {
+    if (entryId !== null) id(entryId);
+    allowWrite(a);
+    requirePermission(a, 'actions', entryId !== null ? 'update' : 'create');
+    exactFields(body, ['requestKey', 'expectedUpdatedAt', 'data']);
+    const data = object(body.data);
+    exactFields(data, ['title', 'description', 'location', 'startsAt', 'endsAt', 'freeBusy', 'status']);
+    const title = text(data.title, '日程主题', 200),
+      startsAt = calendarDate(data.startsAt),
+      endsAt = calendarDate(data.endsAt);
+    if (endsAt <= startsAt || endsAt.getTime() - startsAt.getTime() > 31 * 86400000)
+      throw new BadRequestException('日程结束须晚于开始，单次不超过31天');
+    const description = data.description ?? '',
+      location = data.location ?? '';
+    if (
+      typeof description !== 'string' ||
+      description.length > 2000 ||
+      typeof location !== 'string' ||
+      location.length > 300
+    )
+      throw new BadRequestException('描述或地点超出范围');
+    const freeBusy = data.freeBusy ?? 'busy',
+      status = data.status ?? 'scheduled';
+    if (!['busy', 'free'].includes(String(freeBusy)) || !['scheduled', 'cancelled'].includes(String(status)))
+      throw new BadRequestException('日程状态无效');
+    return runCommand(
+      this.prisma,
+      a,
+      entryId ? 'calendar.update@1.0' : 'calendar.create@1.0',
+      { ...body, entryId },
+      async (tx) => {
+        let updatedAt: Date | undefined;
+        if (entryId) {
+          const prior = await tx.calendarEntry.findFirst({
+            where: { id: id(entryId), tenantId: a.tenantId, ownerId: a.userId },
+          });
+          if (!prior) throw new NotFoundException('日程不存在或不属于本人');
+          checkVersion(prior, body.expectedUpdatedAt);
+          updatedAt = new Date(Math.max(Date.now(), prior.updatedAt.getTime() + 1));
+        }
+        const fields = {
+          title,
+          description,
+          location,
+          startsAt,
+          endsAt,
+          freeBusy: String(freeBusy),
+          status: String(status),
+        };
+        return entryId
+          ? tx.calendarEntry.update({
+              where: { id: entryId },
+              data: { ...fields, revision: { increment: 1 }, updatedAt },
+            })
+          : tx.calendarEntry.create({ data: { tenantId: a.tenantId, ownerId: a.userId, ...fields } });
+      },
+      async (tx) => {
+        if (
+          entryId &&
+          !(await tx.calendarEntry.findFirst({ where: { id: entryId, tenantId: a.tenantId, ownerId: a.userId } }))
+        )
+          throw new NotFoundException('日程不存在或不属于本人');
+      },
+    );
+  }
+}

@@ -7,7 +7,7 @@ const modules = [
   ['order', '订单'],
   ['project', '项目任务与售后'],
   ['follow_up', '跟进'],
-  ['action', '行动计划'],
+  ['action', '行动计划与个人日程'],
 ] as const;
 export const accessCatalog = [
   ...modules.flatMap(([code, label]) =>

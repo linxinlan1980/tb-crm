@@ -338,6 +338,19 @@ export class ApprovalService {
       return tx.approvalFlow.update({ where: { id: flow.id }, data: { isActive: true } });
     });
   }
+  async deactivateFlow(a: Actor, flowId: number, body: Record<string, unknown>) {
+    if (!admin(a)) throw new ForbiddenException('仅管理员可停用审批流');
+    object(body);
+    if (Object.keys(body).some((k) => !['requestKey', 'expectedUpdatedAt'].includes(k)))
+      throw new BadRequestException('不允许的流程停用字段');
+    return runCommand(this.prisma, a, 'approval.flow.deactivate', { ...body, flowId }, async (tx) => {
+      const flow = await tx.approvalFlow.findFirst({ where: { id: flowId, tenantId: a.tenantId } });
+      if (!flow) throw new NotFoundException('流程不存在');
+      checkVersion(flow, body.expectedUpdatedAt);
+      if (!flow.isActive) throw new ConflictException('流程已停用或尚未发布');
+      return tx.approvalFlow.update({ where: { id: flow.id }, data: { isActive: false } });
+    });
+  }
   async preview(a: Actor, flowId: number, body: Record<string, unknown>) {
     const flow = await this.prisma.system.approvalFlow.findFirst({
       where: { id: flowId, tenantId: a.tenantId, ...(!admin(a) ? { isActive: true } : {}) },

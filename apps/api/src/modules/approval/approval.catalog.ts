@@ -213,6 +213,23 @@ export const APPROVAL_OPERATIONS: readonly Operation[] = [
     'super_admin',
   ),
   definition(
+    'approval.flow.deactivate',
+    'write',
+    'POST',
+    '/api/v1/approvals/flows/{flowId}/deactivate',
+    'approval:design',
+    keyed({ expectedUpdatedAt: { type: 'string', format: 'date-time' } }, ['expectedUpdatedAt']),
+    objectResult,
+    [
+      ...writeGuards,
+      'tenant flow',
+      'expectedUpdatedAt',
+      'active flow only',
+      'existing instance snapshots continue unchanged',
+    ],
+    'super_admin',
+  ),
+  definition(
     'approval.flow.preview',
     'read',
     'POST',

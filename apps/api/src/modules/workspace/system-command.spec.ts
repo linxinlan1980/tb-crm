@@ -144,8 +144,21 @@ describe('server-only system command boundary', () => {
     ).rejects.toThrow(error);
     expect(f.transaction).toHaveBeenCalledTimes(5);
   });
-  it('has no production caller or adapter capable of reaching the system entry points', () => {
-    // Stronger than a controller-only check: there are no transitive service callers either.
+  it('limits the registered integration worker to queue preparation, dispatch and result acknowledgement', async () => {
+    const f = fixture();
+    const p = createSystemPrincipal(1, 'dingtalk', 'outbox-test');
+    expect(p.allowedCapabilities).toEqual(['integration.activity.prepare', 'integration.activity.dispatch', 'integration.activity.result']);
+    await expect(runSystemCommand(f.prisma, p, 'renewal.generate', {requestKey:'forbidden'}, async()=>({}))).rejects.toThrow();
+    await expect(runSystemCommand(f.prisma, p, 'integration.activity.result', {requestKey:'allowed'}, async()=>({jobId:'fixture'}))).resolves.toEqual({jobId:'fixture'});
+  });
+  it('restricts system entry points to the explicitly registered DingTalk worker and internal primitives', () => {
+    const allowed = new Set([join(__dirname, 'command-runner.ts'), join(__dirname, 'system-principal.ts'), join(__dirname, '../integration/activity-sync.service.ts')]);
+    const worker = readFileSync(join(__dirname, '../integration/activity-sync.service.ts'), 'utf8');
+    const calls = worker.match(/createSystemPrincipal\(/g) || [];
+    expect(calls.length).toBeGreaterThan(0);
+    expect(worker.match(/createSystemPrincipal\(\s*[^,]+,\s*'dingtalk'/g)).toHaveLength(calls.length);
+    expect(worker).not.toMatch(/'renewal'|'forecast'/);
+    // Controllers and all other services still cannot issue or dispatch system principals.
     function scan(dir: string) {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = join(dir, entry.name);
@@ -153,7 +166,7 @@ describe('server-only system command boundary', () => {
         else if (
           path.endsWith('.ts') &&
           !path.endsWith('.spec.ts') &&
-          !['command-runner.ts', 'system-principal.ts'].includes(entry.name)
+          !allowed.has(path)
         ) {
           expect(readFileSync(path, 'utf8')).not.toMatch(
             /\b(runSystemCommand|createSystemPrincipal|validateSystemPrincipal)\b/,

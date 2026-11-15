@@ -8,6 +8,7 @@ const Dashboard = lazy(() => import('./pages/dashboard/DashboardPage'));
 const Workspace = lazy(() => import('./pages/workspace/WorkspacePage'));
 const Approval = lazy(() => import('./pages/approval/ApprovalCenterPage'));
 const Designer = lazy(() => import('./pages/approval/FlowDesignerPage'));
+const PersonalCalendar = lazy(() => import('./pages/workspace/CalendarPage'));
 const Integration = lazy(() => import('./pages/workspace/IntegrationPage'));
 const System = lazy(() => import('./pages/workspace/SystemPage'));
 const Account = lazy(() => import('./pages/workspace/AccountPage'));
@@ -76,6 +77,7 @@ export default function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="analytics" element={<Analytics />} />
+            <Route path="calendar" element={<PersonalCalendar />} />
             <Route path="service-tickets" element={<ServiceTickets />} />
             {Object.entries(routes).map(([path, kind]) => (
               <Route key={path} path={path} element={<Workspace key={kind} kind={kind} />} />

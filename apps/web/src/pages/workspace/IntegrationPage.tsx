@@ -1,3 +1,4 @@
+import ActivitySyncPanel from './ActivitySyncPanel';
 import DingTalkBridge from './DingTalkBridge';
 import { useState, useEffect } from 'react';
 import { Alert, Button, Card, Input, Space, Table, Tag, Tabs, Typography, message } from 'antd';
@@ -120,7 +121,8 @@ export default function IntegrationPage() {
       </div>
       <Tabs
         items={[
-          { key: 'bridge', label: '钉钉本机同步', children: <DingTalkBridge /> },
+          { key: 'bridge', label: '钉钉组织同步', children: <DingTalkBridge /> },
+          { key: 'activities', label: '本人日程与审批提醒', children: <ActivitySyncPanel /> },
           { key: 'apps', label: '企业应用接口（高级）', children: <AppIntegrations /> },
         ]}
       />

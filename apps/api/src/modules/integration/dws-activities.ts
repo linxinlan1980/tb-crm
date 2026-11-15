@@ -6,6 +6,14 @@ export class UncertainActivityWrite extends Error {
     super('钉钉写入结果尚未核验；须先对账，禁止重复创建');
   }
 }
+export class CalendarConflict extends Error {
+  constructor(
+    readonly canOverwrite: boolean,
+    readonly remote: CalendarProjection,
+  ) {
+    super('钉钉日程已变化或不再是本人单人日程；未覆盖');
+  }
+}
 export interface CalendarProjection {
   id: string;
   title: string;
@@ -14,6 +22,7 @@ export interface CalendarProjection {
   end: string;
   freeBusy: string;
   status: string;
+  attendeeCount: number;
 }
 export interface TodoProjection {
   id: string;
@@ -42,14 +51,16 @@ function iso(value: unknown) {
 export function calendarProjection(value: unknown, expectedId: string): CalendarProjection {
   const data = result(value);
   if (data.id !== expectedId) throw new Error('钉钉日程返回编号不符');
+  if (!Array.isArray(data.attendees)) throw new Error('钉钉日程参会人未完整返回');
   return {
     id: expectedId,
+    attendeeCount: data.attendees.length,
     title: required(data.summary),
     description: typeof data.description === 'string' ? data.description : '',
     start: iso(record(data.start).dateTime),
     end: iso(record(data.end).dateTime),
     freeBusy: required(data.freeBusy, 20).toLowerCase(),
-    status: required(data.status, 40),
+    status: required(data.status, 40).toLowerCase(),
   };
 }
 export function todoProjection(value: unknown, expectedId: string): TodoProjection {
@@ -77,17 +88,36 @@ function calendarArgs(input: CalendarInput) {
   iso(input.end);
   if (Date.parse(input.end) <= Date.parse(input.start)) throw new Error('日程结束须晚于开始');
   if (!['busy', 'free'].includes(input.freeBusy)) throw new Error('日程忙闲字段无效');
-  return ['--title', input.title, '--desc', input.description, '--start', input.start, '--end', input.end,
-    '--free-busy', input.freeBusy];
+  return [
+    '--title',
+    input.title,
+    '--desc',
+    input.description,
+    '--start',
+    input.start,
+    '--end',
+    input.end,
+    '--free-busy',
+    input.freeBusy,
+  ];
 }
 function sameCalendar(actual: CalendarProjection, input: CalendarInput) {
-  return actual.title === input.title && actual.description === input.description &&
-    Date.parse(actual.start) === Date.parse(input.start) && Date.parse(actual.end) === Date.parse(input.end) &&
-    actual.freeBusy === input.freeBusy;
+  return (
+    actual.attendeeCount === 1 &&
+    actual.status === 'confirmed' &&
+    actual.title === input.title &&
+    actual.description === input.description &&
+    Date.parse(actual.start) === Date.parse(input.start) &&
+    Date.parse(actual.end) === Date.parse(input.end) &&
+    actual.freeBusy === input.freeBusy
+  );
 }
 /** Only the operator-bound user's primary calendar and own todos. No arbitrary participants/profile/CLI from HTTP. */
 export class DwsActivities {
-  constructor(private binding: DwsBinding, private call: DwsRead) {}
+  constructor(
+    private binding: DwsBinding,
+    private call: DwsRead,
+  ) {}
   async verifyIdentity() {
     const response = record(await this.call(['contact', 'user', 'get-self']));
     if (response.success !== true) throw new Error('钉钉身份读取失败');
@@ -109,9 +139,14 @@ export class DwsActivities {
     // through the authenticated "my executing tasks" inventory; never compare names or guess IDs.
     const inventory = record(await this.call(['todo', '+get-my-tasks', '--all', '--status', String(item.done)]));
     const data = record(inventory.data);
-    if (inventory.ok !== true || inventory.outcome !== 'success' || data.complete !== true ||
-      !Array.isArray(data.todos) || data.todos.length > 5000 ||
-      data.todos.filter((entry) => record(entry).taskId === id).length !== 1)
+    if (
+      inventory.ok !== true ||
+      inventory.outcome !== 'success' ||
+      data.complete !== true ||
+      !Array.isArray(data.todos) ||
+      data.todos.length > 5000 ||
+      data.todos.filter((entry) => record(entry).taskId === id).length !== 1
+    )
       throw new Error('待办未在当前授权本人的完整执行列表中唯一匹配');
     return item;
   }
@@ -119,14 +154,26 @@ export class DwsActivities {
     await this.verifyIdentity();
     return this.readOwnTodo(id);
   }
-  async writeCalendar(input: CalendarInput, externalId: string | null) {
+  async writeCalendar(input: CalendarInput, externalId: string | null, prior?: CalendarInput, forceOverwrite = false) {
     const args = calendarArgs(input);
     if (externalId !== null) required(externalId, 200);
     await this.verifyIdentity();
+    if (externalId) {
+      const current = await this.calendar(externalId);
+      if (current.status !== 'confirmed' || current.attendeeCount !== 1) throw new CalendarConflict(false, current);
+      if (prior && !forceOverwrite && !sameCalendar(current, prior)) throw new CalendarConflict(true, current);
+    }
     let knownId = externalId;
     try {
-      const response = acknowledgement(await this.call(['calendar', 'event', externalId ? 'update' : 'create',
-        ...(externalId ? ['--id', externalId] : []), ...args]));
+      const response = acknowledgement(
+        await this.call([
+          'calendar',
+          'event',
+          externalId ? 'update' : 'create',
+          ...(externalId ? ['--id', externalId] : []),
+          ...args,
+        ]),
+      );
       if (!externalId) knownId = required(record(response.result).id, 200);
       const actual = await this.calendar(knownId!);
       if (!sameCalendar(actual, input)) throw new Error('日程写后字段不符');
@@ -140,8 +187,19 @@ export class DwsActivities {
     await this.verifyIdentity();
     let knownId: string | null = null;
     try {
-      const response = result(await this.call(['todo', 'task', 'create', '--title', title,
-        '--executors', this.binding.userId, '--priority', '20']));
+      const response = result(
+        await this.call([
+          'todo',
+          'task',
+          'create',
+          '--title',
+          title,
+          '--executors',
+          this.binding.userId,
+          '--priority',
+          '20',
+        ]),
+      );
       knownId = required(response.taskId, 200);
       const actual = await this.readOwnTodo(knownId);
       if (actual.title !== title || actual.done) throw new Error('新待办读回不符');
@@ -159,7 +217,8 @@ export class DwsActivities {
     try {
       acknowledgement(await this.call(['todo', 'task', 'done', '--task-id', externalId, '--status', String(done)]));
       const actual = todoProjection(await this.call(['todo', 'task', 'get', '--task-id', externalId]), externalId);
-      if (JSON.stringify(actual.executorIds) !== JSON.stringify(prior.executorIds) || actual.done !== done) throw new Error('待办状态读回不符');
+      if (JSON.stringify(actual.executorIds) !== JSON.stringify(prior.executorIds) || actual.done !== done)
+        throw new Error('待办状态读回不符');
       return actual;
     } catch {
       throw new UncertainActivityWrite(externalId);

@@ -4,9 +4,9 @@
 
 **当前版本：0.3.0本地公司帐套与销售回款分析候选，完整商用验收尚未完成。**
 
-新增[客户分配与功能/数据权限配置](docs/ACCESS_PERMISSIONS_AND_ALLOCATION.md)：人员有效权限、销售/主管业务矩阵和数据范围、批量分配预览、事务提交及历史；日程与流程待办同步仍待后续。
+新增[客户分配与功能/数据权限配置](docs/ACCESS_PERMISSIONS_AND_ALLOCATION.md)：人员有效权限、销售/主管业务矩阵和数据范围、批量分配预览、事务提交及历史；新增[个人日程与钉钉审批提醒](docs/DINGTALK_ACTIVITY_OPERATIONS.md)，提供本人配置、持久发送、自动扫描和失败对账。
 
-新增[钉钉本机组织同步](docs/DINGTALK_SYNC.md)：公司专属授权、预览、对照表、事务导入与记录；日程和流程待办尚待后续。
+新增[钉钉本机组织同步](docs/DINGTALK_SYNC.md)：公司专属授权、预览、对照表、事务导入与记录；日程及审批提醒见[操作说明](docs/DINGTALK_ACTIVITY_OPERATIONS.md)。
 
 新增[销售预测与回款操作说明](docs/reporting/OPERATIONS.md)：精确到分的阶段预测、月度计划/实收、账龄和年度矩阵；签约须填写真实分期条款。新增[本地多公司安装与外网配置](docs/LOCAL_COMPANY_INSTALL.md)，公司独立MySQL库及账号，网页适配手机H5。
 

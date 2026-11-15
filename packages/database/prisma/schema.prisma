@@ -55,6 +55,80 @@ model IntegrationMapping {
   @@map("integration_mappings")
 }
 
+// Personal CRM calendar and durable, explicitly authorized DingTalk projections.
+model CalendarEntry {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  ownerId Int @map("owner_id")
+  title String @db.VarChar(200)
+  description String @db.Text
+  location String @db.VarChar(300)
+  startsAt DateTime @map("starts_at") @db.DateTime(3)
+  endsAt DateTime @map("ends_at") @db.DateTime(3)
+  freeBusy String @default("busy") @map("free_busy") @db.VarChar(10)
+  status String @default("scheduled") @db.VarChar(20)
+  revision Int @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([tenantId, ownerId, startsAt])
+  @@map("calendar_entries")
+}
+model ActivitySyncSetting {
+  id String @id @db.VarChar(36)
+  tenantId Int @map("tenant_id")
+  ownerId Int @map("owner_id")
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  calendarEnabled Boolean @default(false) @map("calendar_enabled")
+  todoEnabled Boolean @default(false) @map("todo_enabled")
+  autoEnabled Boolean @default(false) @map("auto_enabled")
+  lastScannedAt DateTime? @map("last_scanned_at")
+  lastError String? @map("last_error") @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, ownerId])
+  @@map("activity_sync_settings")
+}
+model ActivitySyncLink {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  ownerId Int @map("owner_id")
+  kind String @db.VarChar(20)
+  sourceId Int @map("source_id")
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  externalId String @map("external_id") @db.VarChar(200)
+  sourceVersion String @map("source_version") @db.VarChar(64)
+  archivedAt DateTime? @map("archived_at")
+  payload Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, ownerId, kind, sourceId])
+  @@unique([tenantId, bindingHash, kind, externalId])
+  @@map("activity_sync_links")
+}
+model ActivitySyncJob {
+  id String @id @db.VarChar(36)
+  tenantId Int @map("tenant_id")
+  ownerId Int @map("owner_id")
+  kind String @db.VarChar(20)
+  sourceId Int @map("source_id")
+  sourceVersion String @map("source_version") @db.VarChar(64)
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  settingsVersion DateTime @map("settings_version") @db.DateTime(3)
+  operation String @db.VarChar(20)
+  payload Json
+  externalId String? @map("external_id") @db.VarChar(200)
+  status String @default("prepared") @db.VarChar(20)
+  leaseToken String? @map("lease_token") @db.VarChar(36)
+  forceOverwrite Boolean @default(false) @map("force_overwrite")
+  error String? @db.VarChar(500)
+  evidence Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, ownerId, kind, sourceId, sourceVersion])
+  @@index([tenantId, ownerId, status])
+  @@map("activity_sync_jobs")
+}
+
 // ============ 1. 租户与权限域 ============
 
 model Tenant {

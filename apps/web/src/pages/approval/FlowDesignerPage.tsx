@@ -111,6 +111,22 @@ export default function FlowDesignerPage() {
         }
       },
     });
+  const deactivate = (f: Flow) =>
+    Modal.confirm({
+      title: `停用 ${f.name} v${f.version}？`,
+      content: '停用后不能发起新申请；已经提交的审批继续按原节点快照处理。',
+      okText: '确认停用',
+      onOk: async () => {
+        try {
+          await post(`/approvals/flows/${f.id}/deactivate`, { requestKey: key(), expectedUpdatedAt: f.updatedAt });
+          await load();
+          message.success('已停用；在途审批保留');
+        } catch (e) {
+          message.error(errorText(e));
+          throw e;
+        }
+      },
+    });
   const test = (f: Flow) => {
     let amount = 100000;
     Modal.confirm({
@@ -202,6 +218,11 @@ export default function FlowDesignerPage() {
                   <Button type="link" onClick={() => test(f)}>
                     预演
                   </Button>
+                  {f.isActive && (
+                    <Button type="link" onClick={() => deactivate(f)}>
+                      停用
+                    </Button>
+                  )}
                   {!f.isActive && (
                     <Button type="link" onClick={() => publish(f)}>
                       发布
