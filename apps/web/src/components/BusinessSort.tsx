@@ -13,7 +13,7 @@ export default function BusinessSort({
   onChange: (v: BusinessSortValue) => void;
 }) {
   return (
-    <Space wrap style={{ marginBottom: 12 }}>
+    <div style={{ marginBottom: 12 }}><Space wrap>
       <strong>排序</strong>
       <Select
         aria-label="排序依据"
@@ -40,6 +40,6 @@ export default function BusinessSort({
           倒序 ↓
         </Button>
       </Space.Compact>
-    </Space>
+    </Space></div>
   );
 }
