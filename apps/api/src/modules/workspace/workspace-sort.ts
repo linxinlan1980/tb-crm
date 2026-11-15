@@ -8,7 +8,7 @@ const titles: Record<string, string> = {
   createdAt: '录入日期',
   updatedAt: '更新日期',
   lastFollowAt: '最近跟进日期',
-  dueDate: '到期日期',
+  dueDate: '计划日期',
   expectedCloseDate: '预计成交日期',
   signDate: '签约日期',
   orderDate: '订单日期',
@@ -45,7 +45,7 @@ export function workspaceSortFields(kind: string) {
     model = Prisma.dmmf.datamodel.models.find((m) => m.name[0].toLowerCase() + m.name.slice(1) === r.model);
   return [...new Set([r.name, 'createdAt', 'updatedAt', ...(extras[kind] ?? [])])]
     .filter((key) => model?.fields.some((f) => f.name === key && f.kind !== 'object'))
-    .map((key) => ({ key, label: titles[key] ?? r.title + '编号' }));
+    .map((key) => ({ key, label: key==='dueDate'?(kind==='payment-plans'?'预计收款日':'计划完成日'):titles[key] ?? r.title + '编号' }));
 }
 export const defaultWorkspaceSort = (kind: string) =>
   kind === 'actions'
@@ -91,6 +91,7 @@ export function sortBusinessRows<T>(rows: readonly T[], key: string, order: 'asc
   });
 }
 export const reportSortFields = [
+  'invoiceReceived','invoiceUnpaid',
   'expectedDate','invoiced','commission','weight','customerName','signDate','unpaid',
   'id',
   'name',

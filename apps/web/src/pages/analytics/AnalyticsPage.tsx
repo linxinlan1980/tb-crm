@@ -2,7 +2,7 @@ import Table from '../../components/BusinessTable';
 import BusinessSort, { type BusinessSortValue } from '../../components/BusinessSort';
 import SalesFunnel from './SalesFunnel';
 import BusinessAnalytics from './BusinessAnalytics';
-import StatisticsPeople, { defaultStatisticsPeople } from '../../components/StatisticsPeople';
+import StatisticsPeople, { statisticsPeopleFromParams } from '../../components/StatisticsPeople';
 import type { SpreadsheetCell } from '../../utils/xlsx';
 import { csvCell } from '../../utils/csv';
 import { useEffect, useRef, useState } from 'react';
@@ -102,7 +102,7 @@ function Trend({ rows, forecast }: { rows: Report['monthly']; forecast: boolean 
   return (
     <>
       <Space>
-        <Tag color="blue">{forecast ? '阶段加权' : '到期计划'}</Tag>
+        <Tag color="blue">{forecast ? '按进度折算' : '收款计划'}</Tag>
         <Tag>{forecast ? '已赢单' : '已复核到账'}</Tag>
       </Space>
       <div
@@ -175,8 +175,8 @@ export default function AnalyticsPage() {
   const [options, setOptions] = useState<Options>();
   const [kind, setKind] = useState(new URLSearchParams(window.location.search).get('tab') === 'collections' ? 'collections' : 'business'),
     [section, setSection] = useState('contracts');
-  const [period, setPeriod] = useState(defaultStatisticsRange);
-  const [people, setPeople] = useState(defaultStatisticsPeople);
+  const [period, setPeriod] = useState(()=>{const p=new URLSearchParams(window.location.search),d=defaultStatisticsRange();return {from:p.get('from')??d.from,to:p.get('to')??d.to};});
+  const [people, setPeople] = useState(()=>statisticsPeopleFromParams(new URLSearchParams(window.location.search)));
   const [source, setSource] = useState('managed');
   const [bucket, setBucket] = useState('open');
   const [page, setPage] = useState(1),
@@ -275,7 +275,7 @@ export default function AnalyticsPage() {
           },
           monetary('商机金额', 'amount'),
           {
-            title: '阶段加权额',
+            title: '按进度折算金额',
             dataIndex: 'weighted',
             render: (v: string | null) => (v === null ? '不纳入加权' : m(v)),
           },
@@ -287,10 +287,10 @@ export default function AnalyticsPage() {
         ? [
             { title: '负责人', dataIndex: 'ownerName' },
             monetary('合同金额', 'amount'),
-            monetary('期间计划', 'planned'),
-            monetary('期间到账', 'received'),
-            monetary('当前未收', 'currentOutstanding'),
-            monetary('当前逾期', 'currentOverdue'),
+            monetary('计划收款', 'planned'),
+            monetary('已登记收款', 'received'),
+            monetary('待收款', 'currentOutstanding'),
+            monetary('已过计划日期未收到的款', 'currentOverdue'),
             ...(data?.monthly ?? []).map((month, i) => ({
               title: `${month.year}-${month.month} · 计划 / 已回`,
               width: 165,
@@ -316,32 +316,32 @@ export default function AnalyticsPage() {
             ]
           : [
               { title: '合同', dataIndex: 'contractName' },
-              { title: '到期日', dataIndex: 'dueDate', render: day },
+              { title: '预计收款日', dataIndex: 'dueDate', render: day },
               monetary('计划金额', 'amount'),
               monetary('当前已核销', 'receivedAmount'),
-              monetary('当前未收', 'outstandingAmount'),
+              monetary('待收款', 'outstandingAmount'),
             ]),
   ];
   const cards = forecast
     ? [
         ['我方待签业务报价', 'open'],
-        ['阶段权重参考金额', 'weighted'],
-        ['期间已赢单', 'won'],
+        ['按商机进度折算金额', 'weighted'],
+        ['已签约商机', 'won'],
         ['待补关闭日期商机', 'unknownClosedCount'],
       ]
     : [
-        ['期间到期计划', 'planned'],
-        ['期间已复核到账', 'received'],
-        ['期间到期计划 · 当前未收', 'currentOutstanding'],
-        ['期间到期计划 · 当前逾期', 'currentOverdue'],
+        ['收款计划', 'planned'],
+        ['已登记收款', 'received'],
+        ['计划待收款', 'currentOutstanding'],
+        ['需要跟催的收款', 'currentOverdue'],
       ];
   return (
     <div>
       <div className="page-heading">
         <div>
           <div className="eyebrow">SALES & CASH ANALYTICS</div>
-          <h1>合同、回款与销售统计</h1>
-          <Typography.Text type="secondary">从商机、计划到实际到账，按同一权限范围核对每个数字。</Typography.Text>
+          <h1>合同、开票与收款</h1>
+          <Typography.Text type="secondary">看清合同签了多少、收了多少、还差多少；每个数字都能查看明细。</Typography.Text>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={!options || busy}>
           刷新
@@ -353,7 +353,7 @@ export default function AnalyticsPage() {
         items={[
           ...(options?.canCollections?[{key:'business',label:'合同与回款经营统计'}]:[]),
           ...(options?.canForecast ? [{ key: 'forecast', label: '商机报价与阶段参考' }] : []),
-          ...(options?.canCollections ? [{ key: 'collections', label: '回款、应收与项目矩阵' }] : []),
+          ...(options?.canCollections ? [{ key: 'collections', label: '收款记录与收款计划' }] : []),
         ]}
       />
       <Card size="small" style={{ marginBottom: 18 }}>
@@ -429,7 +429,7 @@ export default function AnalyticsPage() {
             />
             <Row gutter={[16, 16]}>
               <Col xs={24} xl={15}>
-                <Card title={forecast ? '每月预测 / 已赢单' : '每月到期计划 / 实际到账'}>
+                <Card title={forecast ? '每月预测 / 已赢单' : '每月计划收款 / 实际收款'}>
                   <Trend rows={data.monthly} forecast={forecast} />
                   <Table
                     size="small"
@@ -439,13 +439,13 @@ export default function AnalyticsPage() {
                     columns={[
                       { title: '月份', dataIndex: 'month', sorter:(a:Report['monthly'][number],b:Report['monthly'][number])=>((a.year??0)*12+a.month)-((b.year??0)*12+b.month), render: (_v: number, r: Report['monthly'][number]) => `${r.year}-${r.month}月` },
                       {
-                        title: forecast ? '开放商机' : '到期计划',
+                        title: forecast ? '开放商机' : '收款计划',
                         dataIndex: forecast ? 'amount' : 'planned',
                         align: 'right',
                         render: m,
                       },
                       ...(forecast
-                        ? [{ title: '阶段加权', dataIndex: 'weighted', align: 'right' as const, render: m }]
+                        ? [{ title: '按进度折算', dataIndex: 'weighted', align: 'right' as const, render: m }]
                         : []),
                       {
                         title: forecast ? '已赢单' : '已复核到账',
@@ -458,7 +458,7 @@ export default function AnalyticsPage() {
                 </Card>
               </Col>
               <Col xs={24} xl={9}>
-                <Card title={forecast ? '负责人预测分布' : '所选到期计划 · 当前余额账龄'}>
+                <Card title={forecast ? '负责人预测分布' : '待收款拖延天数'}>
                   {forecast ? (
                     <Table
                       size="small"
@@ -495,7 +495,7 @@ export default function AnalyticsPage() {
                         ]}
                       />
                       <p style={{ marginTop: 16 }}>
-                        期间到账中，当前已核销 ¥{m(data.summary.currentAllocatedOfReceipts)}；当前未核销 ¥
+                        已登记收款中，当前已核销 ¥{m(data.summary.currentAllocatedOfReceipts)}；当前未核销 ¥
                         {m(data.summary.currentUnallocatedOfReceipts)}。二者不再加到到账总额。
                       </p>
                     </>
@@ -521,10 +521,10 @@ export default function AnalyticsPage() {
                         </Button>
                       ),
                     },
-                    { title: '期间计划', dataIndex: 'planned', render: m },
-                    { title: '期间到账', dataIndex: 'received', render: m },
-                    { title: '当前未收', dataIndex: 'currentOutstanding', render: m },
-                    { title: '当前逾期', dataIndex: 'currentOverdue', render: m },
+                    { title: '计划收款', dataIndex: 'planned', render: m },
+                    { title: '已登记收款', dataIndex: 'received', render: m },
+                    { title: '待收款', dataIndex: 'currentOutstanding', render: m },
+                    { title: '已过计划日期未收到的款', dataIndex: 'currentOverdue', render: m },
                   ]}
                 />
               </Card>
@@ -548,10 +548,10 @@ export default function AnalyticsPage() {
                   value={bucket}
                   onChange={(v) => reset(() => setBucket(v))}
                   options={[
-                    { value: 'open', label: '期间开放商机' },
-                    { value: 'won', label: '期间已赢单' },
-                    { value: 'lost', label: '期间已输单' },
-                    { value: 'closed', label: '期间全部已关闭' },
+                    { value: 'open', label: '跟进中商机' },
+                    { value: 'won', label: '已签约商机' },
+                    { value: 'lost', label: '未成交商机' },
+                    { value: 'closed', label: '已结束商机' },
                     { value: 'undated', label: '全部待确认成交日期' },
                   ]}
                 />
@@ -561,11 +561,11 @@ export default function AnalyticsPage() {
                   activeKey={section}
                   onChange={(k) => reset(() => setSection(k))}
                   items={[
-                    { key: 'contracts', label: '项目月度矩阵' },
-                    { key: 'plans', label: '期间到期计划' },
-                    { key: 'receipts', label: '期间到账流水' },
-                    { key: 'balances', label: '期间到期计划 · 当前未收' },
-                    { key: 'overdue', label: '期间到期计划 · 当前逾期' },
+                    { key: 'contracts', label: '合同每月收款表' },
+                    { key: 'plans', label: '收款计划' },
+                    { key: 'receipts', label: '收款记录' },
+                    { key: 'balances', label: '计划待收款' },
+                    { key: 'overdue', label: '需要跟催的收款' },
                   ]}
                 />
               )}

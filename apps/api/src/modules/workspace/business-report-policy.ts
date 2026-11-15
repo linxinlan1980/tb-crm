@@ -52,7 +52,7 @@ export function businessReport(
   const constructionIds = new Set(activeProjects.map((p) => p.contractId));
   const validInvoices = invoices.filter(
     (i) =>
-      businessIds.has(i.contractId) &&
+      cohort.some(c=>c.id===i.contractId) &&
       i.direction === 'output' &&
       ['invoiced', 'sent', 'received', 'verified'].includes(i.status),
   );
@@ -62,17 +62,20 @@ export function businessReport(
     const links = validPlans.filter((p) => p.contractId === i.contractId && p.invoiceId === i.id);
     // Exact stage-level attribution only. An invoice without a complete plan link is not assumed unpaid.
     if (!links.length || !d(sumMoney(links.map((p) => p.amount))).eq(i.amount)) {
-      unmatchedInvoiceCount++;
-      return { id: i.id, contractId: i.contractId, amount: i.amount.toFixed(2), outstanding: null };
+      if(businessIds.has(i.contractId))unmatchedInvoiceCount++;
+      return { id: i.id, contractId: i.contractId, amount: i.amount.toFixed(2), received:null, outstanding: null };
     }
     return {
       id: i.id,
       contractId: i.contractId,
       amount: i.amount.toFixed(2),
+      received:Prisma.Decimal.min(i.amount,max0(d(sumMoney(links.map(p=>p.receivedAmount))))).toFixed(2),
       outstanding: max0(d(i.amount).sub(sumMoney(links.map((p) => p.receivedAmount)))).toFixed(2),
     };
   });
-  const invoiceKnownUnpaid = sumMoney(invoiceBalances.flatMap((i) => (i.outstanding === null ? [] : [i.outstanding])));
+  const businessInvoices=validInvoices.filter(i=>businessIds.has(i.contractId)),businessInvoiceBalances=invoiceBalances.filter(i=>businessIds.has(i.contractId));
+  const invoiceKnownUnpaid = sumMoney(businessInvoiceBalances.flatMap((i) => (i.outstanding === null ? [] : [i.outstanding])));
+  const invoiceKnownReceived=sumMoney(businessInvoiceBalances.flatMap(i=>i.received===null?[]:[i.received]));
   const financialRows = cohort.map((c) => ({
     id: c.id,
     contractNo: c.contractNo,
@@ -87,6 +90,8 @@ export function businessReport(
     category: commission(c) ? 'software_commission' : 'business',
     classificationConfirmed: trades.has(c.id),
     invoiced: sumMoney(validInvoices.filter((i) => i.contractId === c.id).map((i) => i.amount)),
+    invoiceReceived:invoiceBalances.some(i=>i.contractId===c.id&&i.received===null)?null:sumMoney(invoiceBalances.filter(i=>i.contractId===c.id).flatMap(i=>i.received===null?[]:[i.received])),
+    invoiceUnpaid:invoiceBalances.some(i=>i.contractId===c.id&&i.outstanding===null)?null:sumMoney(invoiceBalances.filter(i=>i.contractId===c.id).flatMap(i=>i.outstanding===null?[]:[i.outstanding])),
     building: constructionIds.has(c.id),
   }));
   const projection: {
@@ -131,7 +136,7 @@ export function businessReport(
       }
       if (p?.dueDate) {
         weight += 5;
-        basis.push('已填分期到期日期 +5');
+        basis.push('已填分期预计收款日期 +5');
         const overdue = Math.max(0, Math.floor((q.today.getTime() - p.dueDate.getTime()) / 86400000));
         if (overdue > 90) {
           weight -= 25;
@@ -143,10 +148,10 @@ export function businessReport(
           basis.push('逾期31—90天 -15，预计延后30天');
         } else if (overdue > 0) {
           expectedDate = addDays(q.today, 14);
-          basis.push('已过到期日，预计14天跟催窗口');
+          basis.push('已过预计收款日期，预计14天跟催窗口');
         } else {
           expectedDate = new Date(Math.max(p.dueDate.getTime(), addDays(q.today, 7).getTime()));
-          basis.push('按到期日，至少保留7天执行窗口');
+          basis.push('按预计收款日期，至少保留7天执行窗口');
         }
       } else {
         weight -= 15;
@@ -205,8 +210,10 @@ export function businessReport(
   return {
     summary: {
       signed: sumMoney(business.map((c) => c.amount)),
+      contractReceived:sumMoney(business.map(c=>c.totalReceived)),
+      invoiceReceived:unmatchedInvoiceCount?null:invoiceKnownReceived,invoiceKnownReceived,
       unpaid: sumMoney(business.map((c) => max0(c.totalOutstanding))),
-      invoiced: sumMoney(validInvoices.map((i) => i.amount)),
+      invoiced: sumMoney(businessInvoices.map((i) => i.amount)),
       invoiceUnpaid: unmatchedInvoiceCount ? null : invoiceKnownUnpaid,
       invoiceKnownUnpaid,
       construction: sumMoney(business.filter((c) => constructionIds.has(c.id)).map((c) => c.amount)),
@@ -222,7 +229,7 @@ export function businessReport(
         q.metric === 'commission'
           ? r.category === 'software_commission'
           : r.category === 'business' &&
-            (q.metric === 'unpaid'
+            (q.metric==='contractReceived'?d(r.received).gt(0):q.metric==='invoiceReceived'?(r.invoiceReceived===null||d(r.invoiceReceived).gt(0)):q.metric === 'unpaid'
               ? d(r.outstandingAmount).gt(0)
               : q.metric === 'invoiced'
                 ? d(r.invoiced).gt(0)
@@ -259,8 +266,8 @@ export function businessReport(
       '合同按所选签约日期及负责人筛选；开票、已收和余额为这批合同截至当前累计，不是历史期末快照。',
       '我方业务合同含渠道作为甲方支付的实施、开发和外包款；明确的软件返佣单列，不计业务业绩。未分类合同暂按业务统计并标出待核数量。',
       '建设中金额取可见的在建/暂停项目所关联合同，每份合同只计一次，已完成、运维及关闭项目不纳入。',
-      '开票未回款按有效销项发票关联分期核销计算；关联不完整时显示待核实，不推定全部未收。',
-      '回款权重是可解释的初始规则假设，未经历史统计校准；预计日期是推进安排，不是客户承诺。仅分配合同未回余额，不再加开票余额，软件返佣不混入。',
+      '已开票待收款按有效销项发票关联分期核销计算；关联不完整时显示待核实，不推定全部未收。',
+      '回款权重是可解释的初始规则假设，未经历史统计校准；预计日期是推进安排，不是客户承诺。仅分配合同待收款，不再加开票余额，软件返佣不混入。',
     ],
   };
 }

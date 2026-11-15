@@ -17,7 +17,7 @@ const inputSchema = {
     source: { enum: ['managed', 'legacy'] },
     detail: { enum: ['contracts', 'plans', 'receipts', 'balances', 'overdue'] },
     bucket: { enum: ['open', 'won', 'lost', 'closed', 'undated'] },
-    metric:{enum:['contracts','unpaid','invoiced','invoiceUnpaid','construction','commission','projection']},sortBy:{enum:reportSortFields},sortOrder:{enum:['asc','desc']},
+    metric:{enum:['contracts','contractReceived','invoiceReceived','unpaid','invoiced','invoiceUnpaid','construction','commission','projection']},sortBy:{enum:reportSortFields},sortOrder:{enum:['asc','desc']},
   },
 };
 export const analyticsCapabilities = [

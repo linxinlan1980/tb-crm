@@ -130,7 +130,7 @@ export const resources: Record<string, Resource> = {
       f('title', '任务名称', 'text', true),
       f('projectId', '项目', 'reference', true, { reference: 'projects' }),
       f('milestoneId', '关联里程碑（可选）', 'number'),
-      f('dueDate', '截止日期', 'date'),
+      f('dueDate', '计划完成日', 'date'),
       f('description', '任务说明', 'textarea'),
     ],
     actions: ['start_task', 'complete', 'reopen_task', 'assign_task'],
@@ -142,7 +142,7 @@ export const resources: Record<string, Resource> = {
     fields: [
       f('title', '行动名称', 'text', true),
       f('targetId', '客户', 'reference', true, { reference: 'customers' }),
-      f('dueDate', '计划日期', 'date'),
+      f('dueDate', '计划完成日', 'date'),
       f('content', '内容', 'textarea'),
     ],
     actions: ['complete'],
@@ -173,7 +173,7 @@ export const resources: Record<string, Resource> = {
     ],
     actions: [],
   },
-  'payment-plans': { model: 'paymentPlan', title: '回款计划', name: 'planNo', fields: [], actions: [], readonly: true },
+  'payment-plans': { model: 'paymentPlan', title: '收款计划', name: 'planNo', fields: [], actions: [], readonly: true },
   invoices: { model: 'invoice', title: '发票', name: 'invoiceNo', fields: [], actions: [], readonly: true },
   receipts: { model: 'receipt', title: '收款记录', name: 'receiptNo', fields: [], actions: [], readonly: true },
 };

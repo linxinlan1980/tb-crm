@@ -78,7 +78,7 @@ describe('business cash metrics with explicit trade nature', () => {
       q(),
     );
     expect(r.summary).toMatchObject({
-      signed: '1000.00',
+      signed: '1000.00',contractReceived:'400.00',invoiceReceived:'0.00',
       unpaid: '600.00',
       invoiced: '600.00',
       invoiceUnpaid: '600.00',
@@ -104,6 +104,7 @@ describe('business cash metrics with explicit trade nature', () => {
       customers,
       q(),
     );
+    expect(r.summary.invoiceKnownReceived).toBe('200.00');expect(r.summary.invoiceReceived).toBeNull();
     expect(r.summary.invoiceKnownUnpaid).toBe('400.00');
     expect(r.summary.invoiceUnpaid).toBeNull();
     expect(r.summary.unmatchedInvoiceCount).toBe(1);

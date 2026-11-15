@@ -195,8 +195,10 @@ try {
   const pr=await db.project.findUniqueOrThrow({where:{id:registered.projects[0].projectId}});eq(pr.actualStartDate,null,'No fabricated actual start');eq(pr.acceptanceState,'not_requested','No fabricated acceptance');
   for(const token of [at,mt,adt,freshBoss]){
     const r=await call('/analytics/business?year=2058&ownerId='+a.id,token);
-    eq(r.summary.signed,'1000.00','Channel-paying service included, commission excluded');eq(r.summary.unpaid,'600.00','Contract outstanding');eq(r.summary.invoiced,'600.00','Valid invoices');eq(r.summary.invoiceUnpaid,'400.00','Invoice-specific remaining amount');eq(r.summary.construction,'1000.00','Construction deduplicated by contract');eq(r.summary.commission,'500.00','Commission separate');eq(r.cashProjection.total,'600.00','Cash projection never double-counts invoice receivable');
+    eq(r.summary.signed,'1000.00','Channel-paying service included, commission excluded');eq(r.summary.contractReceived,'400.00','Contract received amount');eq(r.summary.invoiceReceived,'200.00','Invoice-linked received amount');eq(r.summary.unpaid,'600.00','Contract outstanding');eq(r.summary.invoiced,'600.00','Valid invoices');eq(r.summary.invoiceUnpaid,'400.00','Invoice-specific remaining amount');eq(r.summary.construction,'1000.00','Construction deduplicated by contract');eq(r.summary.commission,'500.00','Commission separate');eq(r.cashProjection.total,'600.00','Cash projection never double-counts invoice receivable');
   }
+  eq((await call('/analytics/business?year=2058&metric=contractReceived',at)).contracts.meta.total,1,'Contract-received drilldown');
+  eq((await call('/analytics/business?year=2058&metric=invoiceReceived',at)).contracts.items[0].invoiceReceived,'200.00','Invoice-received drilldown');
   await call('/analytics/business?year=2058&personRange=company',at,403);
   eq((await call('/analytics/business?year=2058',bt)).summary.signed,'0.00','Outsider business report is empty');
   await call('/analytics/business?year=2058&ownerId='+a.id,xt,403);

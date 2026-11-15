@@ -302,7 +302,7 @@ export default function FinanceLedgerPage() {
                     { title: '计划金额', dataIndex: 'amount', render: money },
                     { title: '已收', dataIndex: 'receivedAmount', render: money },
                     { title: '剩余', dataIndex: 'outstandingAmount', render: money },
-                    { title: '到期日', dataIndex: 'dueDate', render: (v: unknown) => String(v).slice(0, 10) },
+                    { title: '预计收款日', dataIndex: 'dueDate', render: (v: unknown) => String(v).slice(0, 10) },
                   ]}
                 />
               </Card>

@@ -10,7 +10,7 @@ import { ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons';
 import { get, errorText, money, type RecordRow } from '../../services/workspace';
 import { useAuthStore } from '../../stores/useAuthStore';
 interface Overview {
-  businessSummary?:{signed:string;unpaid:string;invoiced:string;invoiceUnpaid:string|null;construction:string}|null;
+  businessSummary?:{signed:string;contractReceived:string;invoiceReceived:string|null;unpaid:string;invoiced:string;invoiceUnpaid:string|null;construction:string}|null;
   businessProjectAccess?:boolean;
   restrictedModules?: string[];
   role: string;
@@ -100,22 +100,24 @@ export default function DashboardPage() {
         <div style={{visibility:data?'visible':'hidden',minHeight:300}}>
         <Row gutter={[16, 16]}>
           {[
-            { title: '期间建档客户', value: data?.customers, path: '/customers' },
-            { title: '期间预计成交商机', value: data?.openOpportunities, path: '/opportunities' },
+            { title: '新增客户', value: data?.customers, path: '/customers' },
+            { title: '跟进中商机', value: data?.openOpportunities, path: '/opportunities' },
             { title: '我方待签业务报价', value: money(data?.pipeline), prefix: '¥', path: '/opportunities/board' },
             ...(data?.businessSummary?[
-              {title:'已签合同金额',value:money(data.businessSummary.signed),prefix:'¥',path:'/analytics'},
-              {title:'合同未回款',value:money(data.businessSummary.unpaid),prefix:'¥',path:'/analytics'},
-              {title:'开票金额',value:money(data.businessSummary.invoiced),prefix:'¥',path:'/analytics'},
-              {title:'开票未回款',value:data.businessSummary.invoiceUnpaid===null?'待核实':money(data.businessSummary.invoiceUnpaid),prefix:data.businessSummary.invoiceUnpaid===null?undefined:'¥',path:'/analytics'},
-              ...(data.businessProjectAccess?[{title:'建设中项目金额',value:money(data.businessSummary.construction),prefix:'¥',path:'/analytics'}]:[]),
-            ]:[{ title: '期间签约合同额', value: money(data?.signedAmount), prefix: '¥', path: '/contracts' }]),
-            { title: '期间实际业务回款', value: money(data?.received), prefix: '¥', path: '/receipts' },
+              {title:'合同总金额',value:money(data.businessSummary.signed),prefix:'¥',path:'/analytics',metric:'contracts'},
+              {title:'合同已收款',value:money(data.businessSummary.contractReceived),prefix:'¥',path:'/analytics',metric:'contractReceived'},
+              {title:'合同待收款',value:money(data.businessSummary.unpaid),prefix:'¥',path:'/analytics',metric:'unpaid'},
+              {title:'已开票金额',value:money(data.businessSummary.invoiced),prefix:'¥',path:'/analytics',metric:'invoiced'},
+              {title:'已开票已收款',value:data.businessSummary.invoiceReceived===null?'待核实':money(data.businessSummary.invoiceReceived),prefix:data.businessSummary.invoiceReceived===null?undefined:'¥',path:'/analytics',metric:'invoiceReceived'},
+              {title:'已开票待收款',value:data.businessSummary.invoiceUnpaid===null?'待核实':money(data.businessSummary.invoiceUnpaid),prefix:data.businessSummary.invoiceUnpaid===null?undefined:'¥',path:'/analytics',metric:'invoiceUnpaid'},
+              ...(data.businessProjectAccess?[{title:'在建项目金额',value:money(data.businessSummary.construction),prefix:'¥',path:'/analytics',metric:'construction'}]:[]),
+            ]:[{ title: '合同总金额', value: money(data?.signedAmount), prefix: '¥', path: '/contracts' }]),
+            { title: '按收款日期查看的已收款', value: money(data?.received), prefix: '¥', path: '/receipts' },
           ]
             .filter((k) => can(k.path))
             .map((k) => (
               <Col xs={24} sm={12} xl={8} key={k.title}>
-                <Card className="metric-card" onClick={() => navigate(`${k.path}?${statisticsQuery(period, people)}`)} hoverable>
+                <Card className="metric-card" onClick={() => navigate(`${k.path}?${statisticsQuery(period, people)}${'metric'in k?'&metric='+String(k.metric):''}`)} hoverable>
                   <Statistic title={k.title} value={k.value ?? '—'} prefix={k.prefix} />
                   <div style={{ marginTop: 16, color: '#64748b' }}>
                     查看明细 <ArrowRightOutlined />
@@ -200,8 +202,8 @@ export default function DashboardPage() {
                 </Card>
               )}
               {can('/finance/payment-plans') && (
-                <Card title="区间到期计划余额" style={{ marginTop: 20 }}>
-                  <Statistic title="所选计划当前逾期未收" prefix="¥" value={money(data?.overdue)} />
+                <Card title="需要跟催的收款" style={{ marginTop: 20 }}>
+                  <Statistic title="所选计划已过计划日期未收到的款未收" prefix="¥" value={money(data?.overdue)} />
                   <Alert
                     type="info"
                     message="收款与核销使用本地业务台账"

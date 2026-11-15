@@ -15,7 +15,7 @@ export function reportInput(input: unknown): Record<string, string> {
     contractId: [1, 2147483647], page: [1, 1000000], pageSize: [1, 100],
   };
   const enums: Record<string, readonly string[]> = {
-    sortBy:reportSortFields,sortOrder:['asc','desc'],metric:['contracts','unpaid','invoiced','invoiceUnpaid','construction','commission','projection'],
+    sortBy:reportSortFields,sortOrder:['asc','desc'],metric:['contracts','contractReceived','invoiceReceived','unpaid','invoiced','invoiceUnpaid','construction','commission','projection'],
     personRange: ['self','person','company','department'],
     source: ['managed', 'legacy'], detail: ['contracts', 'plans', 'receipts', 'balances', 'overdue'],
     bucket: ['open', 'won', 'lost', 'closed', 'undated'],

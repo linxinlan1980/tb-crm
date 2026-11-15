@@ -15,6 +15,7 @@ type ContractRow = {
   received: string;
   outstandingAmount: string;
   invoiced: string;
+  invoiceReceived:string|null;invoiceUnpaid:string|null;
   signDate: string;
   category: string;
   building: boolean;
@@ -46,6 +47,7 @@ type ChannelRow = {
 type BusinessReport = {
   summary: {
     signed: string;
+    contractReceived:string;invoiceReceived:string|null;invoiceKnownReceived:string;
     unpaid: string;
     invoiced: string;
     invoiceUnpaid: string | null;
@@ -71,10 +73,11 @@ type BusinessReport = {
 };
 const amount = (v: unknown) => '¥' + money(v);
 const labels: Record<string, string> = {
+  contractReceived:'已收到款的合同',invoiceReceived:'已开票并收到款的合同',
   contracts: '我方已签合同',
-  unpaid: '合同未回款',
+  unpaid: '合同待收款',
   invoiced: '已开票合同',
-  invoiceUnpaid: '开票未回款合同',
+  invoiceUnpaid: '已开票待收款合同',
   construction: '建设中项目合同',
   commission: '软件返佣合同',
 };
@@ -90,7 +93,7 @@ export default function BusinessAnalytics({
   const [data, setData] = useState<BusinessReport>(),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
-    [metric, setMetric] = useState('contracts'),
+    [metric, setMetric] = useState(()=>{const v=new URLSearchParams(window.location.search).get('metric')??'contracts';return ['contracts','contractReceived','invoiceReceived','unpaid','invoiced','invoiceUnpaid','construction','commission'].includes(v)?v:'contracts';}),
     [view, setView] = useState('contracts'),
     [page, setPage] = useState(1);
   const [sorting, setSorting] = useState<BusinessSortValue>({ sortBy: 'signDate', sortOrder: 'desc' }),
@@ -158,11 +161,13 @@ export default function BusinessAnalytics({
           <Row gutter={[12, 12]}>
             {(
               [
-                ['已签合同金额', 'signed', 'contracts'],
-                ['合同未回款', 'unpaid', 'unpaid'],
-                ['开票金额', 'invoiced', 'invoiced'],
-                ['开票未回款', 'invoiceUnpaid', 'invoiceUnpaid'],
-                ['建设中项目金额', 'construction', 'construction'],
+                ['合同总金额', 'signed', 'contracts'],
+                ['合同已收款','contractReceived','contractReceived'],
+                ['合同待收款', 'unpaid', 'unpaid'],
+                ['已开票金额', 'invoiced', 'invoiced'],
+                ['已开票已收款','invoiceReceived','invoiceReceived'],
+                ['已开票待收款', 'invoiceUnpaid', 'invoiceUnpaid'],
+                ['在建项目金额', 'construction', 'construction'],
                 ['软件返佣（另列）','commission','commission'],
               ] as const
             ).map(([title, key, filter]) => (
@@ -187,7 +192,7 @@ export default function BusinessAnalytics({
             showIcon
             style={{ margin: '16px 0' }}
             message="我方业务与软件返佣分别统计"
-            description="按所选签约日期汇总这批合同当前累计值。渠道作为甲方支付的实施、开发及外包费用计入业务；软件返佣单列。点击金额查看合同明细。"
+            description="查看所选签约时间内的合同及收款情况。“待收款”就是还没有收到的钱。渠道作为甲方支付的实施、开发及外包费用计入业务；软件返佣单列。点击金额查看合同明细。"
           />
           <Collapse ghost size="small" style={{marginBottom:16}} items={[{key:'basis',label:'统计口径与回款规则说明',children:data.notices.map((n,i)=><Typography.Paragraph key={i} style={{lineHeight:1.8,marginBottom:10}}>{n}</Typography.Paragraph>)}]}/>
           {data.summary.unmatchedInvoiceCount > 0 && (
@@ -195,16 +200,16 @@ export default function BusinessAnalytics({
               type="warning"
               showIcon
               style={{ marginBottom: 16 }}
-              message={`${data.summary.unmatchedInvoiceCount}张发票的分期核销关联待核实；已明确的开票未回款 ${amount(data.summary.invoiceKnownUnpaid)}，不以估算冒充完整余额。`}
+              message={`${data.summary.unmatchedInvoiceCount}张发票的分期核销关联待核实；已明确的已开票待收款 ${amount(data.summary.invoiceKnownUnpaid)}，不以估算冒充完整余额。`}
             />
           )}
           <Card
-            title="回款时间与金额安排"
+            title="预计收款安排"
             style={{ marginBottom: 16 }}
             extra={<Typography.Text type="secondary">规则版本{data.cashProjection.rulesVersion}</Typography.Text>}
           >
             <Typography.Paragraph>
-              合同未回余额 {amount(data.cashProjection.total)}；规则加权参考 {amount(data.cashProjection.weighted)}
+              合同待收款 {amount(data.cashProjection.total)}；谨慎预计收款 {amount(data.cashProjection.weighted)}
               。下表金额按预计回款时间分组，权重参考考虑已开票、已回过款、验收、逾期及日期完整性。金额可逐笔核对。
             </Typography.Paragraph>
             <Table
@@ -214,8 +219,8 @@ export default function BusinessAnalytics({
               columns={[
                 { title: '预计时间', dataIndex: 'name' },
                 { title: '笔数', dataIndex: 'count' },
-                { title: '待回金额', dataIndex: 'amount', render: amount },
-                { title: '规则加权参考', dataIndex: 'weighted', render: amount },
+                { title: '待收款', dataIndex: 'amount', render: amount },
+                { title: '谨慎预计收款', dataIndex: 'weighted', render: amount },
               ]}
             />
             <Button
@@ -225,7 +230,7 @@ export default function BusinessAnalytics({
                 setSorting({ sortBy: 'expectedDate', sortOrder: 'asc' });
               }}
             >
-              查看逐笔回款安排与权重依据
+              查看每笔预计收款与判断依据
             </Button>
           </Card>
           <Card title="渠道客户往来 · 渠道为甲方付款" style={{ marginBottom: 16 }}>
@@ -258,7 +263,7 @@ export default function BusinessAnalytics({
             />
             <Button onClick={() => choose('commission')}>查看软件返佣合同（不计我方业务业绩）</Button>
           </Card>
-          <Card title={cash ? '逐笔回款安排' : labels[metric]}>
+          <Card title={cash ? '每笔预计收款' : labels[metric]}>
             <Tabs
               activeKey={view}
               onChange={(v) => {
@@ -280,8 +285,8 @@ export default function BusinessAnalytics({
                 cash
                   ? [
                       { key: 'expectedDate', label: '预计回款日期' },
-                      { key: 'amount', label: '待回金额' },
-                      { key: 'weighted', label: '加权参考' },
+                      { key: 'amount', label: '待收款' },
+                      { key: 'weighted', label: '谨慎预计收款' },
                       { key: 'weight', label: '回款权重' },
                       { key: 'name', label: '合同名称' },
                     ]
@@ -291,8 +296,9 @@ export default function BusinessAnalytics({
                       { key: 'customerName', label: '客户名称' },
                       { key: 'amount', label: '合同金额' },
                       { key: 'received', label: '已回款' },
-                      { key: 'outstandingAmount', label: '合同未回款' },
-                      { key: 'invoiced', label: '已开票' },
+                      { key: 'outstandingAmount', label: '合同待收款' },
+                      { key: 'invoiced', label: '已开票金额' },
+                      {key:'invoiceReceived',label:'已开票已收款'},{key:'invoiceUnpaid',label:'已开票待收款'},
                     ]
               }
               onChange={(v) => {
@@ -304,7 +310,7 @@ export default function BusinessAnalytics({
               <Table<CashRow>
                 serverSorted
                 rowKey="id"
-                scroll={{ x: 1300 }}
+                scroll={{ x: 1800 }}
                 dataSource={data.cashProjection.details.items}
                 pagination={{
                   current: page,
@@ -325,10 +331,10 @@ export default function BusinessAnalytics({
                   },
                   { title: '客户', dataIndex: 'customerName' },
                   { title: '负责人', dataIndex: 'ownerName' },
-                  { title: '待回金额', dataIndex: 'amount', render: amount },
+                  { title: '待收款', dataIndex: 'amount', render: amount },
                   { title: '预计回款', dataIndex: 'expectedDate' },
-                  { title: '规则权重', dataIndex: 'weight', render: (v: number) => v + '%' },
-                  { title: '加权参考', dataIndex: 'weighted', render: amount },
+                  { title: '参考把握', dataIndex: 'weight', render: (v: number) => v + '%' },
+                  { title: '谨慎预计收款', dataIndex: 'weighted', render: amount },
                   { title: '判断依据', dataIndex: 'basis', render: (v: string[]) => v.join('；') },
                 ]}
               />
@@ -336,7 +342,7 @@ export default function BusinessAnalytics({
               <Table<ContractRow>
                 serverSorted
                 rowKey="id"
-                scroll={{ x: 1300 }}
+                scroll={{ x: 1800 }}
                 dataSource={data.contracts.items}
                 pagination={{
                   current: page,
@@ -359,9 +365,11 @@ export default function BusinessAnalytics({
                   { title: '负责人', dataIndex: 'ownerName' },
                   { title: '签约日期', dataIndex: 'signDate', render: (v: string) => v?.slice(0, 10) || '待确认' },
                   { title: '合同金额', dataIndex: 'amount', render: amount },
-                  { title: '已回款', dataIndex: 'received', render: amount },
-                  { title: '合同未回款', dataIndex: 'outstandingAmount', render: amount },
-                  { title: '已开票', dataIndex: 'invoiced', render: amount },
+                  { title: '合同已收款', dataIndex: 'received', render: amount },
+                  { title: '合同待收款', dataIndex: 'outstandingAmount', render: amount },
+                  { title: '已开票金额', dataIndex: 'invoiced', render: amount },
+                  {title:'已开票已收款',dataIndex:'invoiceReceived',render:(v:string|null)=>v===null?'待核实':amount(v)},
+                  {title:'已开票待收款',dataIndex:'invoiceUnpaid',render:(v:string|null)=>v===null?'待核实':amount(v)},
                   {
                     title: '交易分类',
                     dataIndex: 'category',

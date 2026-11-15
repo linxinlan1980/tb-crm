@@ -70,7 +70,7 @@ export function reportQuery(q: Record<string, string>, now = new Date()) {
     'sortOrder','metric',
   ];
   if (Object.keys(q).some((k) => !allowed.includes(k))) throw new BadRequestException('存在未定义的报表参数');
-  const metric=q.metric??'contracts';if(!['contracts','unpaid','invoiced','invoiceUnpaid','construction','commission','projection'].includes(metric))throw new BadRequestException('业务统计口径无效');
+  const metric=q.metric??'contracts';if(!['contracts','contractReceived','invoiceReceived','unpaid','invoiced','invoiceUnpaid','construction','commission','projection'].includes(metric))throw new BadRequestException('业务统计口径无效');
   const sortBy=q.sortBy??'id',sortOrder=q.sortOrder??'desc';
   if (!(reportSortFields as readonly string[]).includes(sortBy)||!['asc','desc'].includes(sortOrder)) throw new BadRequestException('报表排序字段或方向无效');
   const integer = (key: string, fallback: number, min: number, max: number) => {
