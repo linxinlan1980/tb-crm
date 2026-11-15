@@ -44,7 +44,7 @@
 | 渠道业务 | “海岚流控经销商”；`TY-HT-00007` | 96万元，经销渠道与终端项目背景分开记录 |
 | 长周期供货 | “远澜能源”；`TY-HT-00008` | 150万元，订单、里程碑与回款节点 |
 | 分期催收 | “雁川冶金”；`TY-HT-00010` | 80万元合同，已收32万元，未收48万元 |
-| 质保尾款 | “青屿水利”；`TY-HT-00012` | 100万元合同，已收95万元，5万元未来到期尾款 |
+| 质保尾款 | “青屿水利”；`TY-HT-00012` | 100万元合同，已收95万元，5万元待收质保尾款 |
 | 审批处理 | `TY-HT-00002` | 待华东主管审批；可查看驳回、撤回、重提历史 |
 | 或签结果 | `TY-HT-00014` | 初始为管理层任一同意；本机已验证老板同意后同组他人保留免审状态 |
 | 商务掉单 | 商机 `TY-SJ-01209` / `TY-SJ-01210` | 180万元竞品因素 / 90万元资源窗口因素，从漏斗下钻复盘 |
@@ -81,7 +81,7 @@ node --test demo/tianyu/generate.test.mjs
 
 ## 资料再生成
 
-介绍网页内嵌九张实际业务截图，可独立分发；两份 Word 分别是六页业务应用全景、八页账号与操作手册。原始截图在 `screenshots/`，虚构项目确认单在 `evidence/`。
+介绍网页内嵌九张实际业务截图，可独立分发；两份 Word 分别是八页业务应用全景、十页账号与操作手册。原始截图在 `screenshots/`，虚构项目确认单在 `evidence/`。
 
 需要编辑资料源时，可在仓库根目录安装 `materials-requirements.txt` 中的文档库后，运行 `python3 demo/tianyu/build_docs.py`、`python3 demo/tianyu/build_product_page.py`。技术确认单使用 `python3 demo/tianyu/evidence/build_evidence.py` 再生成。
 
@@ -125,3 +125,12 @@ node scripts/tianyu-trade-classification.mjs --company-config .local/accounts/TI
 ```
 
 该脚本只读取本机天雨测试帐套并调用管理员应用服务，确认800份已签阀门供货为我方业务；原合同金额、开票、回款不改变，不发外部通知。重复运行跳过已有分类。配置文件只在接收方本机产生，不随源码分发。日期/人员统计、排序和回款新口径详见 `docs/operations/BUSINESS_CASH_METRICS.md`。
+
+## v2展示资料
+
+- `天雨阀门CRM_业务应用全景.docx`：沿用既有版式的8页对外业务介绍。
+- `天雨阀门CRM_演示账号与操作手册.docx`：14个统一密码12345的虚构角色账号及10页操作流程。
+- `天雨阀门CRM_产品介绍_v2.html`：9张实际业务截图内嵌，可离线打开并放大图片；另有团队范围、排序与手机补充截图。
+- `enrichment-verification.json`：公开合成场景补充数量、受控安装脚本及验证范围。
+
+资料生成使用 `materials-requirements.txt` 中的Python库。`build_docs.py`生成并更新既有Word设计；`update_delivery_docs.py --reference-dir <参考文件目录>`可在保留样式、页眉页脚和页面设置时更新文字、截图及补充页。`build_product_page.py`生成v2单文件HTML。应用依赖仍按仓库锁文件安装；材料生成依赖不参与线上服务。
