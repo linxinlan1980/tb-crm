@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import dayjs from 'dayjs';
 import {
   Alert,
   Button,
@@ -57,6 +58,7 @@ interface Approval extends RecordRow {
     comment: string;
     approverName: string;
     canTransfer: boolean;
+    actedAt?: string | null;
   }[];
 }
 interface AuditEvent {
@@ -501,7 +503,16 @@ export default function ApprovalCenterPage() {
               >
                 <List.Item.Meta
                   title={`第${n.nodeOrder}步 · ${n.nodeName} · ${n.approverName}`}
-                  description={`${({ skipped: '或签已结束，无需处理', transferred: '已转交', pending: '待处理', approved: '已通过', rejected: '已驳回' } as Record<string, string>)[n.action] ?? n.action}${n.comment ? ' · ' + n.comment : ''}`}
+                  description={
+                    <>
+                      {`${({ skipped: '未审核（或签已结束，无需处理）', transferred: '已转交', pending: '待处理', approved: '已通过', rejected: '已驳回' } as Record<string, string>)[n.action] ?? n.action}${n.comment ? ' · ' + n.comment : ''}`}
+                      {n.actedAt ? (
+                        <div>审批时间：{dayjs(n.actedAt).format('YYYY-MM-DD HH:mm:ss')}</div>
+                      ) : n.action === 'skipped' ? (
+                        <div>未产生审批操作</div>
+                      ) : null}
+                    </>
+                  }
                 />
               </List.Item>
             )}

@@ -576,6 +576,7 @@ export class ApprovalService {
     action: 'approved' | 'rejected',
     comment: string,
     externalEvidence?: unknown,
+    decisionAt?: Date,
   ) {
     const approval = await tx.approval.findFirst({
       where: { tenantId: a.tenantId, id: approvalId, status: 'pending' },
@@ -595,7 +596,10 @@ export class ApprovalService {
       approval.applicantId === a.userId
     )
       throw new ForbiddenException('不是当前节点审批人，或审批已处理');
-    await tx.approvalNode.update({ where: { id: node.id }, data: { action, comment, actedAt: new Date() } });
+    await tx.approvalNode.update({
+      where: { id: node.id },
+      data: { action, comment, actedAt: decisionAt ?? new Date() },
+    });
     // Group semantics come from the server-authored immutable snapshot, never the live edited flow.
     const anyMode = anySignature(approval.formData, node.nodeOrder);
     if (anyMode)
@@ -603,7 +607,7 @@ export class ApprovalService {
         where: { tenantId: a.tenantId, approvalId, nodeOrder: node.nodeOrder, action: 'pending' },
         data: {
           action: 'skipped',
-          actedAt: new Date(),
+          actedAt: null,
           comment: action === 'approved' ? '同组或签已由其他审批人同意，自动结束等待' : '同组或签已驳回，自动结束等待',
         },
       });
@@ -732,7 +736,9 @@ export class ApprovalService {
         evidenceHash: evidence.digest,
         source: 'dingtalk-native',
         actualDecisionUserId: evidence.decisionUserId,
+        providerDecisionAt: evidence.decisionAt,
       },
+      evidence.decisionAt ? new Date(evidence.decisionAt) : undefined,
     );
   }
   async withdraw(a: Actor, approvalId: number, body: Record<string, unknown>) {

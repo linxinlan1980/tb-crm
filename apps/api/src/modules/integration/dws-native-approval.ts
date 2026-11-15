@@ -88,6 +88,7 @@ export interface NativeEvidence {
   readonly expected: NativeExpectation;
   readonly status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   readonly decisionUserId: string | null;
+  readonly decisionAt: string | null;
   readonly note: string;
   readonly digest: string;
   readonly observed: unknown;
@@ -325,9 +326,32 @@ export class DwsNativeApprovals {
     if (fields.length !== nativeFormLabels.length) throw Error('钉钉审批存在未核验的额外字段');
     const tasks = array(d.tasks);
     const taskUsers = tasks.map((t) => String(t.userId ?? ''));
-    if (!sameIds(taskUsers, expected.approverIds)) throw Error('钉钉实际审批人集合与CRM不一致；不回写');
+    if (!sameIds(taskUsers, expected.approverIds)) {
+      // Completed OR workflows may replace a cancelled peer with a provider virtual account.
+      // Require the exact missing cohort in the originator's OR completion CC evidence.
+      const missing = expected.approverIds.filter((id) => !taskUsers.includes(id));
+      const virtual = tasks.filter((t) => !expected.approverIds.includes(String(t.userId)));
+      const copied = array(d.operationRecords)
+        .filter((r) => r.type === 'PROCESS_CC' && r.userId === expected.originatorId && r.result === 'NONE')
+        .flatMap((r) =>
+          Array.isArray(r.ccUserIds) ? r.ccUserIds.filter((id): id is string => typeof id === 'string' && !!id) : [],
+        );
+      if (
+        d.status !== 'COMPLETED' ||
+        tasks.length !== expected.approverIds.length ||
+        !missing.length ||
+        virtual.length !== missing.length ||
+        !virtual.every(
+          (t) => /^V00_\d+$/.test(String(t.userId)) && t.taskStatus === 'CANCELED' && t.taskResult === 'NONE',
+        ) ||
+        !sameIds(copied, missing) ||
+        new Set(taskUsers).size !== taskUsers.length
+      )
+        throw Error('钉钉实际审批人集合与CRM不一致；不回写');
+    }
     let status: NativeEvidence['status'] = 'pending',
       winner: string | null = null,
+      decisionAt: string | null = null,
       note = '';
     if (d.status === 'COMPLETED') {
       const result = String(d.processInstanceResult).toLowerCase();
@@ -348,6 +372,14 @@ export class DwsNativeApprovals {
       if (!resolved.length) throw Error('未找到实际审批人完成的决定，不能以待办完成或系统自动通过代替');
       resolved.sort((a, b) => Number(a.operationTime) - Number(b.operationTime));
       winner = String(resolved[0].userId);
+      const operationTime = Number(resolved[0].operationTime);
+      if (
+        !Number.isSafeInteger(operationTime) ||
+        operationTime <= 0 ||
+        !Number.isFinite(new Date(operationTime).getTime())
+      )
+        throw Error('实际人工审批时间无效');
+      decisionAt = new Date(operationTime).toISOString();
       status = success ? 'approved' : 'rejected';
       const source = array(d.operationRecords).find(
         (r) => r.type === 'EXECUTE_TASK_NORMAL' && r.userId === winner && accepted.includes(String(r.result)),
@@ -367,6 +399,7 @@ export class DwsNativeApprovals {
         }),
         status,
         decisionUserId: winner,
+        decisionAt,
         note,
         digest: nativeHash(observed),
         observed,

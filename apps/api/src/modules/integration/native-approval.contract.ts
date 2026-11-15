@@ -7,7 +7,24 @@ export const nativeApprovalCapabilities = [
     route: 'GET /integrations/dingtalk-native-approval',
     effect: 'read',
     inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-    outputSchema: { type: 'object', required: ['policy', 'bound', 'pending', 'runs', 'transport'] },
+    outputSchema: {
+      type: 'object',
+      required: ['policy', 'bound', 'pending', 'runs', 'transport', 'synchronization'],
+      properties: {
+        synchronization: {
+          type: 'object',
+          required: [
+            'workerEnabled',
+            'pollIntervalSeconds',
+            'retryLimit',
+            'scope',
+            'pending',
+            'blocked',
+            'lastSuccessfulReadAt',
+          ],
+        },
+      },
+    },
   },
   {
     id: 'integration.native.configure',

@@ -24,6 +24,7 @@ import {
 } from '../workspace/command-runner';
 import { createSystemPrincipal } from '../workspace/system-principal';
 import { activityBinding } from './activity-binding';
+import { NativeApprovalReadError, nativeReadFailure } from './native-approval-sync';
 import { bindingHash, dwsReader, record, type DwsBinding, type DwsRead } from './dws-directory';
 import {
   DwsNativeApprovals,
@@ -104,6 +105,7 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
             }
           }
         }
+        if (!creating) throw new NativeApprovalReadError(error);
         throw new BadRequestException('钉钉原生审批接口未通过，请核查本机工具版本、授权及参数；系统不会自动重发');
       }
     };
@@ -153,6 +155,20 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
           updatedAt: r.updatedAt,
         })),
         transport: 'outbound-poll',
+        synchronization: {
+          workerEnabled: process.env.CRM_ACCOUNT_WORKER === 'true',
+          pollIntervalSeconds: 60,
+          retryLimit: 5,
+          scope: 'current-user-last-30',
+          pending: runs.filter((r) => r.kind === 'dispatch' && r.status === 'sent').length,
+          blocked: runs.filter((r) => r.kind === 'dispatch' && r.status === 'blocked').length,
+          lastSuccessfulReadAt:
+            runs
+              .map((r) => record(r.summary ?? {}).lastPolledAt)
+              .filter((v): v is string => typeof v === 'string')
+              .sort()
+              .at(-1) ?? null,
+        },
         manualDispatch: true,
         externalWritesConfirmedIndividually: true,
       };
@@ -588,6 +604,9 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
       readbackVerified: true,
       remoteStatus: evidence.status,
       lastPolledAt: new Date().toISOString(),
+      lastAttemptAt: new Date().toISOString(),
+      retryCount: 0,
+      nextRetryAt: null,
       evidenceHash: evidence.digest,
       result,
     };
@@ -725,10 +744,12 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
     try {
       const runs = await this.prisma.system.integrationRun.findMany({
         where: { provider, kind: 'dispatch', status: 'sent' },
-        take: 20,
+        take: 100,
         orderBy: { updatedAt: 'asc' },
       });
       for (const r of runs) {
+        const retryAt = record(r.summary ?? {}).nextRetryAt;
+        if (typeof retryAt === 'string' && Date.parse(retryAt) > Date.now()) continue;
         try {
           const p = await this.policy(this.prisma.system, r.tenantId);
           if (!p?.policy.enabled || !p.policy.autoPoll) continue;
@@ -757,14 +778,15 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
             },
             (tx) => this.apply(tx, r.id, evidence),
           );
-        } catch {
+        } catch (error) {
+          const failure = nativeReadFailure(record(r.summary ?? {}), error, new Date());
           await this.prisma.system.integrationRun.updateMany({
-            where: { id: r.id, status: 'sent' },
+            where: { id: r.id, status: 'sent', updatedAt: r.updatedAt },
             data: {
-              status: 'blocked',
+              status: failure.nextRetryAt ? 'sent' : 'blocked',
               summary: json({
                 ...record(r.summary),
-                error: '自动读取或证据核对失败，已暂停；未覆盖本地审批，请管理员核查后手动读取。',
+                ...failure,
               }),
             },
           });

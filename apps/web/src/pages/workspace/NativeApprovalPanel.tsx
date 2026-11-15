@@ -43,6 +43,15 @@ interface State {
   pending: { id: number; title: string; updatedAt: string }[];
   flows: { id: number; name: string }[];
   runs: Run[];
+  synchronization?: {
+    workerEnabled: boolean;
+    pollIntervalSeconds: number;
+    retryLimit: number;
+    scope: string;
+    pending: number;
+    blocked: number;
+    lastSuccessfulReadAt: string | null;
+  };
 }
 interface Preview {
   runId: string;
@@ -70,18 +79,31 @@ export default function NativeApprovalPanel() {
     [selected, setSelected] = useState<number>(),
     [preview, setPreview] = useState<Preview>(),
     [form] = Form.useForm<Omit<Policy, 'fromDate'> & { fromDate: Dayjs }>();
-  async function load() {
+  async function load(updateForm = false) {
     const r = await get<State>(root);
     setData(r);
-    form.setFieldsValue(
-      r.policy
-        ? { ...r.policy, fromDate: dayjs(r.policy.fromDate) }
-        : { enabled: false, autoPoll: true, fromDate: dayjs() },
-    );
+    if (updateForm)
+      form.setFieldsValue(
+        r.policy
+          ? { ...r.policy, fromDate: dayjs(r.policy.fromDate) }
+          : { enabled: false, autoPoll: true, fromDate: dayjs() },
+      );
     return r;
   }
   useEffect(() => {
-    void load().catch((e) => message.error(errorText(e)));
+    void load(true).catch((e) => message.error(errorText(e)));
+    let active = true;
+    const timer = setInterval(() => {
+      void get<State>(root)
+        .then((r) => {
+          if (active) setData(r);
+        })
+        .catch(() => undefined);
+    }, 15000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, []);
   async function execute(label: string, fn: () => Promise<unknown>) {
     setBusy(label);
@@ -163,6 +185,34 @@ export default function NativeApprovalPanel() {
         message={data?.bound ? '本人钉钉授权已绑定' : '本人尚未绑定可执行的钉钉授权'}
         description="现阶段仅支持本人授权、本人发起的单步或签合同；其他申请人需要各自本人授权及匹配人员的模板。个人待办完成不会代替审批决定。"
       />
+      <Card title="审批同步运行状态（本人最近30条连接）">
+        <Descriptions
+          size="small"
+          column={{ xs: 1, sm: 2 }}
+          items={[
+            {
+              key: 'worker',
+              label: '后台同步',
+              children:
+                data?.synchronization?.workerEnabled && data.policy?.enabled && data.policy.autoPoll
+                  ? '已开启，每60秒读取'
+                  : '未开启自动读取',
+            },
+            {
+              key: 'last',
+              label: '最近成功读取',
+              children: data?.synchronization?.lastSuccessfulReadAt
+                ? dayjs(data.synchronization.lastSuccessfulReadAt).format('YYYY-MM-DD HH:mm:ss')
+                : '暂无成功读取记录',
+            },
+            { key: 'pending', label: '等待或重试', children: data?.synchronization?.pending ?? 0 },
+            { key: 'blocked', label: '需人工核查', children: data?.synchronization?.blocked ?? 0 },
+          ]}
+        />
+        <Typography.Paragraph type="secondary">
+          页面每15秒刷新状态，不覆盖正在编辑的连接设置。网络暂时故障按间隔自动重试，连续5次失败暂停；人员、金额、模板或本地版本不匹配立即暂停，不自动通过，也不重新发单。
+        </Typography.Paragraph>
+      </Card>
       {isAdmin && (
         <Card title="原生审批连接设置">
           <Form form={form} layout="vertical" style={{ maxWidth: 720 }}>
@@ -235,7 +285,7 @@ export default function NativeApprovalPanel() {
           >
             读取钉钉流程并预演
           </Button>
-          <Button onClick={() => void execute('refresh', load)}>刷新状态</Button>
+          <Button onClick={() => void execute('refresh', () => load())}>刷新状态</Button>
         </Space>
         {preview && (
           <div style={{ marginTop: 16 }}>
@@ -289,6 +339,16 @@ export default function NativeApprovalPanel() {
                   {String(r.summary?.externalId ?? '')}
                   <br />
                   {String(r.summary?.error ?? '')}
+                  <br />
+                  {r.summary?.remoteStatus
+                    ? `钉钉结果：${({ pending: '等待审批', approved: '已同意', rejected: '已驳回', cancelled: '已撤销' } as Record<string, string>)[String(r.summary.remoteStatus)] ?? String(r.summary.remoteStatus)}`
+                    : ''}
+                  {r.summary?.nextRetryAt ? (
+                    <div>
+                      下次重试：{dayjs(String(r.summary.nextRetryAt)).format('MM-DD HH:mm:ss')}（连续失败
+                      {String(r.summary.retryCount)}次）
+                    </div>
+                  ) : null}
                 </div>
               ),
             },

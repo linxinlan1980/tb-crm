@@ -40,7 +40,7 @@ else if(args[2]==='forecast-process')out={success:true,result:{forecastSuccess:t
 else if(args[2]==='create-instance'){if(!args.includes('--yes'))process.exit(2);const request=JSON.parse(val('--request')),id='synthetic-instance-'+(++s.creates);s.instances[id]={request,status:'pending'};out=s.mode.startsWith('uncertain')?{success:false}:{success:true,result:{processInstanceId:id}};}
 else if(args[2]==='list-initiated'){out=s.mode==='uncertain-unreadable'?{success:false}:{success:true,result:{hasMore:false,processInstanceList:Object.keys(s.instances).map(processInstanceId=>({processInstanceId,originatorUserid:'synthetic-self'}))}};}
 else if(args[2]==='detail'||args[2]==='records'){const id=val('--instance-id'),i=s.instances[id];if(!i)process.exit(2);const approved=i.status==='approved',rejected=i.status==='rejected',resolved=approved||rejected,result=approved?'AGREE':rejected?'REFUSE':'NONE';const records=resolved?[{operationType:'EXECUTE_TASK_NORMAL',operationResult:result,userId:'synthetic-a',operationTime:Date.now()}]:[];if(args[2]==='records')out={success:true,result:{processInstanceId:id,operationRecords:records}};else{out={errcode:0,result:{processInstanceId:id,processCode:'PROC-SYNTHETIC',originatorUserid:'synthetic-self',originatorDeptId:'1',status:resolved?'COMPLETED':'RUNNING',processInstanceResult:approved?'agree':rejected?'refuse':'',formValueVOS:structuredClone(i.request.formComponentValues),tasks:[{userId:'synthetic-a',taskStatus:resolved?'COMPLETED':'RUNNING',taskResult:result},{userId:'synthetic-b',taskStatus:resolved?'CANCELED':'RUNNING',taskResult:'NONE'}],operationRecords:resolved?[{type:'EXECUTE_TASK_NORMAL',result,userId:'synthetic-a',remark:'Synthetic decision'}]:[]}};if(s.mode==='tamper')out.result.formValueVOS[0].value='tampered';}}
-else process.exit(2);fs.writeFileSync(file,JSON.stringify(s));console.log(JSON.stringify(out));
+else process.exit(2);if(s.mode==='virtual-peer'&&args[2]==='detail'){out.result.tasks[1].userId='V00_1234567890';out.result.operationRecords.push({type:'PROCESS_CC',result:'NONE',userId:'synthetic-self',ccUserIds:['synthetic-b']});}fs.writeFileSync(file,JSON.stringify(s));console.log(JSON.stringify(out));
 `,
   { mode: 0o700 },
 );
@@ -265,7 +265,7 @@ try {
     'pending',
     'tampered native form never applied',
   );
-  mutate((s) => (s.mode = 'normal'));
+  mutate((s) => (s.mode = 'virtual-peer'));
   await call(root + '/runs/' + p.runId + '/reconcile', token, { requestKey: randomUUID() }, 201);
   eq(
     (await db.approval.findUniqueOrThrow({ where: { id: a.id } })).status,
@@ -273,6 +273,11 @@ try {
     'actual provider decision uses generic approval',
   );
   eq(await db.approvalNode.count({ where: { approvalId: a.id, action: 'skipped' } }), 1, 'remaining OR voter skipped');
+  eq((await db.approvalNode.findFirstOrThrow({where:{approvalId:a.id,action:'skipped'}})).actedAt,null,'unreviewed peer has no fabricated decision time');
+  const synchronized = await call(root,token);
+  eq(synchronized.synchronization.workerEnabled,true,'background worker enabled');
+  eq(synchronized.synchronization.pollIntervalSeconds,60,'poll interval reported');
+  eq(typeof synchronized.synchronization.lastSuccessfulReadAt,'string','successful read timestamp visible');
   eq(
     (await db.contract.findUniqueOrThrow({ where: { id: a.bizId } })).status,
     'approved',

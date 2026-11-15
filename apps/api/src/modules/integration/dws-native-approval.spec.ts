@@ -44,7 +44,13 @@ function fixtures() {
           { userId: 'synthetic-b', taskStatus: 'CANCELED', taskResult: 'NONE' },
         ],
         operationRecords: [
-          { type: 'EXECUTE_TASK_NORMAL', userId: 'synthetic-a', result: 'AGREE', remark: 'Synthetic decision' },
+          {
+            type: 'EXECUTE_TASK_NORMAL',
+            userId: 'synthetic-a',
+            result: 'AGREE',
+            remark: 'Synthetic decision',
+            ccUserIds: [] as string[],
+          },
         ],
       },
     },
@@ -90,6 +96,39 @@ describe('native approval provider evidence', () => {
   });
   it('does not accept a JSON body masquerading as provider evidence', () =>
     expect(() => assertNativeEvidence({} as NativeEvidence)).toThrow());
+  it('accepts a cancelled virtual peer only with the exact original peer CC evidence', async () => {
+    const f = fixtures();
+    f.detail.result.tasks[1].userId = 'V00_1234567890';
+    f.detail.result.operationRecords.push({
+      type: 'PROCESS_CC',
+      userId: expected.originatorId,
+      result: 'NONE',
+      remark: '',
+      ccUserIds: ['synthetic-b'],
+    });
+    const proof = await (await api(f)).evidence('synthetic-instance', expected);
+    expect(proof.status).toBe('approved');
+    expect(proof.decisionUserId).toBe('synthetic-a');
+    expect(proof.decisionAt).toBe('1970-01-01T00:00:00.001Z');
+  });
+  it.each(['no-cc', 'wrong-cc', 'active-virtual', 'unknown-real', 'pending-workflow'] as const)(
+    'rejects unsafe OR placeholder %s',
+    async (kind) => {
+      const f = fixtures();
+      f.detail.result.tasks[1].userId = kind === 'unknown-real' ? 'unexpected-person' : 'V00_1234567890';
+      if (kind !== 'no-cc')
+        f.detail.result.operationRecords.push({
+          type: 'PROCESS_CC',
+          userId: expected.originatorId,
+          result: 'NONE',
+          remark: '',
+          ccUserIds: [kind === 'wrong-cc' ? 'unexpected-person' : 'synthetic-b'],
+        });
+      if (kind === 'active-virtual') f.detail.result.tasks[1].taskStatus = 'RUNNING';
+      if (kind === 'pending-workflow') f.detail.result.status = 'RUNNING';
+      await expect((await api(f)).evidence('synthetic-instance', expected)).rejects.toThrow();
+    },
+  );
   it.each(['instance', 'process', 'originator', 'department', 'form', 'task', 'decision'] as const)(
     'rejects mismatched %s',
     async (kind) => {
@@ -202,35 +241,73 @@ describe('native approval provider evidence', () => {
 
 describe('native receipt recovery', () => {
   const id = 'synthetic-instance-123';
-  it.each([id, {processInstanceId:id}, {success:true,result:{processInstanceId:id}}, {data:{process_instance_id:id}}, {result:id}, {result:JSON.stringify({processInstanceId:id})}])('treats a receipt as a candidate only', v => {
+  it.each([
+    id,
+    { processInstanceId: id },
+    { success: true, result: { processInstanceId: id } },
+    { data: { process_instance_id: id } },
+    { result: id },
+    { result: JSON.stringify({ processInstanceId: id }) },
+  ])('treats a receipt as a candidate only', (v) => {
     expect(nativeCreationCandidate(v)).toBe(id);
   });
-  it.each([{success:false,result:id}, {errcode:500,result:id}, {ok:false,data:{processInstanceId:id}}, {processInstanceId:id,data:{processInstanceId:'another-instance-123'}}, {}, 'too-short'])('rejects failures and ambiguous receipts', v => {
-    expect(()=>nativeCreationCandidate(v)).toThrow();
+  it.each([
+    { success: false, result: id },
+    { errcode: 500, result: id },
+    { ok: false, data: { processInstanceId: id } },
+    { processInstanceId: id, data: { processInstanceId: 'another-instance-123' } },
+    {},
+    'too-short',
+  ])('rejects failures and ambiguous receipts', (v) => {
+    expect(() => nativeCreationCandidate(v)).toThrow();
   });
   async function recover(ids: string[], hasMore = false, tamper = false) {
     const calls: string[][] = [];
-    const read: DwsRead = async args => {
+    const read: DwsRead = async (args) => {
       calls.push(args);
-      if(args[2] === 'get-self') return {success:true,result:[{orgEmployeeModel:{corpId:binding.corpId,userId:binding.userId,depts:[{deptId:1}]}}]};
-      if(args[2] === 'list-initiated') return {success:true,result:{hasMore,nextCursor:hasMore?'1':null,processInstanceList:ids.map(processInstanceId=>({processInstanceId,originatorUserid:binding.userId}))}};
-      const f = fixtures(), current = args[args.indexOf('--instance-id')+1];
-      f.detail.result.processInstanceId = current;f.records.result.processInstanceId = current;
-      if(tamper) f.detail.result.formValueVOS[0].value='tampered';
+      if (args[2] === 'get-self')
+        return {
+          success: true,
+          result: [{ orgEmployeeModel: { corpId: binding.corpId, userId: binding.userId, depts: [{ deptId: 1 }] } }],
+        };
+      if (args[2] === 'list-initiated')
+        return {
+          success: true,
+          result: {
+            hasMore,
+            nextCursor: hasMore ? '1' : null,
+            processInstanceList: ids.map((processInstanceId) => ({
+              processInstanceId,
+              originatorUserid: binding.userId,
+            })),
+          },
+        };
+      const f = fixtures(),
+        current = args[args.indexOf('--instance-id') + 1];
+      f.detail.result.processInstanceId = current;
+      f.records.result.processInstanceId = current;
+      if (tamper) f.detail.result.formValueVOS[0].value = 'tampered';
       return args[2] === 'detail' ? f.detail : f.records;
     };
-    const api = new DwsNativeApprovals(binding,read);await api.verify();
-    return {api,calls};
+    const api = new DwsNativeApprovals(binding, read);
+    await api.verify();
+    return { api, calls };
   }
   it('recovers one exact original, preserving sealed evidence without calling create', async () => {
-    const {api,calls}=await recover([id]);
-    const found=await api.recoverOwn(expected,'2026-11-15T00:00:00Z','2026-11-15T00:10:00Z');
-    expect(found.evidence.instanceId).toBe(id);expect(()=>assertNativeEvidence(found.evidence)).not.toThrow();
-    expect(calls.some(a=>a[2]==='create-instance')).toBe(false);
+    const { api, calls } = await recover([id]);
+    const found = await api.recoverOwn(expected, '2026-11-15T00:00:00Z', '2026-11-15T00:10:00Z');
+    expect(found.evidence.instanceId).toBe(id);
+    expect(() => assertNativeEvidence(found.evidence)).not.toThrow();
+    expect(calls.some((a) => a[2] === 'create-instance')).toBe(false);
   });
-  it.each([['no matches',[],false,false],['duplicates',[id,'another-instance-123'],false,false],['incomplete pages',[id],true,false],['tampered fields',[id],false,true]] as const)('fails closed on %s', async (_label,ids,more,tamper) => {
-    const {api,calls}=await recover([...ids],more,tamper);
-    await expect(api.recoverOwn(expected,'2026-11-15T00:00:00Z','2026-11-15T00:10:00Z')).rejects.toThrow();
-    expect(calls.some(a=>a[2]==='create-instance')).toBe(false);
+  it.each([
+    ['no matches', [], false, false],
+    ['duplicates', [id, 'another-instance-123'], false, false],
+    ['incomplete pages', [id], true, false],
+    ['tampered fields', [id], false, true],
+  ] as const)('fails closed on %s', async (_label, ids, more, tamper) => {
+    const { api, calls } = await recover([...ids], more, tamper);
+    await expect(api.recoverOwn(expected, '2026-11-15T00:00:00Z', '2026-11-15T00:10:00Z')).rejects.toThrow();
+    expect(calls.some((a) => a[2] === 'create-instance')).toBe(false);
   });
 });
