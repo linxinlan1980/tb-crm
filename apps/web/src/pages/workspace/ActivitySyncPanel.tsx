@@ -523,7 +523,7 @@ export default function ActivitySyncPanel() {
           rowKey="id"
           pagination={false}
           dataSource={historyPages[historyIndex]?.items || []}
-          scroll={{ x: 700 }}
+          scroll={{ x: 700, y: '60vh' }}
           columns={[
             {
               title: '时间',

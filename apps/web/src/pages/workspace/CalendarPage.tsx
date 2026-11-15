@@ -55,6 +55,7 @@ export default function CalendarPage() {
   const [editing, setEditing] = useState<Entry | null | undefined>(undefined),
     [saving, setSaving] = useState(false),
     [form] = Form.useForm();
+  const [detailDay, setDetailDay] = useState<Dayjs | null>(null);
   const screens = Grid.useBreakpoint();
   useEffect(() => {
     if (screens.xs) setView('list');
@@ -146,6 +147,7 @@ export default function CalendarPage() {
       title={r.title}
       onClick={(e) => {
         e.stopPropagation();
+        setDetailDay(null);
         open(r);
       }}
       style={{
@@ -223,7 +225,16 @@ export default function CalendarPage() {
                 }}
                 onPanelChange={(d) => setSelected(d)}
                 cellRender={(d, info) =>
-                  info.type === 'date' ? <div>{dayEntries(d).map(event)}</div> : info.originNode
+                  info.type === 'date' ? (
+                    <div>
+                      {dayEntries(d).slice(0, 3).map(event)}
+                      {dayEntries(d).length > 3 && (
+                        <Button type="link" size="small" onClick={(e) => { e.stopPropagation(); setDetailDay(d); }}>
+                          另有{dayEntries(d).length - 3}项 · 查看全部
+                        </Button>
+                      )}
+                    </div>
+                  ) : info.originNode
                 }
               />
             </div>
@@ -297,6 +308,14 @@ export default function CalendarPage() {
           { key: 'sync', label: '本人钉钉同步', children: <ActivitySyncPanel /> },
         ]}
       />
+      <Modal
+        title={detailDay?.format('YYYY年MM月DD日') + '全部日程'}
+        open={detailDay !== null}
+        onCancel={() => setDetailDay(null)}
+        footer={<Button onClick={() => setDetailDay(null)}>关闭</Button>}
+      >
+        <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>{detailDay && dayEntries(detailDay).map(event)}</div>
+      </Modal>
       <Modal
         title={editing ? '日程详情' : '新建日程'}
         open={editing !== undefined}

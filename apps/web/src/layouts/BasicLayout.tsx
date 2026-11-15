@@ -184,7 +184,7 @@ export default function BasicLayout() {
             justifyContent: 'space-between',
           }}
         >
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
             {mobile && (
               <Button
                 aria-label="打开导航"
@@ -227,10 +227,10 @@ export default function BasicLayout() {
               },
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-              <Tag>{roleName}</Tag>
+            <div aria-label="当前账号菜单" style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexShrink: 0 }}>
+              {!mobile && <Tag>{roleName}</Tag>}
               <Avatar style={{ background: '#1e40af' }}>{user?.name?.slice(0, 1)}</Avatar>
-              <span>{user?.name}</span>
+              {!mobile && <span>{user?.name}</span>}
             </div>
           </Dropdown>
         </Header>

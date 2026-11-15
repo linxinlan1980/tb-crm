@@ -324,6 +324,17 @@ try {
         (await db.systemCommandExecution.count({ where: { requestKey: rollbackBody.requestKey } })) === 0,
       'System failure rolls back writes and receipt',
     );
+    const workerUrl = new URL('../apps/api/src/modules/integration/activity-sync.service.ts', import.meta.url);
+    const workerSource = readFileSync(workerUrl, 'utf8');
+    const workerCalls = workerSource.match(/createSystemPrincipal\(/g) || [];
+    assert(workerCalls.length > 0);
+    assert.equal(workerSource.match(/createSystemPrincipal\(\s*[^,]+,\s*'dingtalk'/g)?.length, workerCalls.length);
+    assert.doesNotMatch(workerSource, /'renewal'|'forecast'/);
+    const systemFiles = new Set([
+      new URL('../apps/api/src/modules/workspace/command-runner.ts', import.meta.url).href,
+      new URL('../apps/api/src/modules/workspace/system-principal.ts', import.meta.url).href,
+      workerUrl.href,
+    ]);
     function assertNoSystemCallers(dir) {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir);
@@ -331,7 +342,7 @@ try {
         else if (
           entry.name.endsWith('.ts') &&
           !entry.name.endsWith('.spec.ts') &&
-          !['command-runner.ts', 'system-principal.ts'].includes(entry.name)
+          !systemFiles.has(path.href)
         ) {
           assert.doesNotMatch(
             readFileSync(path, 'utf8'),

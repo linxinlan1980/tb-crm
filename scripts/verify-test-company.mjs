@@ -10,6 +10,7 @@ const { PrismaClient, Prisma } = require('@prisma/client');
 export async function verifyTestCompany({
   dir = join(project, '.local/accounts'),
   url = 'http://127.0.0.1:3000',
+  allowMarkedFormalTests = false,
 } = {}) {
   const registry = JSON.parse(readFileSync(join(dir, 'registry.json'), 'utf8'));
   const entry = registry.accounts.find((a) => a.code === 'TEST' && a.status === 'ready' && a.purpose === 'test');
@@ -196,6 +197,7 @@ export async function verifyTestCompany({
     eq(restricted.restrictedMatch, true, 'restricted duplicate warning');
     const formalEntry = registry.accounts.find((a) => a.code === 'TINGMENG' && a.status === 'ready');
     let formalBusinessEmpty;
+    let formalOnlyMarkedTests;
     if (formalEntry) {
       const formalConfig = JSON.parse(readFileSync(formalEntry.configFile, 'utf8'));
       const formal = new PrismaClient({ datasourceUrl: formalConfig.DATABASE_URL });
@@ -217,9 +219,28 @@ export async function verifyTestCompany({
           'approval',
           'approvalFlow',
           'serviceTicket',
-        ])
+        ]) {
+          if (allowMarkedFormalTests && ['approval', 'approvalFlow'].includes(model)) continue;
           eq(await formal[model].count(), 0, 'formal account remains empty: ' + model);
-        formalBusinessEmpty = true;
+        }
+        if (allowMarkedFormalTests) {
+          eq(await formal.approval.count({ where: { OR: [
+            { title: { not: { startsWith: '【测试】' } } }, { bizType: { not: 'general' } },
+            { status: { notIn: ['approved', 'rejected', 'withdrawn'] } },
+          ] } }), 0, 'formal approvals only completed marked tests');
+          eq(await formal.approvalFlow.count({ where: { OR: [
+            { name: { not: { startsWith: '【测试】' } } }, { isActive: true },
+          ] } }), 0, 'formal flows only inactive marked tests');
+          eq(await formal.calendarEntry.count({ where: { OR: [
+            { title: { not: { startsWith: '【测试】' } } }, { status: { not: 'cancelled' } },
+          ] } }), 0, 'formal calendars only cancelled marked tests');
+          eq(await formal.activitySyncJob.count({ where: { status: { in: ['prepared', 'dispatching', 'uncertain'] } } }), 0, 'formal test outbox settled');
+          eq(await formal.activitySyncSetting.count({ where: { OR: [
+            { calendarEnabled: true }, { todoEnabled: true }, { autoEnabled: true },
+          ] } }), 0, 'formal sync consent disabled after testing');
+          formalBusinessEmpty = false;
+          formalOnlyMarkedTests = true;
+        } else formalBusinessEmpty = true;
         await assert.rejects(db.$queryRawUnsafe('SELECT COUNT(*) FROM `' + formalEntry.database + '`.customers'));
         checks++;
         await assert.rejects(formal.$queryRawUnsafe('SELECT COUNT(*) FROM `' + entry.database + '`.customers'));
@@ -237,6 +258,7 @@ export async function verifyTestCompany({
       creatorAndAssignment: true,
       approvalAndDeliveryStates: true,
       formalBusinessEmpty: formalBusinessEmpty ?? 'no formal account in isolated CI fixture',
+      ...(formalOnlyMarkedTests ? { formalOnlyMarkedTests } : {}),
       golden: {
         pipeline: '871500.00',
         weighted: '284100.00',
@@ -250,4 +272,4 @@ export async function verifyTestCompany({
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
-  console.log(JSON.stringify(await verifyTestCompany({ url: process.env.CRM_LOCAL_URL || 'http://127.0.0.1:3000' })));
+  console.log(JSON.stringify(await verifyTestCompany({ url: process.env.CRM_LOCAL_URL || 'http://127.0.0.1:3000', allowMarkedFormalTests: process.env.ALLOW_MARKED_FORMAL_TESTS === 'true' })));
