@@ -434,7 +434,11 @@ export class WorkspaceService {
           },
         ],
       };
-    else if (kind === 'followups' || kind === 'receipts')
+    else if (kind === 'receipts') visibility = { OR: [
+      { contractId: { in: (await tx.contract.findMany({where:{tenantId:a.tenantId,deletedAt:null,...(await ownerScope(tx,a))},select:{id:true}})).map(c=>c.id) } },
+      { contractId: null, customerId: { in: (await tx.customer.findMany({ where: {tenantId:a.tenantId,deletedAt:null,...(await customerScope(tx,a,false))},select:{id:true} })).map(c=>c.id) } },
+    ] };
+    else if (kind === 'followups')
       visibility = {
         customerId: {
           in: (
@@ -593,13 +597,26 @@ export class WorkspaceService {
     const related: Record<string, unknown> = {};
     if (kind === 'customers') {
       for (const child of ['contacts', 'opportunities', 'contracts', 'projects', 'followups'])
+        if (hasPermission(a, resourcePermission(child, 'read')))
         related[child] = (await this.db(tx, child).findMany({
           where: { ...(await this.scope(tx, a, child)), customerId: recordId },
           take: 30,
           orderBy: { createdAt: 'desc' },
         })).map(r=>child==='opportunities'?salesAmountProjection(r):r);
+      if (hasPermission(a, 'action:read')) related.actions = await tx.actionPlan.findMany({
+        where: { ...(await this.scope(tx, a, 'actions')), targetType: 'customer', targetId: recordId },
+        take: 30, orderBy: { dueDate: 'asc' },
+      });
     }
     if (kind === 'opportunities') {
+      if (hasPermission(a, 'follow_up:read')) related.followups = await tx.followUp.findMany({
+        where: { ...(await this.scope(tx, a, 'followups')), targetType: 'opportunity', targetId: recordId },
+        take: 30, orderBy: { createdAt: 'desc' },
+      });
+      if (hasPermission(a, 'action:read')) related.actions = await tx.actionPlan.findMany({
+        where: { ...(await this.scope(tx, a, 'actions')), targetType: 'customer', targetId: row.customerId as number },
+        take: 30, orderBy: { dueDate: 'asc' },
+      });
       if(typeof row.contractId==='number'&&hasPermission(a,'contract:read'))related.linkedContract=await tx.contract.findMany({where:{...(await this.scope(tx,a,'contracts')),id:row.contractId}});
       related.quote = await tx.opportunityProduct.findMany({
         where: { tenantId: a.tenantId, opportunityId: recordId },
@@ -611,19 +628,23 @@ export class WorkspaceService {
       });
     }
     if (kind === 'contracts') {
+      if (hasPermission(a,'action:read')) related.actions = await tx.actionPlan.findMany({
+        where:{...(await this.scope(tx,a,'actions')),targetType:'customer',targetId:row.customerId as number,actionType:'contract_lifecycle',title:('成交路径｜'+String(row.contractNo)+'｜'+String(row.name)).slice(0,200)},take:30,
+      });
+      if (hasPermission(a,'opportunity:read')) related.opportunities = (await tx.opportunity.findMany({
+        where: { AND: [await this.scope(tx,a,'opportunities'), { OR: [{contractId:recordId}, ...(typeof row.opportunityId==='number'?[{id:row.opportunityId}]:[])] }] }, take:30,
+      })).map(r=>salesAmountProjection(r));
       related.items=await tx.contractItem.findMany({where:{tenantId:a.tenantId,contractId:recordId},orderBy:{sortOrder:'asc'}});
       related.changes = await tx.contractChange.findMany({
         where: { tenantId: a.tenantId, contractId: recordId },
         orderBy: { createdAt: 'desc' },
         take: 30,
       });
-      related.orders = await tx.order.findMany({
+      if (hasPermission(a, 'order:read')) related.orders = await tx.order.findMany({
         where: { ...(await this.scope(tx, a, 'orders')), contractId: recordId },
       });
-      related['payment-plans'] = await tx.paymentPlan.findMany({
-        where: { tenantId: a.tenantId, contractId: recordId },
-      });
       if (hasPermission(a, 'finance:read')) {
+        related['payment-plans'] = await tx.paymentPlan.findMany({ where: { ...(await this.scope(tx, a, 'payment-plans')), contractId: recordId } });
         related.invoices = await tx.invoice.findMany({ where: { ...(await this.scope(tx, a, 'invoices')), contractId: recordId }, orderBy: { invoiceDate: 'asc' } });
         related.receipts = await tx.receipt.findMany({ where: { ...(await this.scope(tx, a, 'receipts')), contractId: recordId }, orderBy: { receiptDate: 'asc' } });
       }
@@ -654,7 +675,7 @@ export class WorkspaceService {
       });
     if (kind === 'receipts') {
       related.allocations = await tx.receiptAllocation.findMany({
-        where: { tenantId: a.tenantId, receiptId: recordId },
+        where: { tenantId: a.tenantId, receiptId: recordId, paymentPlan: { contract: { tenantId:a.tenantId,deletedAt:null,...(await ownerScope(tx,a)) } } },
         orderBy: { id: 'desc' },
         take: 100,
       });

@@ -43,7 +43,7 @@ export const analyticsCapabilities = [
   outputSchema: { type: 'object', required: ['version', 'generatedAt', 'summary', 'monthly', 'notices'] },
   guards: [
     'authenticated tenant/actor',
-    'default self; explicit person/company/department checked against current data scope',
+    'role default; explicit person/company/department checked against current data scope',
     'object and record visibility',
     'RepeatableRead snapshot',
     'read-only; no state effect',

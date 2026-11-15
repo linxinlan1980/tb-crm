@@ -1,5 +1,5 @@
 import SalesFunnel from './SalesFunnel';
-import StatisticsPeople, { ownStatistics } from '../../components/StatisticsPeople';
+import StatisticsPeople, { defaultStatisticsPeople } from '../../components/StatisticsPeople';
 import type { SpreadsheetCell } from '../../utils/xlsx';
 import { csvCell } from '../../utils/csv';
 import { useEffect, useRef, useState } from 'react';
@@ -173,7 +173,7 @@ export default function AnalyticsPage() {
   const [kind, setKind] = useState(new URLSearchParams(window.location.search).get('tab') === 'collections' ? 'collections' : 'forecast'),
     [section, setSection] = useState('contracts');
   const [period, setPeriod] = useState(defaultStatisticsRange);
-  const [people, setPeople] = useState(ownStatistics);
+  const [people, setPeople] = useState(defaultStatisticsPeople);
   const [source, setSource] = useState('managed');
   const [bucket, setBucket] = useState('open');
   const [page, setPage] = useState(1),

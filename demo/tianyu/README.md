@@ -33,7 +33,7 @@
 - 管理员：`admin`
 - 全部演示账号初始密码：`12345`。完整用户名和人员编号见 `manifest.json` 和账号操作手册。
 
-统计页面默认本人。经营负责人选择“全公司（当前帐套）”；销售主管选择所属部门或权限内人员。建议总体预测使用 2025-01-01 至 2027-12-31，商机看板使用本月、华东销售1。
+统计页面按角色默认：经营负责人和管理员为全公司，销售主管为本部门及子部门，销售为本人。可显式选择权限内其他范围。建议总体预测使用2025-01-01至2027-12-31；看板支持全公司分页，也可选本月、指定销售。
 
 ## 现场案例
 
@@ -84,3 +84,15 @@ node --test demo/tianyu/generate.test.mjs
 介绍网页内嵌九张实际业务截图，可独立分发；两份 Word 分别是六页业务应用全景、八页账号与操作手册。原始截图在 `screenshots/`，虚构项目确认单在 `evidence/`。
 
 需要编辑资料源时，可在仓库根目录安装 `materials-requirements.txt` 中的文档库后，运行 `python3 demo/tianyu/build_docs.py`、`python3 demo/tianyu/build_product_page.py`。技术确认单使用 `python3 demo/tianyu/evidence/build_evidence.py` 再生成。
+
+## 追加审批与成交后路径
+
+`approval-scenarios.json`提供22类虚构阀门业务流程：六步推进、公海领取、客户资料和交易主体资料变更、项目金额、定制件评审、报价折扣、账期及回款行动调整。每类创建待审、通过、退回、撤回和退回后重提记录，共110条，完整保留人、节点、表单和决定。只调用TIANYU本机应用服务及虚构账号，不调用外部通讯。
+
+```sh
+node scripts/tianyu-approval-scenarios.mjs \
+  --company-config .local/accounts/TIANYU.json \
+  --confirm-fictional-tianyu
+```
+
+通用事项审批不冒充生产、发运、开票或自动业务回调。合同/订单/项目仍由各自受控命令推进。管理员可通过`sales.contract.plan@1.0`为已签合同创建成交路径行动表单，沿用真实合同归属，列出已知合同/开票/回款及待核步骤；拟定日期与实际事实分开保留。

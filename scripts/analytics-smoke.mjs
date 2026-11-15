@@ -91,11 +91,11 @@ try {
   await call('/analytics/collections?year=2059&ownerId=' + a.id, xt, 403);
   const schemas = await call('/analytics/schema', at); eq(schemas.length, 2, 'versioned report catalog');
   const options = await call('/analytics/options', mt); ok(!options.owners.some((u) => u.id === b.id), 'no other-team options');
-  for (const token of [mt, adt, gt]) {
+  for (const [token, expected, range] of [[mt, '100.01', 'department'], [adt, '1000099.01', 'company'], [gt, '1000099.01', 'company']]) {
     const own = await call('/analytics/forecast?year=2059', token);
-    eq(own.summary.open, '0.00', 'even managers and admins default self');
-    eq(own.audience.personRange, 'self');
-    eq((await call('/workspace/overview?from=2059-01-01&to=2059-12-31', token)).openOpportunities, 0, 'dashboard default self');
+    eq(own.summary.open, expected, 'role default authorized scope');
+    eq(own.audience.personRange, range);
+    eq((await call('/workspace/overview?from=2059-01-01&to=2059-12-31', token)).openOpportunities, token === mt ? 1 : 2, 'dashboard role default');
   }
   for (const token of [adt, gt]) {
     eq((await call('/analytics/forecast?year=2059&personRange=company', token)).summary.open, '1000099.01', 'company explicitly authorized');
@@ -112,8 +112,41 @@ try {
   const selfOptions = await call('/workspace/statistics-options', at);
   eq(selfOptions.owners.map(u=>u.id), [a.id]);eq(selfOptions.canCompany,false);eq(selfOptions.departments,[]);
   const adminOptions = await call('/workspace/statistics-options', adt);
-  eq(adminOptions.defaultRange,'self');eq(adminOptions.canCompany,true);
+  eq(adminOptions.defaultRange,'company');eq(adminOptions.canCompany,true);
   const delegatedReports = await verifyAgentReports({db,url,actors:[{token:at,userId:a.id},{token:mt,userId:manager.id},{token:adt,userId:admin.id},{token:gt,userId:boss.id}],owner:a,outsider:b,password,hash,tenantId:tid,deptId:deptA.id,alienToken:xt});
+
+  // Parent/child department and related records must share the same live access boundary.
+  const childDept=await db.department.create({data:{tenantId:tid,name:'Synthetic child',parentId:deptA.id}});
+  const child=await user('sales',childDept.id,'reportChild');
+  const cc=await db.customer.create({data:{tenantId:tid,code:'CH'+suffix,name:'Synthetic child customer',ownerId:child.id,poolType:'private'}});
+  const co=await makeOpp('CH',child.id,cc.id,{amount:'22.22'});
+  const cf=await db.followUp.create({data:{tenantId:tid,targetType:'opportunity',targetId:co.id,customerId:cc.id,method:'other',content:'Synthetic history authored by admin',createdBy:admin.id}});
+  const ca=await db.actionPlan.create({data:{tenantId:tid,targetType:'customer',targetId:cc.id,title:'Synthetic child plan',assigneeId:child.id,dueDate:future}});
+  const chct=await db.contract.create({data:{tenantId:tid,contractNo:'CH'+suffix,name:'Synthetic child contract',customerId:cc.id,ownerId:child.id,contractType:'implementation',amount:'22.22',status:'signed',signDate:future}});
+  const cp=await db.paymentPlan.create({data:{tenantId:tid,contractId:chct.id,planNo:'CH'+suffix,amount:'22.22',receivedAmount:'0',outstandingAmount:'22.22',dueDate:future}});
+  const ct=await login(child), freshBoss=await login(boss);
+  eq((await call('/workspace/statistics-options',mt)).owners.some(u=>u.id===child.id),true,'Child employee in manager options');
+  eq((await call('/analytics/forecast?year=2059',mt)).summary.open,'122.23','Manager default includes child department');
+  eq((await call('/analytics/forecast?year=2059&deptId='+childDept.id,mt)).summary.open,'22.22','Child department filter');
+  await call('/analytics/forecast?year=2059&deptId='+deptA.id,ct,403);
+  for(const [kind,id]of [['customers',cc.id],['opportunities',co.id],['contracts',chct.id],['payment-plans',cp.id],['actions',ca.id],['followups',cf.id]]) {
+    for(const token of [mt,adt,freshBoss,ct]) eq((await call('/workspace/'+kind+'/'+id,token)).id,id,'Related object visible to permitted role');
+    await call('/workspace/'+kind+'/'+id,bt,404);
+  }
+  eq((await call('/workspace/followups?personRange=department&deptId='+deptA.id,mt)).items.some(f=>f.id===cf.id),true,'Transferred customer history follows owner, not original author');
+
+  const reviewFlow=await call('/approvals/flows',adt,201,{requestKey:randomUUID(),name:'Synthetic child review',bizType:'general',fields:[],nodes:[{name:'Manager',approverType:'user',approverValue:String(manager.id)}]});
+  const activeFlow=await call('/approvals/flows/'+reviewFlow.id+'/publish',adt,201,{requestKey:randomUUID(),expectedUpdatedAt:reviewFlow.updatedAt});
+  const review=await call('/capabilities/approval.request/invoke',ct,201,{kind:'form',requestKey:randomUUID(),flowId:activeFlow.id,title:'Synthetic child request',amount:'22.22',form:{}});
+  for(const token of [mt,adt,freshBoss,ct]) eq((await call('/approvals/'+review.id,token)).id,review.id,'Approval history follows organization read scope');
+  await call('/approvals/'+review.id,bt,404);
+  const reviewDetail=await call('/approvals/'+review.id,adt);
+  await call('/approvals/'+review.id+'/nodes/'+reviewDetail.currentNodeId+'/approve',freshBoss,403,{requestKey:randomUUID(),comment:'Must not decide for assigned manager'});
+  const smallRole=await db.role.create({data:{tenantId:tid,code:'customerOnly'+suffix,name:'Synthetic customer only',dataScope:'self',permissions:['customer:read']}});
+  await db.userRole.deleteMany({where:{tenantId:tid,userId:child.id}});await db.userRole.create({data:{tenantId:tid,userId:child.id,roleId:smallRole.id}});
+  const limited=await login(child),limitedDetail=await call('/workspace/customers/'+cc.id,limited);
+  eq(Object.keys(limitedDetail.related),['contacts'],'Missing module permissions omit related content');
+  await call('/workspace/opportunities/'+co.id,limited,403);
   await db.opportunity.createMany({ data: Array.from({ length: 10001 }, (_, i) => ({ tenantId: tid, code: 'B' + suffix + i, name: 'Synthetic bounded query', ownerId: b.id, customerId: customerB.id, stage: stage.code, amount: '0.01', expectedCloseDate: future })) });
   await call('/analytics/forecast?year=2059', bt, 400);
   await db.user.update({ where: { id: a.id }, data: { status: 'inactive' } });

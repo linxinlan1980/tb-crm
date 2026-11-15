@@ -32,7 +32,7 @@ try{
  let ready=false;for(let i=0;i<120;i++){try{ready=(await fetch(base+'/health/ready')).ok;}catch{}if(ready)break;if(api.exitCode!==null)throw Error(log);await delay(150);}eq(ready,true,'API ready');
  const login=async u=>(await call('/auth/login',null,200,{tenantCode:tenant.code,username:u.username,password})).accessToken;
  const [at,st,ot]=await Promise.all([login(admin),login(sales),login(outsider)]);
- const schema=await call('/sales-intake/schema',at);eq(schema.length,4,'Capability contracts');
+ const schema=await call('/sales-intake/schema',at);eq(schema.length,6,'Capability contracts');
  const source={requestKey:'archive-'+suffix,filename:'synthetic-source.txt',description:'Synthetic source',contentBase64:Buffer.from('Synthetic bytes '+suffix).toString('base64')};
  const archive=await call('/sales-intake/archives',at,201,source);
  eq((await call('/sales-intake/archives',at,201,{...source,requestKey:'archive2-'+suffix})).id,archive.id,'SHA source dedup');
@@ -67,7 +67,7 @@ try{
  eq((await db.actionPlan.findUnique({where:{id:receipt.ids.actions.a2}})).assigneeId,sales.id,'Collection preserves active legacy owner without department');
  const detail=await call('/workspace/opportunities/'+receipt.ids.opportunities.unknown,at);eq(detail.amount,null,'Unknown amount detail');
  const customerDetail=await call('/workspace/customers/'+receipt.ids.customers.new,at);eq(customerDetail.related.opportunities.find(o=>o.id===detail.id).amount,null,'Unknown price nested detail');
- const list=await call('/analytics/funnel?from=2010-01-01&to=2060-12-31',at);eq(list.summary.count,5,'Admin defaults self');eq([list.summary.confirmedLostAmount,list.summary.pendingIdentityLostAmount],['200.00','50.00'],'Separate identity groups');
+ const list=await call('/analytics/funnel?from=2010-01-01&to=2060-12-31',at);eq(list.summary.count,6,'Admin defaults company');eq([list.summary.confirmedLostAmount,list.summary.pendingIdentityLostAmount],['200.00','50.00'],'Separate identity groups');
  eq((await call('/analytics/funnel?from=2010-01-01&to=2060-12-31&personRange=company',at)).summary.count,6,'Explicit company scope');
  eq((await call('/analytics/funnel?from=2010-01-01&to=2060-12-31',ot)).items,[],'Other salesperson cannot see batch data');
  await call('/analytics/funnel?personRange=company',st,403);
@@ -75,6 +75,34 @@ try{
  const quote=await db.opportunity.findUnique({where:{id:receipt.ids.opportunities.monthly}});await db.opportunity.update({where:{id:quote.id},data:{expectedCloseDate:new Date('2059-07-01')}});
  eq((await call('/analytics/forecast?year=2059',at)).summary.open,'0.00','Recurring total excluded from forecast');
  eq((await call('/workspace/overview',at)).pipeline,'100','Recurring total excluded from workbench');
+
+ // Existing historical activities are repaired through the same authenticated application boundary.
+ const activityOpp=await db.opportunity.findUniqueOrThrow({where:{id:receipt.ids.opportunities.draft}}),activityAction=await db.actionPlan.findUniqueOrThrow({where:{id:receipt.ids.actions.a1}});
+ const item={kind:'opportunities',id:activityOpp.id,caseKey:'draft',expectedUpdatedAt:activityOpp.updatedAt.toISOString(),expectedCloseDate:'2026-12-01',closeDateEstimated:true,dateBasis:'Synthetic estimated target; not a signed or closed date',nextAction:'Confirm draft',nextActionDate:'2026-11-16',actionId:activityAction.id,actionVersion:activityAction.updatedAt.toISOString(),followup:{content:'Synthetic historical quotation evidence review, not new customer contact',occurredAt:'2026-11-01T01:00:00.000Z',estimated:true,sourceIds:['synthetic:draft']}};
+ const repair={requestKey:'activities-'+suffix,items:[item]},beforeRepair=await counts();
+ await call('/sales-intake/activities',st,403,repair);
+ await call('/sales-intake/activities',at,400,{...repair,tenantId:foreign.id});
+ await call('/sales-intake/activities',at,409,{requestKey:'invalid-source-'+suffix,items:[{...item,followup:{...item.followup,sourceIds:['foreign-source']}}]});
+ await call('/sales-intake/activities',at,409,{requestKey:'invalid-case-'+suffix,items:[{...item,caseKey:'foreign-case'}]});
+ const repaired=await call('/sales-intake/activities',at,201,repair);
+ eq(await call('/sales-intake/activities',at,201,repair),repaired,'Activity repair idempotency');
+ const refreshed=await db.opportunity.findUniqueOrThrow({where:{id:item.id}});
+ eq([refreshed.followCount,refreshed.lastFollowAt.toISOString(),refreshed.expectedCloseDate.toISOString().slice(0,10),refreshed.closedAt],[2,'2026-11-01T01:00:00.000Z','2026-12-01',null],'Sources, estimate and followup links repaired without closing');
+ eq(await counts(),beforeRepair,'Activity planning is silent and never changes finance or approvals');
+ await call('/sales-intake/activities',at,409,{...repair,requestKey:'stale-activities-'+suffix});
+
+ const planBody={requestKey:'contract-plan-'+suffix,contracts:[{id:contract.id,expectedUpdatedAt:before.updatedAt.toISOString(),dueDate:'2026-11-20',nextAction:'Synthetic verify acceptance report and final payment trigger',sourceIds:['crm:contract:'+contract.id]}]};
+ await call('/sales-intake/contract-plans',st,403,planBody);
+ await call('/sales-intake/contract-plans',at,409,{...planBody,requestKey:'draft-plan-'+suffix,contracts:[{...planBody.contracts[0],id:draft.id,expectedUpdatedAt:draft.updatedAt.toISOString()}]});
+ const contractPlans=await call('/sales-intake/contract-plans',at,201,planBody);
+ eq(await call('/sales-intake/contract-plans',at,201,planBody),contractPlans,'Contract path replay');
+ const form=await db.actionPlan.findUniqueOrThrow({where:{id:contractPlans.actions[0].id}});
+ eq(form.assigneeId,sales.id,'Contract form assigned to actual owner');
+ eq(form.content.includes('非已发生事实'),true,'Estimated path distinguishes actual facts');
+ eq(form.content.includes('Synthetic verify acceptance report'),true,'Concrete sourced next action retained');
+ eq((await call('/workspace/contracts/'+contract.id,at)).related.actions.some(a=>a.id===form.id),true,'Contract form linked from contract detail');
+ eq((await call('/sales-intake/contract-plans',at,201,{...planBody,requestKey:'contract-plan-repeat-'+suffix})).actions[0].reused,true,'One lifecycle form per contract');
+ eq(await counts(),beforeRepair,'Lifecycle forms never alter finance approvals or send messages');
  // Changed source after preview must roll back the whole import, including proposed customer.
  const stale={...manifest,batchKey:'stale-batch-'+suffix,customers:[{...customer,expectedUpdatedAt:existing.updatedAt.toISOString()},{...manifest.customers[1],name:'Synthetic rollback '+suffix}],cases:[c('stale-case',{customerKey:'existing'})],followups:[],actions:[]};
  const p2=await call('/sales-intake/preview',at,201,{requestKey:'stale-preview-'+suffix,manifest:stale});

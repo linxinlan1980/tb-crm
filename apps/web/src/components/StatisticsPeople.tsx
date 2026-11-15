@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Select, Space } from 'antd';
 import { get, errorText } from '../services/workspace';
+import { useAuthStore } from '../stores/useAuthStore';
 
 export interface StatisticsPeopleRange {
   personRange: 'self' | 'person' | 'company' | 'department';
@@ -14,13 +15,20 @@ interface PeopleOptions {
   departments: { id: number; name: string }[];
 }
 export const ownStatistics = (): StatisticsPeopleRange => ({ personRange: 'self' });
+export function defaultStatisticsPeople(): StatisticsPeopleRange {
+  const user = useAuthStore.getState().user;
+  if (user?.roles.some(r => ['super_admin', 'gm'].includes(r)) || user?.dataScope === 'all') return { personRange: 'company' };
+  if (user && ['dept', 'team'].includes(user.dataScope ?? '') && user.dept?.id) return { personRange: 'department', deptId: user.dept.id };
+  return ownStatistics();
+}
 export function statisticsPeopleFromParams(params: URLSearchParams): StatisticsPeopleRange {
   const range = params.get('personRange');
   // The server, never the URL, decides whether these selections are permitted.
   if (range === 'company') return { personRange: range };
   if (range === 'person') return { personRange: range, ownerId: Number(params.get('ownerId')) };
   if (range === 'department') return { personRange: range, deptId: Number(params.get('deptId')) };
-  return ownStatistics();
+  if (range === 'self') return ownStatistics();
+  return defaultStatisticsPeople();
 }
 export function statisticsQuery(period: { from: string; to: string }, people: StatisticsPeopleRange) {
   return new URLSearchParams(Object.entries({ ...period, ...people }).filter(([,v]) => v !== undefined).map(([k,v]) => [k,String(v)])).toString();
@@ -37,7 +45,7 @@ export default function StatisticsPeople({ value, onChange }: { value: Statistic
     <strong>人员范围</strong>
     <Select aria-label="统计人员范围" showSearch optionFilterProp="label" style={{ minWidth: 220, maxWidth: '100%' }} value={selected} loading={!options && !error} disabled={!options}
       options={[
-        { value: 'self', label: '本人（默认）' },
+        { value: 'self', label: '本人' },
         ...(options?.canCompany ? [{ value: 'company', label: '全公司（当前帐套）' }] : []),
         ...(options?.owners.filter(u => u.id !== options.selfId).map(u => ({ value: 'person:' + u.id, label: `${u.name} · ${u.employeeNo || '#' + u.id}${u.status !== 'active' ? '（已停用）' : ''}` })) ?? []),
         ...(options?.departments.map(d => ({ value: 'department:' + d.id, label: '部门：' + d.name })) ?? []),

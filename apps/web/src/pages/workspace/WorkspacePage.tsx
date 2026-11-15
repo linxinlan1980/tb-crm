@@ -671,6 +671,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                         contracts: '合同',
                         projects: '项目',
                         followups: '跟进',
+                        actions: '行动计划',
                         orders: '订单',
                         'payment-plans': '回款计划',
                         invoices: '开票记录',
