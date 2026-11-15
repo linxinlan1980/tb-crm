@@ -21,6 +21,7 @@ try{
  const hash=await bcrypt.hash(password,10);
  async function user(roleCode,name){const role=await db.role.findFirstOrThrow({where:{tenantId:tid,code:roleCode}});return db.user.create({data:{tenantId:tid,username:name.replaceAll(' ','')+suffix,name,deptId:dept.id,passwordHash:hash,roles:{create:{tenantId:tid,roleId:role.id}}}});}
  const admin=await user('super_admin','Synthetic admin'),sales=await user('sales','Synthetic salesperson'),outsider=await user('sales','Synthetic outsider');
+ await db.user.update({where:{id:sales.id},data:{deptId:null}});
  for(const [index,code] of ['proposal','signing','negotiation','delivery'].entries())await db.opportunityStage.upsert({where:{tenantId_code:{tenantId:tid,code}},update:{isActive:true},create:{tenantId:tid,code,name:code,probability:50,sortOrder:index}});
  const existing=await db.customer.create({data:{tenantId:tid,code:'EC'+suffix,name:'Synthetic existing customer '+suffix,ownerId:sales.id,ownerDeptId:dept.id,poolType:'private'}});
  const contract=await db.contract.create({data:{tenantId:tid,contractNo:'CT'+suffix,name:'Synthetic signed contract',customerId:existing.id,ownerId:sales.id,contractType:'implementation',status:'signed',amount:'125',totalOutstanding:'25'}});
@@ -43,6 +44,7 @@ try{
  await call('/sales-intake/preview',at,400,{requestKey:'inject-'+suffix,manifest:{...manifest,tenantId:foreign.id}});
  await call('/sales-intake/preview',at,409,{requestKey:'foreign-'+suffix,manifest:{...manifest,customers:[{...customer,existingId:foreignCustomer.id},manifest.customers[1]]}});
  await call('/sales-intake/preview',at,409,{requestKey:'stale-'+suffix,manifest:{...manifest,customers:[{...customer,expectedUpdatedAt:'2020-01-01T00:00:00.000Z'},manifest.customers[1]]}});
+ await call('/sales-intake/preview',at,409,{requestKey:'new-owner-no-dept-'+suffix,manifest:{...manifest,cases:[{...manifest.cases[0],ownerId:sales.id},...manifest.cases.slice(1)]}});
  const preview=await call('/sales-intake/preview',at,201,{requestKey:'preview-'+suffix,manifest});
  const before=await db.contract.findUnique({where:{id:contract.id}});
  const counts=async()=>Promise.all(['invoice','receipt','paymentPlan','approval','notification','integrationOutbox'].filter(k=>db[k]).map(k=>db[k].count({where:{tenantId:tid}})));
@@ -61,7 +63,7 @@ try{
  eq((await db.contractItem.findMany({where:{contractId:draft.id}})).map(r=>r.amount.toFixed(2)),['100.00'],'Actual draft line sum');
  eq((await db.opportunity.findUnique({where:{id:receipt.ids.opportunities.lost}})).closedAt,null,'Unknown lost date preserved');
  eq((await db.followUp.findUnique({where:{id:receipt.ids.followups.f1}})).method,'other','Internal revision not visit');
- eq((await db.actionPlan.findUnique({where:{id:receipt.ids.actions.a2}})).assigneeId,sales.id,'Collection follows contract owner');
+ eq((await db.actionPlan.findUnique({where:{id:receipt.ids.actions.a2}})).assigneeId,sales.id,'Collection preserves active legacy owner without department');
  const detail=await call('/workspace/opportunities/'+receipt.ids.opportunities.unknown,at);eq(detail.amount,null,'Unknown amount detail');
  const customerDetail=await call('/workspace/customers/'+receipt.ids.customers.new,at);eq(customerDetail.related.opportunities.find(o=>o.id===detail.id).amount,null,'Unknown price nested detail');
  const list=await call('/analytics/funnel?from=2010-01-01&to=2060-12-31',at);eq(list.summary.count,5,'Admin defaults self');eq([list.summary.confirmedLostAmount,list.summary.pendingIdentityLostAmount],['200.00','50.00'],'Separate identity groups');

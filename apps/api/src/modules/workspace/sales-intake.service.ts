@@ -175,24 +175,38 @@ export class SalesIntakeService {
     );
   }
   private async validate(tx: Tx, a: Actor, m: SalesManifest) {
-    const ownerIds = [
-      ...new Set([
-        a.userId,
-        ...m.cases.flatMap((c) => (c.ownerId ? [c.ownerId] : [])),
-        ...m.actions.flatMap((c) => (c.ownerId ? [c.ownerId] : [])),
-      ]),
-    ];
-    const owners = await tx.user.findMany({
+    const sourceContracts = await tx.contract.findMany({
       where: {
         tenantId: a.tenantId,
-        id: { in: ownerIds },
         deletedAt: null,
-        status: 'active',
-        department: { status: 1, deletedAt: null },
+        id: { in: [...new Set([...m.cases, ...m.actions].flatMap((c) => (c.contractId ? [c.contractId] : [])))] },
       },
-      select: { id: true },
+      select: { id: true, ownerId: true },
     });
-    if (owners.length !== ownerIds.length) throw new ConflictException('负责人已失效或部门不可用');
+    const preservedOwners = new Set(sourceContracts.map((c) => c.ownerId));
+    const newOwners = new Set([
+      a.userId,
+      ...m.cases.flatMap((c) =>
+        c.ownerId && !(c.contractId && sourceContracts.some((s) => s.id === c.contractId && s.ownerId === c.ownerId))
+          ? [c.ownerId]
+          : [],
+      ),
+      ...m.actions.flatMap((c) => (!c.contractId && c.ownerId ? [c.ownerId] : [])),
+    ]);
+    const ownerIds = [
+      ...new Set([...newOwners, ...preservedOwners, ...m.cases.flatMap((c) => (c.ownerId ? [c.ownerId] : []))]),
+    ];
+    const owners = await tx.user.findMany({
+      where: { tenantId: a.tenantId, id: { in: ownerIds }, deletedAt: null, status: 'active' },
+      select: { id: true, department: { select: { status: true, deletedAt: true } } },
+    });
+    if (owners.length !== ownerIds.length) throw new ConflictException('负责人已失效');
+    // Preserve a live legacy contract owner without fabricating a department or reassigning debt.
+    // New assignments still require an active department, even if that user owns another old contract.
+    if (
+      owners.some((o) => newOwners.has(o.id) && (!o.department || o.department.status !== 1 || o.department.deletedAt))
+    )
+      throw new ConflictException('新分配负责人部门不可用');
     for (const c of m.customers) {
       if (c.existingId) {
         const row = await tx.customer.findFirst({ where: { tenantId: a.tenantId, id: c.existingId, deletedAt: null } });
@@ -714,8 +728,8 @@ export class SalesIntakeService {
             amountBasis: '尚未形成有效报价',
             sourceDate,
             channel: typeof m.channel === 'string' ? m.channel : (l.sourceDetail ?? l.source),
-            ownerId: l.assigneeId??0,
-            ownerName: l.assigneeId?names.get(l.assigneeId):'未分配',
+            ownerId: l.assigneeId ?? 0,
+            ownerName: l.assigneeId ? names.get(l.assigneeId) : '未分配',
             lossReason: null,
             lossGroup: null,
             lossConfirmedAt: null,
