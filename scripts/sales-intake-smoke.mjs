@@ -58,6 +58,7 @@ try{
  eq(await counts(),financialBefore,'No invoices receipts receivables approvals or external outbox');
  eq(await db.contract.findUnique({where:{id:contract.id}}),before,'Signed contract entirely unchanged');
  eq((await db.customer.findUnique({where:{id:existing.id}})).ownerId,sales.id,'Existing customer ownership');
+ const createdCustomer=await db.customer.findUnique({where:{id:receipt.ids.customers.new}});const holding=await db.privateHolding.findFirstOrThrow({where:{customerId:createdCustomer.id}});eq(holding.protectUntil.toISOString(),createdCustomer.protectUntil.toISOString(),'Consistent customer protection period');
  const draft=await db.contract.findUnique({where:{id:receipt.ids.contracts.draft}});eq([draft.status,draft.signDate,draft.totalOutstanding.toFixed(2)],['draft',null,'0.00'],'No invented signatures or debt');
  eq((await db.opportunityQuote.findMany({where:{opportunityId:receipt.ids.opportunities.draft},orderBy:{version:'asc'}})).map(q=>q.total.toFixed(2)),['90.00','100.00'],'Quote revisions preserve totals');
  eq((await db.contractItem.findMany({where:{contractId:draft.id}})).map(r=>r.amount.toFixed(2)),['100.00'],'Actual draft line sum');

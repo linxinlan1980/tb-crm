@@ -347,6 +347,7 @@ export class SalesIntakeService {
             ownerId: a.userId,
             ownerDeptId: a.deptId,
             poolType: 'private',
+            protectUntil:new Date(Date.now()+30*86400000),
             createdBy: a.userId,
             remark: c.notes,
             tags: json({ salesIntake: { identityStatus: c.identityStatus, batchKey: m.batchKey } }),
@@ -359,7 +360,7 @@ export class SalesIntakeService {
             userId: a.userId,
             customerId: row.id,
             claimedAt: new Date(),
-            protectUntil: new Date(Date.now() + 30 * 86400000),
+            protectUntil: row.protectUntil!,
           },
         });
       }
