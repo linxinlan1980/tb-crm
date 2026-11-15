@@ -1,3 +1,4 @@
+import { roleAuthority } from '../../common/types/role-authority';
 import {
   Injectable,
   UnauthorizedException,
@@ -200,6 +201,7 @@ export class AuthService {
     });
     if (!user) throw new UnauthorizedException('用户不存在');
     const roles = user.roles.map((r) => r.role);
+    const authority = roleAuthority(roles);
     return {
       id: user.id,
       username: user.username,
@@ -208,14 +210,8 @@ export class AuthService {
       avatar: user.avatarUrl,
       dept: user.department ? { id: user.department.id, name: user.department.name } : null,
       roles: roles.map((r) => ({ id: r.id, code: r.code, name: r.name })),
-      permissions: [
-        ...new Set(
-          roles.flatMap((r) =>
-            Array.isArray(r.permissions) ? r.permissions.filter((p): p is string => typeof p === 'string') : [],
-          ),
-        ),
-      ],
-      dataScope: ['all', 'dept', 'team', 'custom', 'self'].find((s) => roles.some((r) => r.dataScope === s)) ?? 'self',
+      permissions: authority.permissions,
+      dataScope: authority.dataScope,
       updatedAt: user.updatedAt,
     };
   }
@@ -295,7 +291,8 @@ export class AuthService {
     });
   }
   private generateTokens(user: AuthUser, sid: string) {
-    const roles = user.roles.map((r) => r.role.code);
+    const authority = roleAuthority(user.roles.map((r) => r.role));
+    const roles = authority.roles;
     const payload = { sub: user.id, tid: user.tenantId, username: user.username, name: user.name, roles, sid };
     const accessToken = this.jwtService.sign(
       { ...payload, jti: randomUUID() },
@@ -317,6 +314,8 @@ export class AuthService {
         avatar: user.avatarUrl,
         dept: user.department ? { id: user.department.id, name: user.department.name } : null,
         roles,
+        permissions: authority.permissions,
+        dataScope: authority.dataScope,
         company: {
           code: user.tenant.code,
           name: user.tenant.name,

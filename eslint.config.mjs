@@ -18,7 +18,7 @@ export default tseslint.config(
       'apps/api/src/modules/customer/customer-visibility.ts', 'apps/api/src/modules/workspace/**/*.ts',
       'apps/api/src/modules/approval/**/*.ts', 'apps/api/src/modules/integration/platform*.ts', 'apps/api/src/modules/integration/directory*.ts', 'apps/api/src/modules/integration/dws-*.ts',
       'apps/api/src/modules/auth/**/*.ts', 'apps/api/src/modules/system/users/**/*.ts',
-      'apps/api/src/modules/system/departments/**/*.ts'],
+      'apps/api/src/modules/system/departments/**/*.ts', 'apps/api/src/modules/system/roles/access-policy*.ts'],
     rules: { '@typescript-eslint/no-explicit-any': 'error', '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }] },
   },
 );

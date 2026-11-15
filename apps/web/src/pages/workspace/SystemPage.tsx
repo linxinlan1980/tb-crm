@@ -1,7 +1,33 @@
+import AccessPolicyPanel from './AccessPolicyPanel';
 import { useEffect, useState, useRef } from 'react';
-import { Alert, Button, Card, Form, Input, Modal, Select, Table, Tag, Tabs, Typography, message } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Tabs,
+  Typography,
+  message,
+} from 'antd';
+import { useNavigate } from 'react-router-dom';
 import { get, post, put, key, errorText, type RecordRow } from '../../services/workspace';
 type DepartmentNode = RecordRow & { children?: DepartmentNode[] };
+interface PersonPolicy {
+  user: { id: number; name: string; username: string; status: string; department: { id: number; name: string } | null };
+  roles: { id: number; name: string; code: string }[];
+  dataScope: string;
+  configuredPoints: string[];
+  catalog: { code: string; label: string }[];
+  assignedCustomers: number;
+  notice: string;
+}
 function departmentTree(rows: RecordRow[]): DepartmentNode[] {
   const nodes = new Map(rows.map((r) => [r.id, { ...r } as DepartmentNode]));
   const roots: DepartmentNode[] = [];
@@ -25,6 +51,18 @@ function departmentTree(rows: RecordRow[]): DepartmentNode[] {
   return roots;
 }
 export default function SystemPage() {
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState('users'),
+    [personPolicy, setPersonPolicy] = useState<PersonPolicy>(),
+    [policyTarget, setPolicyTarget] = useState<number>(),
+    [policyPanelKey, setPolicyPanelKey] = useState(0);
+  const inspect = async (personId: number) => {
+    try {
+      setPersonPolicy(await get<PersonPolicy>('/system/access-policy/people/' + personId));
+    } catch (e) {
+      message.error(errorText(e));
+    }
+  };
   const [users, setUsers] = useState<RecordRow[]>([]),
     [roles, setRoles] = useState<RecordRow[]>([]),
     [depts, setDepts] = useState<RecordRow[]>([]),
@@ -143,7 +181,8 @@ export default function SystemPage() {
       </Button>
       {error && <Alert message={error} type="error" showIcon />}
       <Tabs
-        defaultActiveKey="users"
+        activeKey={activeTab}
+        onChange={setActiveTab}
         items={[
           {
             key: 'network',
@@ -183,6 +222,7 @@ export default function SystemPage() {
               <Card>
                 <Table
                   rowKey="id"
+                  scroll={{ x: 1000 }}
                   dataSource={users}
                   pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: setPage }}
                   columns={[
@@ -194,13 +234,29 @@ export default function SystemPage() {
                       dataIndex: 'roles',
                       render: (v: RecordRow[]) => v.map((r) => <Tag key={r.id}>{String(r.name)}</Tag>),
                     },
-                    { title: '状态', dataIndex: 'status' },
+                    {
+                      title: '状态',
+                      dataIndex: 'status',
+                      render: (value: string) => (
+                        <Tag color={value === 'active' ? 'processing' : 'default'}>
+                          {{ active: '启用', inactive: '停用', resigned: '离职' }[value] ?? value}
+                        </Tag>
+                      ),
+                    },
                     {
                       title: '操作',
                       render: (_, r) => (
-                        <Button type="link" onClick={() => edit(r)}>
-                          编辑 / 停用
-                        </Button>
+                        <Space>
+                          <Button type="link" onClick={() => edit(r)}>
+                            编辑 / 停用
+                          </Button>
+                          <Button type="link" onClick={() => void inspect(r.id)}>
+                            有效权限
+                          </Button>
+                          <Button type="link" onClick={() => navigate('/customer-allocation?ownerId=' + r.id)}>
+                            名下客户
+                          </Button>
+                        </Space>
                       ),
                     },
                   ]}
@@ -224,24 +280,7 @@ export default function SystemPage() {
           {
             key: 'roles',
             label: '角色权限',
-            children: (
-              <Card>
-                <Table
-                  rowKey="id"
-                  dataSource={roles}
-                  columns={[
-                    { title: '角色', dataIndex: 'name' },
-                    { title: '编码', dataIndex: 'code' },
-                    { title: '数据范围', dataIndex: 'dataScope' },
-                    {
-                      title: '权限',
-                      dataIndex: 'permissions',
-                      render: (v: string[]) => v?.map((p) => <Tag key={p}>{p}</Tag>),
-                    },
-                  ]}
-                />
-              </Card>
-            ),
+            children: <AccessPolicyPanel key={policyPanelKey} initialRoleId={policyTarget} />,
           },
           {
             key: 'departments',
@@ -456,6 +495,71 @@ export default function SystemPage() {
           autoComplete="new-password"
           placeholder="新密码"
         />
+      </Modal>
+      <Modal
+        title="人员有效权限与客户归属"
+        open={!!personPolicy}
+        onCancel={() => setPersonPolicy(undefined)}
+        footer={
+          personPolicy ? (
+            <Space>
+              <Button onClick={() => navigate('/customer-allocation?ownerId=' + personPolicy.user.id)}>
+                查看名下客户
+              </Button>
+              <Button
+                type="primary"
+                onClick={() => {
+                  setPolicyTarget(personPolicy.roles[0]?.id);
+                  setPolicyPanelKey((v) => v + 1);
+                  setActiveTab('roles');
+                  setPersonPolicy(undefined);
+                }}
+              >
+                配置所属角色权限
+              </Button>
+            </Space>
+          ) : null
+        }
+        width={800}
+      >
+        {personPolicy && (
+          <>
+            <Alert type="info" showIcon message={personPolicy.notice} />
+            <Descriptions
+              column={1}
+              style={{ marginTop: 16 }}
+              items={[
+                { key: 'user', label: '人员', children: personPolicy.user.name + ' / ' + personPolicy.user.username },
+                { key: 'department', label: '所属部门', children: personPolicy.user.department?.name ?? '未分配' },
+                { key: 'roles', label: '所属角色', children: personPolicy.roles.map((r) => r.name).join('、') },
+                {
+                  key: 'scope',
+                  label: '数据范围',
+                  children: (
+                    {
+                      self: '本人及显式协作',
+                      dept: '本部门（含停用人员名下资料，不含下级）',
+                      all: '当前公司',
+                      team: '本部门',
+                      custom: '本人（未开放自定义组）',
+                    } as Record<string, string>
+                  )[personPolicy.dataScope],
+                },
+                { key: 'customers', label: '名下客户', children: personPolicy.assignedCustomers },
+              ]}
+            />
+            <Typography.Paragraph>
+              修改角色矩阵会影响同一角色的全部人员；人员角色调整请使用“编辑 / 停用”。
+            </Typography.Paragraph>
+            <Space wrap>
+              {personPolicy.catalog
+                .filter((p) => personPolicy.configuredPoints.includes(p.code))
+                .map((p) => (
+                  <Tag key={p.code}>{p.label}</Tag>
+                ))}
+            </Space>
+          </>
+        )}
       </Modal>
     </div>
   );

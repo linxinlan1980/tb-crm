@@ -78,6 +78,7 @@ export const identityCapabilities = [
       'last administrator',
       'no self-disable/demotion',
       'pending approval handover',
+      'sales assets handed over before offboarding, department change or loss of sales authority',
       'session revocation',
     ],
   },

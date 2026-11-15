@@ -238,6 +238,27 @@ export class UserService {
       const nextPermissions = nextRoles.flatMap((r) =>
         Array.isArray(r.permissions) ? r.permissions.filter((v): v is string => typeof v === 'string') : [],
       );
+      const canOwnSales =
+        nextRoles.some((r) => r.code === 'super_admin') ||
+        (nextRoles.some((r) => ['sales', 'sales_manager'].includes(r.code)) &&
+          ['customer:read', 'customer:update'].every((permission) =>
+            nextPermissions.some((p) => [permission, '*', 'customer:*'].includes(p)),
+          ));
+      if (
+        securityChange &&
+        (status !== 'active' || (refs.deptId !== undefined && refs.deptId !== user.deptId) || !canOwnSales)
+      ) {
+        const assets = await Promise.all([
+          tx.customer.count({ where: { tenantId: actor.tenantId, ownerId: target, deletedAt: null } }),
+          tx.opportunity.count({ where: { tenantId: actor.tenantId, ownerId: target, deletedAt: null } }),
+          tx.contract.count({ where: { tenantId: actor.tenantId, ownerId: target, deletedAt: null } }),
+          tx.order.count({ where: { tenantId: actor.tenantId, ownerId: target, deletedAt: null } }),
+        ]);
+        if (assets.some(Boolean))
+          throw new ConflictException(
+            '该人员仍有客户、商机、合同或订单销售归属，请先通过客户分配/整体交接处理，再停用、调岗或移除销售职责',
+          );
+      }
       const canDeliver =
         nextRoles.some((r) => r.code === 'super_admin') ||
         (nextRoles.some((r) => ['sales', 'sales_manager'].includes(r.code)) &&

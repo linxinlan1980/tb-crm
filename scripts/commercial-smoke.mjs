@@ -723,7 +723,10 @@ try {
     admin,
   );
   const handedOverUser = (await call('/system/users/' + users.sales.id, 'GET', undefined, admin)).data;
-  await call('/system/users/' + users.sales.id, 'PUT', req({ status: 'inactive' }, handedOverUser), admin);
+  await call('/system/users/' + users.sales.id, 'PUT', req({ status: 'inactive' }, handedOverUser), admin, 409);
+  // Historical installations can already contain inactive owners. Construct that legacy fixture
+  // directly; new personnel commands must refuse offboarding before the sales-asset handover.
+  await db.user.update({ where: { id: users.sales.id }, data: { status: 'inactive' } });
   const opts = (await call('/commercial/customers/handover/options', 'GET', undefined, manager)).data;
   ok(
     opts.customers.some((r) => r.id === dormant.id),

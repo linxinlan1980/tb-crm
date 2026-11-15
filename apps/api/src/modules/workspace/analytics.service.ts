@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import type { Actor } from '../../common/types/actor';
 import { WorkspaceService } from './workspace.service';
-import { admin, boss, hasPermission, teamIds } from './access';
+import { companyWide, hasPermission, teamIds } from './access';
 import { validateActor } from './command-runner';
 import { reportQuery, forecastReport, collectionReport } from './analytics-policy';
 const LIMIT = 10000;
@@ -26,7 +26,7 @@ export class AnalyticsService {
       where: {
         tenantId: a.tenantId,
         deletedAt: null,
-        ...(!admin(a) && !boss(a) ? { id: { in: await teamIds(tx, a) } } : {}),
+        ...(!companyWide(a) ? { id: { in: await teamIds(tx, a) } } : {}),
       },
       select: { id: true, name: true, deptId: true },
       orderBy: { id: 'asc' },

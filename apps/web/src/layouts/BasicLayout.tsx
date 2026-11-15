@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Avatar, Dropdown, Tag, Typography, message, Button } from 'antd';
+import { Layout, Menu, Avatar, Dropdown, Tag, Typography, message, Button, Result } from 'antd';
+import { menuAccess } from '../services/access';
 import { authApi } from '../services/auth.api';
 import {
   DashboardOutlined,
@@ -24,6 +25,22 @@ export default function BasicLayout() {
     location = useLocation();
   const [mobile, setMobile] = useState(false);
   const { user, logout } = useAuthStore();
+  useEffect(() => {
+    void authApi
+      .getMe()
+      .then((profile) => {
+        const current = useAuthStore.getState();
+        if (current.user?.id === profile.id && current.accessToken && current.refreshToken)
+          current.setAuth(current.accessToken, current.refreshToken, {
+            ...current.user,
+            permissions: profile.permissions,
+            dataScope: profile.dataScope,
+          });
+      })
+      .catch(() => {
+        /* Authentication handler manages revoked sessions. */
+      });
+  }, []);
   const roles = user?.roles ?? [],
     isAdmin = roles.includes('super_admin'),
     roleName = isAdmin
@@ -43,7 +60,10 @@ export default function BasicLayout() {
       children: [
         { key: '/customers', label: '客户档案' },
         ...(isAdmin || roles.includes('sales_manager')
-          ? [{ key: '/customer-operations', label: '客户导入 / 销售交接' }]
+          ? [
+              { key: '/customer-allocation', label: '客户分配工作台' },
+              { key: '/customer-operations', label: '客户导入 / 销售交接' },
+            ]
           : []),
         { key: '/contacts', label: '联系人' },
         { key: '/pool/public', label: '公海客户' },
@@ -137,7 +157,13 @@ export default function BasicLayout() {
           mode="inline"
           selectedKeys={[location.pathname]}
           defaultOpenKeys={['customer', 'sales']}
-          items={items}
+          items={items.flatMap<(typeof items)[number]>((item) => {
+            if ('children' in item && item.children) {
+              const children = item.children.filter((child) => menuAccess(child.key, user?.permissions ?? [], isAdmin));
+              return children.length ? [{ ...item, children }] : [];
+            }
+            return menuAccess(item.key, user?.permissions ?? [], isAdmin) ? [item] : [];
+          })}
           onClick={({ key }) => {
             if (mobile) setCollapsed(true);
             if (key.startsWith('/')) navigate(key);
@@ -208,7 +234,11 @@ export default function BasicLayout() {
           </Dropdown>
         </Header>
         <Content style={{ padding: 28, background: '#f5f7fb', minWidth: 0 }}>
-          <Outlet key={`${sessionStorage.getItem('companyCode')}:${user?.id}`} />
+          {menuAccess(location.pathname, user?.permissions ?? [], isAdmin) ? (
+            <Outlet key={`${sessionStorage.getItem('companyCode')}:${user?.id}`} />
+          ) : (
+            <Result status="403" title="当前角色未获此功能权限" subTitle="请由管理员在角色功能权限中配置" />
+          )}
         </Content>
       </Layout>
     </Layout>

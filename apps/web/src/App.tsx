@@ -11,6 +11,7 @@ const Designer = lazy(() => import('./pages/approval/FlowDesignerPage'));
 const Integration = lazy(() => import('./pages/workspace/IntegrationPage'));
 const System = lazy(() => import('./pages/workspace/SystemPage'));
 const Account = lazy(() => import('./pages/workspace/AccountPage'));
+const CustomerAllocation = lazy(() => import('./pages/workspace/CustomerAllocationPage'));
 const CustomerOperations = lazy(() => import('./pages/workspace/CustomerOperationsPage'));
 const Ai = lazy(() => import('./pages/workspace/AiPage'));
 const Notifications = lazy(() => import('./pages/notification/NotificationCenterPage'));
@@ -87,6 +88,14 @@ export default function App() {
               element={
                 <Supervisor>
                   <CustomerOperations />
+                </Supervisor>
+              }
+            />
+            <Route
+              path="customer-allocation"
+              element={
+                <Supervisor>
+                  <CustomerAllocation />
                 </Supervisor>
               }
             />

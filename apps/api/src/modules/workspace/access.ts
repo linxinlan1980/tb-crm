@@ -5,24 +5,26 @@ import type { Tx } from './command-runner';
 export const admin = (a: Actor) => a.roles.includes('super_admin');
 export const boss = (a: Actor) => a.roles.includes('gm');
 export const manager = (a: Actor) => a.roles.includes('sales_manager');
+export const companyWide = (a: Actor) => admin(a) || boss(a) || a.dataScope === 'all';
 export function allowWrite(a: Actor) {
   if (!admin(a) && !manager(a) && !a.roles.includes('sales')) throw new ForbiddenException('当前角色无业务编辑权限');
 }
 export async function teamIds(tx: Tx, a: Actor) {
-  if (!manager(a) || a.deptId === null) return [a.userId];
+  if (!['dept', 'team'].includes(a.dataScope) || a.deptId === null) return [a.userId];
   return (
     await tx.user.findMany({
-      where: { tenantId: a.tenantId, deptId: a.deptId, status: 'active', deletedAt: null },
+      // Assets owned by inactive/resigned staff still belong to this department and need handover.
+      where: { tenantId: a.tenantId, deptId: a.deptId, deletedAt: null },
       select: { id: true },
     })
   ).map((u) => u.id);
 }
 export async function ownerScope(tx: Tx, a: Actor, field = 'ownerId'): Promise<Record<string, unknown>> {
-  if (admin(a) || boss(a)) return {};
+  if (companyWide(a)) return {};
   return { [field]: { in: await teamIds(tx, a) } };
 }
 export async function customerScope(tx: Tx, a: Actor, publicVisible = true) {
-  return customerVisibility(a, manager(a) ? await teamIds(tx, a) : undefined, publicVisible);
+  return customerVisibility(a, await teamIds(tx, a), publicVisible);
 }
 export function hasPermission(a: Actor, permission: string) {
   return admin(a) || a.permissions.some((p) => p === '*' || p === permission || p === permission.split(':')[0] + ':*');

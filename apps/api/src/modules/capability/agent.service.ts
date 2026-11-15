@@ -1,3 +1,4 @@
+import { roleAuthority } from '../../common/types/role-authority';
 import {
   BadRequestException,
   ConflictException,
@@ -75,17 +76,7 @@ export class AgentService {
       tenantId: user.tenantId,
       sessionId: session.id,
       deptId: user.deptId,
-      roles: roles.map((r) => r.code),
-      permissions: [
-        ...new Set(
-          roles.flatMap((r) =>
-            Array.isArray(r.permissions) ? r.permissions.filter((p): p is string => typeof p === 'string') : [],
-          ),
-        ),
-      ],
-      dataScope:
-        (['all', 'dept', 'team', 'custom', 'self'] as const).find((s) => roles.some((r) => r.dataScope === s)) ??
-        'self',
+      ...roleAuthority(roles),
     };
     if (contextHash(actor) !== grant.contextHash) throw new UnauthorizedException('委托人的权限已变化，请重新授权');
     return actor;

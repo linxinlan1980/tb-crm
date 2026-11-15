@@ -1,4 +1,5 @@
 import { AnalyticsController } from './analytics.controller';
+import { AllocationController } from './allocation.controller';
 import { AnalyticsService } from './analytics.service';
 import { Module } from '@nestjs/common';
 import { ApprovalModule } from '../approval/approval.module';
@@ -15,6 +16,7 @@ import { AttachmentService } from './attachment.service';
 @Module({
   imports: [ApprovalModule],
   controllers: [
+    AllocationController,
     AnalyticsController,
     WorkspaceController,
     CommercialController,
