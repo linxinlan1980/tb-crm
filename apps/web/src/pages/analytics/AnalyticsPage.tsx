@@ -223,6 +223,7 @@ export default function AnalyticsPage() {
     setPage(1);
   };
   const forecast = kind === 'forecast';
+  const scopeName = people.personRange === 'self' ? '本人' : people.personRange === 'company' ? '全公司' : people.personRange === 'person' ? '人员' + people.ownerId : '部门' + people.deptId;
   const detailData = forecast
     ? data?.details
     : section === 'receipts'
@@ -325,8 +326,8 @@ export default function AnalyticsPage() {
     : [
         ['期间到期计划', 'planned'],
         ['期间已复核到账', 'received'],
-        ['当前未收余额 · 全期间', 'currentOutstanding'],
-        ['当前逾期余额 · 全期间', 'currentOverdue'],
+        ['期间到期计划 · 当前未收', 'currentOutstanding'],
+        ['期间到期计划 · 当前逾期', 'currentOverdue'],
       ];
   return (
     <div>
@@ -448,7 +449,7 @@ export default function AnalyticsPage() {
                 </Card>
               </Col>
               <Col xs={24} xl={9}>
-                <Card title={forecast ? '负责人预测分布' : '当前余额账龄 · 不限计划期间'}>
+                <Card title={forecast ? '负责人预测分布' : '所选到期计划 · 当前余额账龄'}>
                   {forecast ? (
                     <Table
                       size="small"
@@ -541,10 +542,10 @@ export default function AnalyticsPage() {
               title={forecast ? '商机明细 · 所选口径' : '项目 / 计划 / 到账明细'}
               extra={
                 <Space wrap>
-                  <Button icon={<DownloadOutlined />} disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${period.from}至${period.to}-${forecast ? '销售预测' : section}`, columns)}>
+                  <Button icon={<DownloadOutlined />} disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${period.from}至${period.to}-${scopeName}-${forecast ? '销售预测' : section}`, columns)}>
                     导出 Excel
                   </Button>
-                  <Button disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${period.from}至${period.to}-${forecast ? '销售预测' : section}`, columns, 'csv')}>导出 CSV</Button>
+                  <Button disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${period.from}至${period.to}-${scopeName}-${forecast ? '销售预测' : section}`, columns, 'csv')}>导出 CSV</Button>
                 </Space>
               }
             >
@@ -571,8 +572,8 @@ export default function AnalyticsPage() {
                     { key: 'contracts', label: '项目月度矩阵' },
                     { key: 'plans', label: '期间到期计划' },
                     { key: 'receipts', label: '期间到账流水' },
-                    { key: 'balances', label: '当前未收 · 全期间' },
-                    { key: 'overdue', label: '当前逾期 · 全期间' },
+                    { key: 'balances', label: '期间到期计划 · 当前未收' },
+                    { key: 'overdue', label: '期间到期计划 · 当前逾期' },
                   ]}
                 />
               )}
