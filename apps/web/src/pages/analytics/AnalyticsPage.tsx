@@ -1,3 +1,4 @@
+import SalesFunnel from './SalesFunnel';
 import StatisticsPeople, { ownStatistics } from '../../components/StatisticsPeople';
 import type { SpreadsheetCell } from '../../utils/xlsx';
 import { csvCell } from '../../utils/csv';
@@ -32,7 +33,7 @@ type Detail = {
   planNo?: string;
   contractName?: string;
   ownerName?: string;
-  amount: string;
+  amount: string | null;
   weighted?: string | null;
   stageName?: string;
   expectedCloseDate?: string | null;
@@ -239,7 +240,7 @@ export default function AnalyticsPage() {
     title,
     dataIndex: key,
     align: 'right',
-    render: (v: unknown) => m(v),
+    render: (v: unknown) => v===null?'金额待确认':m(v),
   });
   const titleColumn: ColumnsType<Detail>[number] = {
     title: forecast ? '商机' : section === 'contracts' ? '合同 / 项目' : section === 'receipts' ? '收款单' : '付款计划',
@@ -520,23 +521,7 @@ export default function AnalyticsPage() {
                 />
               </Card>
             )}
-            {forecast && (
-              <Card title="开放阶段分布" style={{ marginTop: 18 }}>
-                <Table
-                  size="small"
-                  pagination={false}
-                  rowKey="stage"
-                  dataSource={data.stages}
-                  columns={[
-                    { title: '阶段', dataIndex: 'name' },
-                    { title: '数量', dataIndex: 'count' },
-                    { title: '金额', dataIndex: 'amount', render: m },
-                    { title: '加权', dataIndex: 'weighted', render: m },
-                    { title: '未加权数量', dataIndex: 'excluded' },
-                  ]}
-                />
-              </Card>
-            )}
+            {forecast && <SalesFunnel period={period} people={people}/>}
             <Card
               style={{ marginTop: 18 }}
               title={forecast ? '商机明细 · 所选口径' : '项目 / 计划 / 到账明细'}
@@ -614,7 +599,7 @@ export default function AnalyticsPage() {
       >
         {selected && (
           <>
-            <p>金额：¥{m(selected.amount)}</p>
+            <p>金额：{selected.amount===null?'待确认':'¥'+m(selected.amount)}</p>
             {selected.ownerName && <p>负责人：{selected.ownerName}</p>}
             {selected.contractName && <p>合同：{selected.contractName}</p>}
             {selected.expectedCloseDate && <p>预计成交：{day(selected.expectedCloseDate)}</p>}

@@ -225,3 +225,11 @@ describe('cash, allocation and planned receipts', () => {
     expect(r.summary.received).toBe('0.30');
   });
 });
+
+describe('historical quote forecast semantics',()=>{
+ it('excludes recurring and unknown totals across all monetary aggregates',()=>{
+  const rows=[opp({id:11,amount:decimal(100)}),opp({id:12,amount:decimal(9000),healthFactors:{salesIntake:{amountKnown:true,forecastEligible:false}}}),opp({id:13,amount:decimal(0),healthFactors:{salesIntake:{amountKnown:false,forecastEligible:false}}})];
+  const r=forecastReport(rows,[stage],q());
+  expect(r.summary.open).toBe('100.00');expect(r.summary.weighted).toBe('50.00');expect(r.stages[0].amount).toBe('100.00');expect(r.owners[0].open).toBe('100.00');expect(r.monthly[10].amount).toBe('100.00');expect(r.details.items.find(x=>x.id===13)?.amount).toBeNull();expect(r.summary.unweightedCount).toBe(2);
+ });
+});

@@ -46,6 +46,7 @@ interface ListResult {
 }
 const labels: Record<string, string> = {
   id: '编号',
+  itemName:'服务/产品',unitPrice:'单价',manDays:'人天',
   acceptanceState: '验收状态',
   actualHours: '累计实际工时',
   milestoneId: '关联里程碑',
@@ -87,6 +88,9 @@ const labels: Record<string, string> = {
   receiptDate: '收款日期',
   budgetAmount: '项目预算',
   createdAt: '创建时间',
+  activityAt: '历史发生时间',
+  amountStatus: '金额说明',
+  linkedContract: '关联合同',
   updatedAt: '更新时间',
   ownerId: '负责人编号',
   ownerName: '负责人',
@@ -247,6 +251,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     setPage(1);
     setQuery('');
   }, [kind, poolType]);
+  useEffect(()=>{const selected=params.get('id');if(selected&&/^[1-9]\d*$/.test(selected))void get<RecordRow>(`/workspace/${kind}/${selected}`).then(setDetail).catch(e=>message.error(errorText(e)));},[kind,params.get('id')]);
   useEffect(() => {
     void load();
     return () => {listRevision.current++;};
@@ -491,7 +496,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     projects: ['status', 'progress', 'acceptanceState', 'plannedEndDate'],
     tasks: ['status', 'assigneeName', 'dueDate'],
     actions: ['status', 'assigneeName', 'dueDate'],
-    followups: ['customerName', 'nextAction', 'nextFollowAt'],
+    followups: ['customerName', 'activityAt', 'nextAction', 'nextFollowAt'],
     products: ['category', 'unit', 'listPrice', 'taxRate'],
     'payment-plans': ['status', 'amount', 'receivedAmount', 'outstandingAmount', 'dueDate'],
     invoices: ['customerName', 'amount', 'invoiceDate', 'status'],
@@ -673,6 +678,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                         quote: '报价明细',
                         quoteVersions: '报价历史版本',
                         changes: '合同变更记录',
+                        items:'合同明细',linkedContract:'关联合同',
                       } as Record<string, string>
                     )[name] ?? name,
                   children:

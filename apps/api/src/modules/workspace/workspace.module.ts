@@ -16,6 +16,8 @@ import { AttachmentService } from './attachment.service';
 import { SourceArchiveController } from './source-archive.controller';
 import { SourceArchiveService } from './source-archive.service';
 import { BusinessRulesController } from './business-rules.controller';
+import { SalesIntakeController } from './sales-intake.controller';
+import { SalesIntakeService } from './sales-intake.service';
 @Module({
   imports: [ApprovalModule],
   controllers: [
@@ -28,6 +30,7 @@ import { BusinessRulesController } from './business-rules.controller';
     AttachmentController,
     SourceArchiveController,
     BusinessRulesController,
+    SalesIntakeController,
   ],
   providers: [
     AnalyticsService,
@@ -37,6 +40,7 @@ import { BusinessRulesController } from './business-rules.controller';
     ServiceTicketService,
     AttachmentService,
     SourceArchiveService,
+    SalesIntakeService,
   ],
   exports: [WorkspaceService, AnalyticsService],
 })

@@ -1,5 +1,9 @@
 # Architecture baseline · 2026-10-31
 
+## Reviewed sales evidence intake
+
+SalesIntakeService is a bounded human-administrator command boundary, not an arbitrary database adapter. A sealed, expiring preview is committed by the same authenticated company actor with live source versions. Serializable writes preserve source keys, exact quotation totals, owner relationships, private source archives, command receipts and audit; a historical import bypasses normal creation notifications and approval triggers explicitly. Signed source contracts and existing financial facts are only referenced. Unsigned drafts do not create accounts receivable. Unknown quote totals retain an explicit presence flag, while recurring/unit price bases are excluded from additive pipeline forecasts. Forecast and workspace projections share those rules. The existing analytics screen owns the sales funnel and click-through detail; live object scope intersects explicit statistical audience selections.
+
 ## 2026-11-15 local company deployment and reporting
 
 The local gateway serves the built React H5 and routes by registered company code to an independently spawned loopback NestJS process. Each company has a separate MySQL database and SQL account with grants only on that database, independent session signing/encryption keys, and no shared global environment loading. The installation control plane is loopback-only and authenticated by a separate operator token; the root provisioning connection never reaches workers. New companies initialize necessary references and one administrator, not synthetic business records. This is database/account isolation within one MySQL host, not separate hardware.

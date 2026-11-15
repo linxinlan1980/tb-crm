@@ -31,6 +31,7 @@ import { statisticsResourceFilter, statisticsOptions, statisticsScope, statistic
 import { businessDay, reportQuery } from './analytics-policy';
 import { businessPolicy, notifyOpportunity } from './business-policy';
 import { recalculateCustomerContracts } from './contract-change-policy';
+import { salesAmountProjection, salesIntakeMeta, salesForecastEligible } from './sales-intake-policy';
 import { paymentSchedule, paymentScheduleSchema } from './payment-schedule';
 import { financeEventsForActor, hideReceiptCorrectionFields } from './finance-policy';
 import { deliveryPeople, handoverProjectManager } from './delivery-staff-policy';
@@ -549,6 +550,8 @@ export class WorkspaceService {
       ).map((c) => [c.id, c.name]),
     );
     for (const row of items) {
+      if(kind==='opportunities')Object.assign(row,salesAmountProjection(row));
+      if(kind==='followups' && salesIntakeMeta(row.aiStructured).sourceId) row.activityAt=salesIntakeMeta(row.aiStructured).occurredAt??null;
       if (kind === 'receipts') hideReceiptCorrectionFields(a, row);
       if (typeof row.ownerId === 'number') row.ownerName = names.get(row.ownerId) ?? '未分配';
       if (typeof row.assigneeId === 'number') row.assigneeName = names.get(row.assigneeId) ?? '未分配';
@@ -576,6 +579,7 @@ export class WorkspaceService {
     const tx = this.prisma.system,
       row = await this.require(tx, a, kind, recordId);
     if (kind === 'receipts') hideReceiptCorrectionFields(a, row);
+    if(kind==='opportunities')Object.assign(row,salesAmountProjection(row));
     if (kind === 'customers' && row.poolType === 'public' && !admin(a) && !boss(a))
       return {
         id: row.id,
@@ -589,13 +593,14 @@ export class WorkspaceService {
     const related: Record<string, unknown> = {};
     if (kind === 'customers') {
       for (const child of ['contacts', 'opportunities', 'contracts', 'projects', 'followups'])
-        related[child] = await this.db(tx, child).findMany({
+        related[child] = (await this.db(tx, child).findMany({
           where: { ...(await this.scope(tx, a, child)), customerId: recordId },
           take: 30,
           orderBy: { createdAt: 'desc' },
-        });
+        })).map(r=>child==='opportunities'?salesAmountProjection(r):r);
     }
     if (kind === 'opportunities') {
+      if(typeof row.contractId==='number'&&hasPermission(a,'contract:read'))related.linkedContract=await tx.contract.findMany({where:{...(await this.scope(tx,a,'contracts')),id:row.contractId}});
       related.quote = await tx.opportunityProduct.findMany({
         where: { tenantId: a.tenantId, opportunityId: recordId },
       });
@@ -606,6 +611,7 @@ export class WorkspaceService {
       });
     }
     if (kind === 'contracts') {
+      related.items=await tx.contractItem.findMany({where:{tenantId:a.tenantId,contractId:recordId},orderBy:{sortOrder:'asc'}});
       related.changes = await tx.contractChange.findMany({
         where: { tenantId: a.tenantId, contractId: recordId },
         orderBy: { createdAt: 'desc' },
@@ -1031,6 +1037,7 @@ export class WorkspaceService {
           )
             throw new BadRequestException('关联对象创建后不可修改，请新建记录');
         }
+        if(kind==='opportunities' && row && data.amount!==undefined && Object.keys(salesIntakeMeta(row.healthFactors)).length)data.healthFactors=json({...object(row.healthFactors),salesIntake:{...salesIntakeMeta(row.healthFactors),amountKnown:true}});
         await this.references(tx, a, kind, { ...row, ...data });
         if (
           ['orders', 'projects'].includes(kind) &&
@@ -1679,7 +1686,7 @@ export class WorkspaceService {
     await tx.opportunityProduct.createMany({ data: items });
     await tx.opportunity.update({
       where: { id: row.id, tenantId: a.tenantId },
-      data: { amount: total, updatedAt: new Date(Math.max(Date.now(), new Date(row.updatedAt!).getTime() + 1)) },
+      data: { amount: total, ...(Object.keys(salesIntakeMeta(row.healthFactors)).length?{healthFactors:json({...object(row.healthFactors),salesIntake:{...salesIntakeMeta(row.healthFactors),amountKnown:true,forecastEligible:true,amountBasis:'正式产品报价明细总额'}})}:{}), updatedAt: new Date(Math.max(Date.now(), new Date(row.updatedAt!).getTime() + 1)) },
     });
     const latest = await tx.opportunityQuote.findFirst({
       where: { tenantId: a.tenantId, opportunityId: row.id },
@@ -1752,7 +1759,7 @@ export class WorkspaceService {
       role: admin(a) ? 'admin' : boss(a) ? 'boss' : manager(a) ? 'manager' : 'sales',
       customers: customers.length,
       openOpportunities: opps.filter((o) => o.status === 'open').length,
-      pipeline: sum(opps.filter((o) => o.status === 'open').map((o) => o.amount)),
+      pipeline: sum(opps.filter((o) => o.status === 'open' && salesForecastEligible(o)).map((o) => o.amount)),
       signedAmount: sum(
         contracts.filter((c) => ['signed', 'executing', 'completed'].includes(c.status)).map((c) => c.amount),
       ),
@@ -1765,7 +1772,7 @@ export class WorkspaceService {
         name: s.name,
         code: s.code,
         count: opps.filter((o) => o.status === 'open' && o.stage === s.code).length,
-        amount: sum(opps.filter((o) => o.status === 'open' && o.stage === s.code).map((o) => o.amount)),
+        amount: sum(opps.filter((o) => o.status === 'open' && o.stage === s.code && salesForecastEligible(o)).map((o) => o.amount)),
       })),
       actions,
       users,

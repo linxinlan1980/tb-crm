@@ -1,13 +1,20 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { Actor } from '../../common/types/actor';
+import { SalesIntakeService } from './sales-intake.service';
 import { AnalyticsService } from './analytics.service';
 import { hasPermission } from './access';
 import { analyticsCapabilities } from './analytics.contract';
 export { analyticsCapabilities } from './analytics.contract';
 @Controller('analytics')
 export class AnalyticsController {
-  constructor(private readonly service: AnalyticsService) {}
+  constructor(
+    private readonly service: AnalyticsService,
+    private readonly intake: SalesIntakeService,
+  ) {}
+  @Get('funnel') funnel(@CurrentUser() a: Actor, @Query() q: Record<string, string>) {
+    return this.intake.list(a, q);
+  }
   @Get('options') options(@CurrentUser() a: Actor) {
     return this.service.options(a);
   }

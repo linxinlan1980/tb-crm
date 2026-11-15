@@ -65,6 +65,7 @@ export class AnalyticsService {
               stage: true,
               status: true,
               amount: true,
+              healthFactors: true,
               expectedCloseDate: true,
               closedAt: true,
               nextAction: true,
@@ -100,7 +101,7 @@ export class AnalyticsService {
           notices: [
             '阶段加权是规则预测，不是销售承诺或AI预测。',
             '停用/未知阶段不计加权额；已赢单与开放商机互斥。',
-            '金额使用当前值；尚无历史快照/预测提报及锁定。',
+            '未知总价和未明确期限的月费不混入预测金额；金额使用当前值，尚无历史快照/预测提报及锁定。',
           ],
         };
       },

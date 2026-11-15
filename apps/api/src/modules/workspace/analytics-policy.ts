@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import {salesForecastEligible,knownSalesAmount} from './sales-intake-policy';
 import { Prisma, type Opportunity, type Contract, type PaymentPlan, type Receipt } from '@prisma/client';
 export type ForecastRow = Pick<
   Opportunity,
@@ -12,7 +13,7 @@ export type ForecastRow = Pick<
   | 'closedAt'
   | 'nextAction'
   | 'nextActionDate'
->;
+> & {healthFactors?:unknown};
 export type ContractRow = Pick<
   Contract,
   'id' | 'contractNo' | 'name' | 'ownerId' | 'amount' | 'currency' | 'signDate' | 'status'
@@ -131,12 +132,13 @@ export function forecastReport(
   stages: { code: string; name: string; probability: number; isActive: boolean }[],
   q: ReportQuery,
 ) {
+  const forecastAmount=(r:ForecastRow)=>salesForecastEligible(r)?r.amount:decimal(0);
   const definitions = new Map(stages.map((s) => [s.code, s]));
   const open = rows.filter((r) => r.status === 'open' && inPeriod(r.expectedCloseDate, q));
   const won = rows.filter((r) => r.status === 'won' && inPeriod(closedDay(r.closedAt), q));
   const lost = rows.filter((r) => r.status === 'lost' && inPeriod(closedDay(r.closedAt), q));
   const weight = (r: ForecastRow) => {
-    if (r.status !== 'open') return null;
+    if (r.status !== 'open'||!salesForecastEligible(r)) return null;
     const s = definitions.get(r.stage);
     return s?.isActive && s.probability >= 0 && s.probability <= 100
       ? decimal(r.amount).mul(s.probability).div(100).toDecimalPlaces(2)
@@ -148,7 +150,7 @@ export function forecastReport(
       stage,
       name: definitions.get(stage)?.name ?? '未知阶段',
       count: items.length,
-      amount: sumMoney(items.map((r) => r.amount)),
+      amount: sumMoney(items.map(forecastAmount)),
       weighted: sumMoney(
         items.flatMap((r) => {
           const w = weight(r);
@@ -162,19 +164,19 @@ export function forecastReport(
     const items = open.filter((r) => r.expectedCloseDate?.getUTCMonth() === month - 1 && r.expectedCloseDate?.getUTCFullYear() === year);
     return {
       year, month,
-      amount: sumMoney(items.map((r) => r.amount)),
+      amount: sumMoney(items.map(forecastAmount)),
       weighted: sumMoney(
         items.flatMap((r) => {
           const w = weight(r);
           return w === null ? [] : [w];
         }),
       ),
-      won: sumMoney(won.filter((r) => closedDay(r.closedAt)?.getUTCMonth() === month - 1 && closedDay(r.closedAt)?.getUTCFullYear() === year).map((r) => r.amount)),
+      won: sumMoney(won.filter((r) => closedDay(r.closedAt)?.getUTCMonth() === month - 1 && closedDay(r.closedAt)?.getUTCFullYear() === year).map(forecastAmount)),
     };
   });
   const owners = [...new Set([...open, ...won, ...lost].map((r) => r.ownerId))].map((ownerId) => ({
     ownerId,
-    open: sumMoney(open.filter((r) => r.ownerId === ownerId).map((r) => r.amount)),
+    open: sumMoney(open.filter((r) => r.ownerId === ownerId).map(forecastAmount)),
     weighted: sumMoney(
       open
         .filter((r) => r.ownerId === ownerId)
@@ -183,16 +185,16 @@ export function forecastReport(
           return w === null ? [] : [w];
         }),
     ),
-    won: sumMoney(won.filter((r) => r.ownerId === ownerId).map((r) => r.amount)),
+    won: sumMoney(won.filter((r) => r.ownerId === ownerId).map(forecastAmount)),
     wonCount: won.filter((r) => r.ownerId === ownerId).length,
     lostCount: lost.filter((r) => r.ownerId === ownerId).length,
   }));
   return {
     summary: {
       openCount: open.length,
-      open: sumMoney(open.map((r) => r.amount)),
+      open: sumMoney(open.map(forecastAmount)),
       weighted: sumMoney(groups.map((r) => r.weighted)),
-      won: sumMoney(won.map((r) => r.amount)),
+      won: sumMoney(won.map(forecastAmount)),
       wonCount: won.length,
       lostCount: lost.length,
       winRate:
@@ -221,7 +223,7 @@ export function forecastReport(
               : open
       ).map((r) => ({
         ...r,
-        amount: r.amount.toFixed(2),
+        amount: knownSalesAmount(r)?r.amount.toFixed(2):null,
         weighted: weight(r)?.toFixed(2) ?? null,
         stageName: definitions.get(r.stage)?.name ?? '未知阶段',
         risk:
