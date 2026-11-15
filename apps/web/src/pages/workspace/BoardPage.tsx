@@ -1,3 +1,4 @@
+import BusinessSort, {type BusinessSortValue} from '../../components/BusinessSort';
 import StatisticsPeople, { statisticsPeopleFromParams, statisticsQuery } from '../../components/StatisticsPeople';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { useState, useEffect, useRef } from 'react';
@@ -9,6 +10,7 @@ import { menuAccess } from '../../services/access';
 export default function BoardPage() {
   const [people, setPeople] = useState(() => statisticsPeopleFromParams(new URLSearchParams(window.location.search)));
   const [period,setPeriod]=useState(() => { const p = new URLSearchParams(window.location.search); return { from: p.get('from') ?? defaultStatisticsRange().from, to: p.get('to') ?? defaultStatisticsRange().to }; });
+  const [sorting,setSorting]=useState<BusinessSortValue>({sortBy:'createdAt',sortOrder:'desc'});
   const revision=useRef(0);
   const [page, setPage] = useState(1), [loading, setLoading] = useState(false);
   const user=useAuthStore(s=>s.user);
@@ -24,7 +26,7 @@ export default function BoardPage() {
     const requestRevision=++revision.current;setRows([]);setError('');setLoading(true);
     try {
       const [r, definitions] = await Promise.all([
-        get<{ items: RecordRow[]; meta: { total: number } }>('/workspace/opportunities', { page, pageSize: 100, ...period, ...people }),
+        get<{ items: RecordRow[]; meta: { total: number } }>('/workspace/opportunities', { page, pageSize: 100, ...period, ...people, ...sorting }),
         get<{ code: string; name: string }[]>('/commercial/opportunity-stages'),
       ]);
       const items=r.items.slice();
@@ -47,7 +49,7 @@ export default function BoardPage() {
   useEffect(() => {
     void load();
     return ()=>{revision.current++;};
-  }, [period.from,period.to,people.personRange,people.ownerId,people.deptId,page]);
+  }, [period.from,period.to,people.personRange,people.ownerId,people.deptId,page,sorting.sortBy,sorting.sortOrder]);
   const advance = async (r: RecordRow) => {
     try {
       await post(`/workspace/opportunities/${r.id}/advance`, { requestKey: key(), expectedUpdatedAt: r.updatedAt });
@@ -69,6 +71,7 @@ export default function BoardPage() {
       </div>
       <StatisticsPeriod value={period} onChange={v=>{setPage(1);setPeriod(v);}} />
       <StatisticsPeople value={people} onChange={v=>{setPage(1);setPeople(v);}} />
+      <BusinessSort value={sorting} fields={[{key:"createdAt",label:"录入日期"},{key:"updatedAt",label:"更新日期"},{key:"expectedCloseDate",label:"预计成交日期"},{key:"amount",label:"商机金额"},{key:"name",label:"商机名称"}]} onChange={v=>{setPage(1);setSorting(v);}}/>
       <Typography.Paragraph type="secondary">按预计成交日期筛选，共{total}条，当前页{rows.length}条。阶段数量和金额为本页汇总；完整统计请查看销售预测。未填写预计成交日的商机可在列表补齐。</Typography.Paragraph>
       {error && <Alert type="error" message={error} />}{' '}
       {loading && <Spin tip="正在读取商机" />}

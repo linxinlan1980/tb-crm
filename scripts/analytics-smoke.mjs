@@ -155,6 +155,21 @@ try {
   const limited=await login(child),limitedDetail=await call('/workspace/customers/'+cc.id,limited);
   eq(Object.keys(limitedDetail.related),['contacts'],'Missing module permissions omit related content');
   await call('/workspace/opportunities/'+co.id,limited,403);
+  // Sorting must cover every matching record before server pagination; permissions remain unchanged.
+  const sortRows=await Promise.all(Array.from({length:47},(_,i)=>db.actionPlan.create({data:{tenantId:tid,targetType:'customer',targetId:customer.id,title:'Sort '+suffix+' '+i,assigneeId:a.id,dueDate:i<45?new Date(Date.UTC(2058,0,1+(i%17))):null}})));
+  for(const direction of ['asc','desc']){
+    const actual=[];
+    for(let page=1;page<=3;page++)actual.push(...(await call('/workspace/actions?keyword=Sort%20'+suffix+'&pageSize=20&page='+page+'&sortBy=dueDate&sortOrder='+direction,at)).items);
+    const expected=[...sortRows].sort((x,y)=>x.dueDate===null||y.dueDate===null?(x.dueDate===null&&y.dueDate===null?(x.id-y.id)*(direction==='asc'?1:-1):x.dueDate===null?1:-1):((x.dueDate-y.dueDate)||x.id-y.id)*(direction==='asc'?1:-1));
+    eq(actual.map(r=>r.id),expected.map(r=>r.id),'All-page action dates '+direction+' with null dates last and stable ties');
+    const r=await call('/analytics/forecast?year=2059&personRange=company&sortBy=amount&sortOrder='+direction+'&pageSize=2',adt);
+    const values=r.details.items.map(x=>Number(x.amount));eq(values,[...values].sort((a,b)=>(a-b)*(direction==='asc'?1:-1)),'Report money sorted globally '+direction);
+  }
+  await call('/workspace/actions?sortBy=passwordHash',at,400);
+  await call('/workspace/actions?sortOrder=sideways',at,400);
+  await call('/analytics/forecast?sortBy=healthFactors',at,400);
+  await call('/analytics/forecast?sortOrder=sideways',at,400);
+  await call('/workspace/actions?personRange=person&ownerId='+b.id+'&sortBy=dueDate',at,403);
   await db.opportunity.createMany({ data: Array.from({ length: 10001 }, (_, i) => ({ tenantId: tid, code: 'B' + suffix + i, name: 'Synthetic bounded query', ownerId: b.id, customerId: customerB.id, stage: stage.code, amount: '0.01', expectedCloseDate: future })) });
   await call('/analytics/forecast?year=2059', bt, 400);
   await db.user.update({ where: { id: a.id }, data: { status: 'inactive' } });

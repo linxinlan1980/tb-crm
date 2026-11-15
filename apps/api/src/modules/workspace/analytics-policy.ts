@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { reportSortFields, sortBusinessRows } from './workspace-sort';
 import {salesForecastEligible,knownSalesAmount} from './sales-intake-policy';
 import { Prisma, type Opportunity, type Contract, type PaymentPlan, type Receipt } from '@prisma/client';
 export type ForecastRow = Pick<
@@ -64,8 +65,12 @@ export function reportQuery(q: Record<string, string>, now = new Date()) {
     'bucket',
     'from',
     'to',
+    'sortBy',
+    'sortOrder',
   ];
   if (Object.keys(q).some((k) => !allowed.includes(k))) throw new BadRequestException('存在未定义的报表参数');
+  const sortBy=q.sortBy??'id',sortOrder=q.sortOrder??'desc';
+  if (!(reportSortFields as readonly string[]).includes(sortBy)||!['asc','desc'].includes(sortOrder)) throw new BadRequestException('报表排序字段或方向无效');
   const integer = (key: string, fallback: number, min: number, max: number) => {
     if (q[key] === undefined) return fallback;
     if (typeof q[key] !== 'string' || !/^\d+$/.test(q[key])) throw new BadRequestException(`${key}必须为整数`);
@@ -93,6 +98,7 @@ export function reportQuery(q: Record<string, string>, now = new Date()) {
   if (end <= start) throw new BadRequestException('结束日期不能早于开始日期');
   return {
     year,
+    sortBy,sortOrder:sortOrder as 'asc'|'desc',
     month,
     ownerId: integer('ownerId', 0, 1, 2147483647),
     deptId: integer('deptId', 0, 1, 2147483647),
@@ -123,7 +129,7 @@ export function closedDay(d: Date | null) {
 }
 export function pageRows<T>(rows: T[], q: ReportQuery) {
   return {
-    items: rows.slice((q.page - 1) * q.pageSize, q.page * q.pageSize),
+    items: sortBusinessRows(rows,q.sortBy,q.sortOrder).slice((q.page - 1) * q.pageSize, q.page * q.pageSize),
     meta: { page: q.page, pageSize: q.pageSize, total: rows.length },
   };
 }

@@ -1,6 +1,7 @@
 import type { Actor } from '../../common/types/actor';
 import { statisticsProperties } from './statistics-scope';
 import { hasPermission } from './access';
+import { reportSortFields } from './workspace-sort';
 const inputSchema = {
   type: 'object',
   additionalProperties: false,
@@ -16,6 +17,7 @@ const inputSchema = {
     source: { enum: ['managed', 'legacy'] },
     detail: { enum: ['contracts', 'plans', 'receipts', 'balances', 'overdue'] },
     bucket: { enum: ['open', 'won', 'lost', 'closed', 'undated'] },
+    sortBy:{enum:reportSortFields},sortOrder:{enum:['asc','desc']},
   },
 };
 export const analyticsCapabilities = [

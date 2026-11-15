@@ -62,6 +62,8 @@
 
 新增[统计人员范围与数据权限](docs/operations/STATISTICS_DATA_SCOPE.md)：全部现行统计默认本人，指定人员、部门、全公司由实时后端权限控制，钻取、导出及MCP保持相同范围。
 
+新增[业务和统计正反序排序](docs/operations/BUSINESS_SORTING.md)：日期、金额、名称等排序，分页列表在服务端排序后分页，保留现有数据权限。
+
 ## 本地安装与访问
 
 先阅读[公司帐套、手机H5及外网配置说明](docs/LOCAL_COMPANY_INSTALL.md)。需要Node.js 24、pnpm 11.25.0和本机MySQL 8。

@@ -1,9 +1,11 @@
+import Table from '../../components/BusinessTable';
+import BusinessSort,{type BusinessSortValue} from '../../components/BusinessSort';
 import StatisticsPeople, { statisticsPeopleFromParams, statisticsQuery } from '../../components/StatisticsPeople';
 import { menuAccess } from '../../services/access';
 import { useEffect, useRef, useState } from 'react';
 import StatisticsPeriod, { defaultStatisticsRange } from '../../components/StatisticsPeriod';
 import { useNavigate } from 'react-router-dom';
-import { Alert, Button, Card, Col, Empty, Progress, Row, Space, Spin, Statistic, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Empty, Progress, Row, Space, Spin, Statistic, Tag, Typography } from 'antd';
 import { ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons';
 import { get, errorText, money, type RecordRow } from '../../services/workspace';
 import { useAuthStore } from '../../stores/useAuthStore';
@@ -27,6 +29,7 @@ interface Overview {
 export default function DashboardPage() {
   const [people, setPeople] = useState(() => statisticsPeopleFromParams(new URLSearchParams(window.location.search)));
   const [period, setPeriod] = useState(() => { const p = new URLSearchParams(window.location.search); return { from: p.get('from') ?? defaultStatisticsRange().from, to: p.get('to') ?? defaultStatisticsRange().to }; });
+  const [funnelSort,setFunnelSort]=useState<BusinessSortValue>({sortBy:'name',sortOrder:'asc'});
   const revision = useRef(0);
   const [data, setData] = useState<Overview>(),
     [error, setError] = useState(''),
@@ -127,7 +130,8 @@ export default function DashboardPage() {
                   </Button>
                 }
               >
-                {data?.funnel?.map((f, i) => (
+                <BusinessSort value={funnelSort} fields={[{key:'name',label:'阶段名称'},{key:'count',label:'商机数量'},{key:'amount',label:'商机金额'}]} onChange={setFunnelSort}/>
+                {[...(data?.funnel??[])].sort((a,b)=>(funnelSort.sortBy==='name'?a.name.localeCompare(b.name,'zh-CN'):Number(a[funnelSort.sortBy as 'count'|'amount'])-Number(b[funnelSort.sortBy as 'count'|'amount']))*(funnelSort.sortOrder==='asc'?1:-1)).map((f, i) => (
                   <div key={f.code} style={{ marginBottom: 14 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>

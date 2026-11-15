@@ -1,3 +1,5 @@
+import Table from '../../components/BusinessTable';
+import BusinessSort, { type BusinessSortValue } from '../../components/BusinessSort';
 import SalesFunnel from './SalesFunnel';
 import StatisticsPeople, { defaultStatisticsPeople } from '../../components/StatisticsPeople';
 import type { SpreadsheetCell } from '../../utils/xlsx';
@@ -15,7 +17,6 @@ import {
   Space,
   Spin,
   Statistic,
-  Table,
   Tabs,
   Tag,
   Typography,
@@ -169,6 +170,7 @@ async function exportDetail(rows: Detail[], name: string, columns: ColumnsType<D
   } catch (e) { message.error(errorText(e)); }
 }
 export default function AnalyticsPage() {
+  const [sorting,setSorting]=useState<BusinessSortValue>({sortBy:'id',sortOrder:'desc'});
   const [options, setOptions] = useState<Options>();
   const [kind, setKind] = useState(new URLSearchParams(window.location.search).get('tab') === 'collections' ? 'collections' : 'forecast'),
     [section, setSection] = useState('contracts');
@@ -200,6 +202,7 @@ export default function AnalyticsPage() {
       const r = await get<Report>('/analytics/' + kind, {
         ...period,
         ...people,
+        ...sorting,
         source,
         page,
         pageSize: 20,
@@ -218,7 +221,7 @@ export default function AnalyticsPage() {
     return () => {
       seq.current++;
     };
-  }, [options, kind, period.from, period.to, people.personRange, people.ownerId, people.deptId, source, page, section, bucket]);
+  }, [options, kind, period.from, period.to, people.personRange, people.ownerId, people.deptId, source, page, section, bucket,sorting.sortBy,sorting.sortOrder]);
   const reset = (fn: () => void) => {
     fn();
     setPage(1);
@@ -430,7 +433,7 @@ export default function AnalyticsPage() {
                     rowKey={r => `${r.year}-${r.month}`}
                     dataSource={data.monthly}
                     columns={[
-                      { title: '月份', dataIndex: 'month', render: (_v: number, r: Report['monthly'][number]) => `${r.year}-${r.month}月` },
+                      { title: '月份', dataIndex: 'month', sorter:(a:Report['monthly'][number],b:Report['monthly'][number])=>((a.year??0)*12+a.month)-((b.year??0)*12+b.month), render: (_v: number, r: Report['monthly'][number]) => `${r.year}-${r.month}月` },
                       {
                         title: forecast ? '开放商机' : '到期计划',
                         dataIndex: forecast ? 'amount' : 'planned',
@@ -562,7 +565,9 @@ export default function AnalyticsPage() {
                   ]}
                 />
               )}
+              <BusinessSort value={sorting} onChange={v=>reset(()=>setSorting(v))} fields={[{key:"id",label:"录入顺序"},...columns.flatMap(c=>"dataIndex"in c&&typeof c.dataIndex==="string"&&!["ownerName","stageName","risk","nextAction","contractName"].includes(c.dataIndex)?[{key:c.dataIndex,label:String(c.title)}]:[])]}/>
               <Table<Detail>
+                serverSorted
                 rowKey="id"
                 size="small"
                 dataSource={detailData?.items}
@@ -611,7 +616,7 @@ export default function AnalyticsPage() {
                 pagination={false}
                 dataSource={selected.months}
                 columns={[
-                  { title: '月份', dataIndex: 'month', render: (_v: number, r: NonNullable<Detail['months']>[number]) => `${r.year}-${r.month}月` },
+                  { title: '月份', dataIndex: 'month', sorter:(a:NonNullable<Detail['months']>[number],b:NonNullable<Detail['months']>[number])=>((a.year??0)*12+a.month)-((b.year??0)*12+b.month), render: (_v: number, r: NonNullable<Detail['months']>[number]) => `${r.year}-${r.month}月` },
                   { title: '计划', dataIndex: 'planned', render: m },
                   { title: '已回', dataIndex: 'received', render: m },
                 ]}

@@ -1,3 +1,4 @@
+import Table from '../../components/BusinessTable';
 import StatisticsPeople, { statisticsPeopleFromParams } from '../../components/StatisticsPeople';
 import type { SpreadsheetCell } from '../../utils/xlsx';
 import { csvCell } from '../../utils/csv';
@@ -17,7 +18,6 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Tag,
   Tabs,
   Typography,
@@ -28,6 +28,7 @@ import ContractChanges from './ContractChanges';
 import AttachmentPanel from './AttachmentPanel';
 import QuoteHistory, { QuoteLines } from './QuoteHistory';
 import OpportunityFollowup from './OpportunityFollowup';
+import BusinessSort, { type BusinessSortValue } from '../../components/BusinessSort';
 import {
   get,
   post,
@@ -174,6 +175,7 @@ const display = (name: string, v: unknown) =>
   );
 export default function WorkspacePage({ kind, poolType }: { kind: string; poolType?: string }) {
   const [params]=useSearchParams();
+  const [sorting,setSorting]=useState<BusinessSortValue>(()=>({sortBy:kind==='actions'?'dueDate':'createdAt',sortOrder:kind==='actions'?'asc':'desc'}));
   const [people, setPeople] = useState(() => statisticsPeopleFromParams(params));
   const [personActive, setPersonActive] = useState(() => params.has('personRange'));
   const [dateActive,setDateActive]=useState(()=>!!params.get('from'));
@@ -233,6 +235,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           page,
           pageSize: 20,
           keyword: query,
+          ...sorting,
           ...(poolType ? { poolType } : {}),
           ...(kind === 'customers' ? { customerCategory, channelBrand } : {}),
           ...(personActive && kind !== 'products' ? people : {}),
@@ -254,12 +257,13 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     setEditing(undefined);
     setPage(1);
     setQuery(params.get('keyword')??'');
+    setSorting({sortBy:kind==='actions'?'dueDate':'createdAt',sortOrder:kind==='actions'?'asc':'desc'});
   }, [kind, poolType]);
   useEffect(()=>{const selected=params.get('id');if(selected&&/^[1-9]\d*$/.test(selected))void get<RecordRow>(`/workspace/${kind}/${selected}`).then(setDetail).catch(e=>message.error(errorText(e)));},[kind,params.get('id')]);
   useEffect(() => {
     void load();
     return () => {listRevision.current++;};
-  }, [kind, poolType, page, query, customerCategory, channelBrand,personActive,people.personRange,people.ownerId,people.deptId,dateActive,dateField,period.from,period.to]);
+  }, [kind, poolType, page, query, customerCategory, channelBrand,personActive,people.personRange,people.ownerId,people.deptId,dateActive,dateField,period.from,period.to,sorting.sortBy,sorting.sortOrder]);
   const openDetail = async (row: RecordRow) => {
     try {
       setDetail(await get<RecordRow>(`/workspace/${kind}/${row.id}`));
@@ -601,6 +605,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
         </Space>
         {personActive && kind !== 'products' && <StatisticsPeople value={people} onChange={v => {setPeople(v);setPage(1);}}/>}
         {dateActive&&<StatisticsPeriod value={period} onChange={v=>{setPeriod(v);setPage(1);}}/>}
+        {spec?.sortFields&&<div><BusinessSort value={sorting} fields={spec.sortFields} onChange={v=>{setSorting(v);setPage(1);}}/></div>}
         {kind === 'customers' && <Space wrap style={{ marginBottom: 16 }}>
           <Select aria-label="客户标记筛选" allowClear placeholder="全部客户标记" style={{ width: 180 }} value={customerCategory}
             options={[{ value: 'direct', label: '普通直客' }, { value: 'sales_channel', label: '销售渠道客户' }]}
@@ -618,10 +623,12 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           }}
         />
         <Table
+          serverSorted
           rowKey="id"
           loading={loading}
           dataSource={rows}
-          columns={columns}
+          columns={columns.map(c=>c.dataIndex&&spec?.sortFields?.some(f=>f.key===c.dataIndex)?{...c,sorter:true,sortOrder:sorting.sortBy===c.dataIndex?(sorting.sortOrder==='asc'?'ascend' as const:'descend' as const):null}:c)}
+          onChange={(_pagination,_filters,sorter)=>{if(!Array.isArray(sorter)&&sorter.order&&typeof sorter.field==='string'){setSorting({sortBy:sorter.field,sortOrder:sorter.order==='ascend'?'asc':'desc'});setPage(1);}}}
           scroll={{ x: 900 }}
           pagination={{ current: page, pageSize: 20, total, onChange: setPage, showTotal: (n) => `共 ${n} 条` }}
           locale={{ emptyText: <Empty description="暂无业务数据" /> }}

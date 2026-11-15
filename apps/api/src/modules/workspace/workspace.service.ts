@@ -35,6 +35,7 @@ import { salesAmountProjection, salesIntakeMeta, salesForecastEligible } from '.
 import { followupTime } from './sales-activity-policy';
 import { opportunityFollowInput, opportunityFollowSchema } from './opportunity-follow-policy';
 import { pendingCustomerName } from './pending-customer';
+import { workspaceSortFields, defaultWorkspaceSort, workspaceOrderBy } from './workspace-sort';
 import { paymentSchedule, paymentScheduleSchema } from './payment-schedule';
 import { financeEventsForActor, hideReceiptCorrectionFields } from './finance-policy';
 import { deliveryPeople, handoverProjectManager } from './delivery-staff-policy';
@@ -125,6 +126,7 @@ export class WorkspaceService {
           version: '1.0',
           canCreate,
           canEdit,
+          sortFields:workspaceSortFields(key), defaultSort:defaultWorkspaceSort(key),
           actions,
           operations: [
             ...(key === 'customers' && canCreate
@@ -248,6 +250,7 @@ export class WorkspaceService {
                   page: { type: 'integer', minimum: 1 },
                   pageSize: { type: 'integer', minimum: 1, maximum: 100 },
                   keyword: { type: 'string', maxLength: 100 },
+                  sortBy:{enum:workspaceSortFields(key).map(f=>f.key)},sortOrder:{enum:['asc','desc']},
                   ...statisticsProperties,
                   from: { type:'string',format:'date',description:'Inclusive 2010..2060 business date; provide to together' },
                   to: { type:'string',format:'date' },
@@ -527,7 +530,7 @@ export class WorkspaceService {
     const [items, total] = await Promise.all([
       this.db(tx, kind).findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }, { id:'desc' }],
+        orderBy: workspaceOrderBy(kind,query),
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
