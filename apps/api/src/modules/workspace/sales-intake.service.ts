@@ -19,6 +19,7 @@ import { salesIntakeMeta, salesForecastEligible } from './sales-intake-policy';
 import { reportQuery } from './analytics-policy';
 import { statisticsScope } from './statistics-scope';
 import { salesActivityBody, contractPlanBody, actionCalendarBody, followupTime } from './sales-activity-policy';
+import { pendingCustomerName } from './pending-customer';
 const provider = 'crm-sales-intake';
 const identifier = z.string().uuid();
 const requestKey = z.string().min(1).max(80);
@@ -231,6 +232,12 @@ export class SalesIntakeService {
         if (meta.caseKey !== x.caseKey) throw new ConflictException('历史事项来源不匹配');
         const customerId = 'customerId' in row ? row.customerId : Number(meta.customerId);
         if (!Number.isSafeInteger(customerId) || customerId <= 0) throw new ConflictException('历史事项缺少客户关联');
+        if(x.identityStage){
+          const customer=await tx.customer.findFirst({where:{tenantId:a.tenantId,id:customerId,deletedAt:null},select:{name:true}});
+          if(x.kind!=='opportunities'||row.status==='won'||!pendingCustomerName(customer?.name))throw new ConflictException('仅身份待核的非成交商机可回归发现阶段');
+          if(!await tx.opportunityStage.findFirst({where:{tenantId:a.tenantId,code:x.identityStage,isActive:true}}))throw new ConflictException('发现阶段未启用');
+          await tx.opportunity.update({where:{id:x.id},data:{stage:x.identityStage,stageHistory:json([...('stageHistory'in row&&Array.isArray(row.stageHistory)?row.stageHistory:[]),{stage:x.identityStage,previousStage:'stage'in row?row.stage:null,changedAt:new Date().toISOString(),reason:'客户名字待核实，当前管理阶段回归发现/需求确认；原商务历史、报价及掉单结果保留'}])}});
+        }
         const action = await tx.actionPlan.findFirst({ where:{tenantId:a.tenantId,id:x.actionId,deletedAt:null,targetType:'customer',targetId:customerId} });
         if (!action || !['pending','in_progress','overdue'].includes(action.status)) throw new ConflictException('行动已结束或客户不匹配');
         checkVersion(action,x.actionVersion);
@@ -537,7 +544,7 @@ export class SalesIntakeService {
             batchKey: m.batchKey,
             identityStatus: customer.identityStatus,
           };
-          const stage = c.outcome === 'lost' ? 'negotiation' : c.kind === 'contract' ? 'signing' : 'proposal';
+          const stage = pendingCustomerName(customer.name)&&c.outcome!=='won'?'qualified':c.outcome === 'lost' ? 'negotiation' : c.kind === 'contract' ? 'signing' : 'proposal';
           if (!(await tx.opportunityStage.findFirst({ where: { tenantId: a.tenantId, code: stage, isActive: true } })))
             throw new ConflictException('所需商机阶段未启用');
           const row = await tx.opportunity.create({

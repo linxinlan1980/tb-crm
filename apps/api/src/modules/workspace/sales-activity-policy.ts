@@ -7,6 +7,7 @@ export const salesActivityBody = z.object({
   items: z.array(z.object({
     kind: z.enum(['opportunities','leads']), id: z.number().int().positive(), expectedUpdatedAt: z.string().datetime(),
     caseKey: z.string().min(1).max(90),
+    identityStage: z.enum(['new','qualified']).optional(),
     expectedCloseDate: day.optional(), closeDateEstimated: z.boolean().optional(), dateBasis: z.string().min(1).max(1000),
     nextAction: z.string().min(1).max(200), nextActionDate: day,
     actionId: z.number().int().positive(), actionVersion: z.string().datetime(),

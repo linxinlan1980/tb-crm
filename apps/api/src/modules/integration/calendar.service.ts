@@ -39,9 +39,9 @@ export class CalendarService {
       const items = await tx.calendarEntry.findMany({
         where: { tenantId: a.tenantId, AND:[{OR:[...(includeOwn?[{ownerId:a.userId}]:[]),{origin:'crm_plan',...(audience.ownerIds!==null?{ownerId:{in:audience.ownerIds}}:{})}]}], OR: [{ startsAt: { gte: start, lt: end } }, { startsAt: { lt: start }, endsAt: { gt: start } }] },
         orderBy: { startsAt: 'asc' },
-        take: 1001,
+        take: 5001,
       });
-      if (items.length > 1000) throw new BadRequestException('日程超过1000条，请缩小时间范围');
+      if (items.length > 5000) throw new BadRequestException('日程超过5000条，请缩小时间或人员范围');
       const people=await tx.user.findMany({where:{tenantId:a.tenantId,id:{in:[...new Set(items.map(e=>e.ownerId))]}},select:{id:true,name:true}});
       return { items:items.map(e=>({...e,ownerName:people.find(p=>p.id===e.ownerId)?.name??'历史负责人'})), audience, timeZone: 'Asia/Shanghai' };
     });

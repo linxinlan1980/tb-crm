@@ -119,8 +119,29 @@ try{
  await call('/workspace/actions/'+form.id+'/complete',at,201,{requestKey:'complete-plan-'+suffix,expectedUpdatedAt:form.updatedAt.toISOString()});
  eq((await db.calendarEntry.findUniqueOrThrow({where:{id:calendarEntry.id}})).status,'completed','Completing action closes linked calendar without external effects');
  eq(await counts(),beforeRepair,'Calendar and completion never alter finance approvals or external outbox');
+
+ const contextual=await call('/workspace/opportunities/'+activityOpp.id,at);
+ const followBody={requestKey:'context-follow-'+suffix,expectedUpdatedAt:contextual.updatedAt,followup:{method:'other',content:'Synthetic actual work record for this opportunity',nextAction:'Confirm technical scope and next decision',nextFollowAt:'2059-07-02',createAction:true}};
+ await call('/workspace/opportunities/'+contextual.id+'/follow',ot,404,followBody);
+ await call('/workspace/opportunities/'+contextual.id+'/follow',at,400,{...followBody,tenantId:foreign.id});
+ const contextualResult=await call('/workspace/opportunities/'+contextual.id+'/follow',at,201,followBody);
+ eq(await call('/workspace/opportunities/'+contextual.id+'/follow',at,201,followBody),contextualResult,'Contextual followup replay');
+ const afterFollow=await call('/workspace/opportunities/'+contextual.id,at);
+ eq(afterFollow.related.followups.some(f=>f.id===contextualResult.followupId),true,'Followup is directly readable in the opportunity');
+ eq(afterFollow.followCount,3,'Opportunity follow count updated');
+ eq((await db.calendarEntry.findUniqueOrThrow({where:{id:contextualResult.calendarId}})).externalSnapshot.actionId,contextualResult.actionId,'New followup action and proposed calendar linked');
+ await call('/workspace/opportunities/'+contextual.id+'/follow',at,409,{...followBody,requestKey:'stale-follow-'+suffix});
+ eq(await counts(),beforeRepair,'Opportunity followup has no financial, approval or external effects');
+
+ const ownedManual=await db.opportunity.create({data:{tenantId:tid,code:'MF'+suffix,name:'Synthetic salesperson followup',customerId:existing.id,ownerId:sales.id,stage:'proposal'}});
+ const ownedBody={requestKey:'own-follow-'+suffix,expectedUpdatedAt:ownedManual.updatedAt.toISOString(),followup:{content:'Synthetic actual work',method:'other'}};
+ await call('/workspace/opportunities/'+ownedManual.id+'/follow',st,201,ownedBody);
+ const salesRole=await db.role.findFirstOrThrow({where:{tenantId:tid,code:'sales'}});
+ await db.role.update({where:{id:salesRole.id},data:{permissions:salesRole.permissions.filter(p=>!['follow_up:create','follow_up:*','*'].includes(p))}});
+ const narrowed=await login(sales);
+ await call('/workspace/opportunities/'+ownedManual.id+'/follow',narrowed,403,ownedBody);
  // Changed source after preview must roll back the whole import, including proposed customer.
- const stale={...manifest,batchKey:'stale-batch-'+suffix,customers:[{...customer,expectedUpdatedAt:existing.updatedAt.toISOString()},{...manifest.customers[1],name:'Synthetic rollback '+suffix}],cases:[c('stale-case',{customerKey:'existing'})],followups:[],actions:[]};
+ const stale={...manifest,batchKey:'stale-batch-'+suffix,customers:[{...customer,expectedUpdatedAt:(await db.customer.findUniqueOrThrow({where:{id:existing.id}})).updatedAt.toISOString()},{...manifest.customers[1],name:'Synthetic rollback '+suffix}],cases:[c('stale-case',{customerKey:'existing'})],followups:[],actions:[]};
  const p2=await call('/sales-intake/preview',at,201,{requestKey:'stale-preview-'+suffix,manifest:stale});
  await db.customer.update({where:{id:existing.id},data:{remark:'Version changed'}});
  await call('/sales-intake/commit',at,409,{requestKey:'stale-commit-'+suffix,previewId:p2.previewId,digest:p2.digest,confirm:true});

@@ -5,12 +5,16 @@ import StatisticsPeriod, { defaultStatisticsRange } from '../../components/Stati
 import { Alert, Button, Card, Empty, Pagination, Space, Spin, Tag, Typography, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { get, post, key, errorText, money, type RecordRow } from '../../services/workspace';
+import { menuAccess } from '../../services/access';
 export default function BoardPage() {
   const [people, setPeople] = useState(() => statisticsPeopleFromParams(new URLSearchParams(window.location.search)));
   const [period,setPeriod]=useState(() => { const p = new URLSearchParams(window.location.search); return { from: p.get('from') ?? defaultStatisticsRange().from, to: p.get('to') ?? defaultStatisticsRange().to }; });
   const revision=useRef(0);
   const [page, setPage] = useState(1), [loading, setLoading] = useState(false);
-  const canEdit = !useAuthStore((s) => s.user?.roles.includes('gm'));
+  const user=useAuthStore(s=>s.user);
+  const has=(p:string)=>user?.roles.includes('super_admin')||user?.permissions?.some(x=>[p,'*',p.split(':')[0]+':*'].includes(x));
+  const canEdit=Boolean(user?.roles.some(r=>['super_admin','sales_manager','sales'].includes(r))&&has('opportunity:update'));
+  const canCustomer=menuAccess('/customers',user?.permissions??[],user?.roles.includes('super_admin')??false);
   const [stages, setStages] = useState<string[][]>([]);
   const [rows, setRows] = useState<RecordRow[]>([]),
     [total, setTotal] = useState(0),
@@ -93,12 +97,15 @@ export default function BoardPage() {
               </div>
               {list.map((r) => (
                 <Card key={r.id} size="small" style={{ marginBottom: 12 }}>
-                  <strong>{String(r.name)}</strong>
+                  <Button type="link" style={{padding:0,height:'auto',whiteSpace:'normal',textAlign:'left',fontWeight:600}} onClick={()=>navigate(`/opportunities?id=${r.id}`)}>{String(r.name)}</Button>
+                  <div style={{marginTop:8,fontWeight:500}}>客户：{canCustomer?<Button type="link" style={{padding:0,height:'auto',whiteSpace:'normal',textAlign:'left'}} onClick={()=>navigate(`/customers?id=${String(r.customerId)}`)}>{String(r.customerName??'客户名字待核实')}</Button>:String(r.customerName??'客户名字待核实')}</div>
                   <Typography.Paragraph style={{ marginTop: 12 }}>¥{money(r.amount)}</Typography.Paragraph>
                   <Tag color={r.status==='lost'?'red':r.status==='won'?'green':'blue'}>{({won:'已赢单',lost:'已掉单',cancelled:'已取消',on_hold:'暂缓'} as Record<string,string>)[String(r.status)]??'进行中'}</Tag>
                   <Typography.Paragraph type="secondary" style={{marginTop:8,marginBottom:0}}>{String(r.ownerName??'')} · {String(r.expectedCloseDate??'').slice(0,10)}</Typography.Paragraph>
+                  <Typography.Paragraph type="secondary" style={{marginTop:4,marginBottom:0}}>跟进 {Number(r.followCount??0)} 次 · 最近 {r.lastFollowAt?String(r.lastFollowAt).slice(0,10):'待记录'}</Typography.Paragraph>
                   {String(r.remark??'').includes('[日期估算]') && <Tag>日期估算</Tag>}
                   {Boolean(r.nextAction) && <Typography.Paragraph style={{marginTop:8,marginBottom:0}}>下一步：{String(r.nextAction)}</Typography.Paragraph>}
+                  <Space wrap style={{marginTop:8}}><Button size="small" onClick={()=>navigate(`/opportunities?id=${r.id}`)}>商机详情</Button>{has('follow_up:read')&&<Button size="small" onClick={()=>navigate(`/opportunities?id=${r.id}&tab=followups`)}>查看跟进</Button>}</Space>
                   {canEdit && r.status === 'open' && (
                     <Button type="link" onClick={() => void advance(r)}>
                       推进下一阶段 →

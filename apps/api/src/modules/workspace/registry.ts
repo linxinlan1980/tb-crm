@@ -79,7 +79,7 @@ export const resources: Record<string, Resource> = {
       f('demandSummary', '需求摘要', 'textarea'),
       f('nextAction', '下一步行动'),
     ],
-    actions: ['advance', 'quote', 'lose'],
+    actions: ['advance', 'quote', 'lose', 'follow'],
   },
   contracts: {
     model: 'contract',

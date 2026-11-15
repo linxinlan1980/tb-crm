@@ -27,6 +27,7 @@ import { PlusOutlined, ReloadOutlined, ExportOutlined } from '@ant-design/icons'
 import ContractChanges from './ContractChanges';
 import AttachmentPanel from './AttachmentPanel';
 import QuoteHistory, { QuoteLines } from './QuoteHistory';
+import OpportunityFollowup from './OpportunityFollowup';
 import {
   get,
   post,
@@ -452,7 +453,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
   };
   const availableActions = (row: RecordRow) =>
     spec?.actions.filter((a) => {
-      if (a === 'follow') return false;
+      if (a === 'follow') return false; // The opportunity drawer owns the contextual followup form.
       if (kind === 'customers')
         return row.poolType === 'public' ? a === 'claim' || a === 'assign' : a === 'return' || a === 'assign';
       if (kind === 'leads') return row.status !== 'converted';
@@ -659,8 +660,11 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
               </Card>
             )}
             {detail.related && typeof detail.related === 'object' && (
+              <>
+              {kind==='opportunities'&&<Space style={{marginTop:20}}><OpportunityFollowup row={detail} onChanged={()=>{void openDetail(detail);void load();}}/></Space>}
               <Tabs
                 style={{ marginTop: 24 }}
+                defaultActiveKey={Object.keys(detail.related).includes(params.get('tab')??'')?params.get('tab')!:undefined}
                 items={Object.entries(detail.related).map(([name, values]) => ({
                   key: name,
                   label:
@@ -724,6 +728,12 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                           },
                         ]}
                       />
+                    ) : name==='followups' ? (
+                      <Table<RecordRow> rowKey="id" size="small" pagination={{pageSize:5}} dataSource={values as RecordRow[]} scroll={{x:650}} columns={[
+                        {title:'跟进时间',width:145,render:(_,r)=>{const source=(r.aiStructured&&typeof r.aiStructured==='object'?(r.aiStructured as Record<string,unknown>).salesIntake:undefined) as Record<string,unknown>|undefined;const time=source?source.occurredAt:r.createdAt;return <>{time?String(time).slice(0,10):'原始日期待核'}{source?.dateEstimated===true&&<Tag>估算日期</Tag>}</>;}},
+                        {title:'内容与结果',render:(_,r)=><><div style={{whiteSpace:'pre-wrap'}}>{String(r.content??'')}</div>{r.result?<Tag>{String(r.result)}</Tag>:null}</>},
+                        {title:'下一步',width:220,render:(_,r)=><>{String(r.nextAction??'—')}<div>{r.nextFollowAt?String(r.nextFollowAt).slice(0,10):''}</div></>},
+                      ]}/>
                     ) : name === 'quoteVersions' ? (
                       <QuoteHistory versions={values as RecordRow[]} />
                     ) : (
@@ -741,6 +751,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                     ),
                 }))}
               />
+              </>
             )}
           </>
         )}

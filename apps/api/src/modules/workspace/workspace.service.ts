@@ -32,6 +32,9 @@ import { businessDay, reportQuery } from './analytics-policy';
 import { businessPolicy, notifyOpportunity } from './business-policy';
 import { recalculateCustomerContracts } from './contract-change-policy';
 import { salesAmountProjection, salesIntakeMeta, salesForecastEligible } from './sales-intake-policy';
+import { followupTime } from './sales-activity-policy';
+import { opportunityFollowInput, opportunityFollowSchema } from './opportunity-follow-policy';
+import { pendingCustomerName } from './pending-customer';
 import { paymentSchedule, paymentScheduleSchema } from './payment-schedule';
 import { financeEventsForActor, hideReceiptCorrectionFields } from './finance-policy';
 import { deliveryPeople, handoverProjectManager } from './delivery-staff-policy';
@@ -330,6 +333,7 @@ export class WorkspaceService {
                 required: [
                   'requestKey',
                   'expectedUpdatedAt',
+                  ...(key==='opportunities'&&action==='follow'?['followup']:[]),
                   ...(key === 'contracts' && action === 'sign' ? ['paymentSchedule'] : []),
                   ...((key === 'projects' &&
                     ['advance', 'request_acceptance', 'reject_acceptance', 'accept', 'handover_pm'].includes(action)) ||
@@ -355,6 +359,7 @@ export class WorkspaceService {
                     : {}),
                   ...(action === 'quote' ? { items: { type: 'array', minItems: 1, maxItems: 20 } } : {}),
                   ...(action === 'lose' ? { reason: { type: 'string', minLength: 1 } } : {}),
+                  ...(key==='opportunities'&&action==='follow'?{followup:opportunityFollowSchema.toJSONSchema()}:{}),
                   ...((key === 'projects' &&
                     ['advance', 'request_acceptance', 'reject_acceptance', 'accept', 'handover_pm'].includes(action)) ||
                   key === 'tasks'
@@ -369,6 +374,7 @@ export class WorkspaceService {
                 'record scope',
                 'expectedUpdatedAt',
                 'business state preconditions',
+                  ...(key==='opportunities'&&action==='follow'?['follow_up:create and visible customer','optional action:create with active opportunity owner','followup and optional action/calendar share one transaction','no external notifications']:[]),
                 ...(key === 'opportunities' && action === 'advance' ? ['next active stage only'] : []),
                 ...(key === 'opportunities' && action === 'lose'
                   ? ['open opportunity; closedAt and zero weightedAmount atomically']
@@ -521,7 +527,7 @@ export class WorkspaceService {
     const [items, total] = await Promise.all([
       this.db(tx, kind).findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id:'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -555,7 +561,7 @@ export class WorkspaceService {
     );
     for (const row of items) {
       if(kind==='opportunities')Object.assign(row,salesAmountProjection(row));
-      if(kind==='followups' && salesIntakeMeta(row.aiStructured).sourceId) row.activityAt=salesIntakeMeta(row.aiStructured).occurredAt??null;
+      if(kind==='followups') row.activityAt=followupTime({createdAt:row.createdAt as Date,aiStructured:row.aiStructured});
       if (kind === 'receipts') hideReceiptCorrectionFields(a, row);
       if (typeof row.ownerId === 'number') row.ownerName = names.get(row.ownerId) ?? '未分配';
       if (typeof row.assigneeId === 'number') row.assigneeName = names.get(row.assigneeId) ?? '未分配';
@@ -584,6 +590,8 @@ export class WorkspaceService {
       row = await this.require(tx, a, kind, recordId);
     if (kind === 'receipts') hideReceiptCorrectionFields(a, row);
     if(kind==='opportunities')Object.assign(row,salesAmountProjection(row));
+    if(typeof row.customerId==='number') row.customerName=(await tx.customer.findFirst({where:{tenantId:a.tenantId,id:row.customerId},select:{name:true}}))?.name??'—';
+    if(typeof row.ownerId==='number') row.ownerName=(await tx.user.findFirst({where:{tenantId:a.tenantId,id:row.ownerId},select:{name:true}}))?.name??'历史负责人';
     if (kind === 'customers' && row.poolType === 'public' && !admin(a) && !boss(a))
       return {
         id: row.id,
@@ -1242,6 +1250,10 @@ export class WorkspaceService {
   async command(a: Actor, kind: string, recordId: number, action: string, body: Record<string, unknown>) {
     allowWrite(a);
     requirePermission(a, kind, 'update');
+    if(kind==='opportunities'&&action==='follow'){
+      requirePermission(a,'followups','create');
+      if(opportunityFollowInput(body.followup).createAction)requirePermission(a,'actions','create');
+    }
     if (
       Object.keys(body).some(
         (k) =>
@@ -1254,6 +1266,7 @@ export class WorkspaceService {
             'items',
             'form',
             'actualHours',
+            ...(kind==='opportunities'&&action==='follow'?['followup']:[]),
             ...(kind === 'contracts' && action === 'sign' ? ['paymentSchedule'] : []),
           ].includes(k),
       )
@@ -1371,6 +1384,28 @@ export class WorkspaceService {
             });
             return { id: c.id, kind: 'customers' };
           } else if (kind === 'opportunities') {
+            if(action==='follow'){
+              requirePermission(a,'followups','create');
+              const f=opportunityFollowInput(body.followup);
+              await this.require(tx,a,'customers',id(row.customerId));
+              const now=new Date(),due=f.nextFollowAt?new Date(f.nextFollowAt+'T00:00:00Z'):null;
+              const follow=await tx.followUp.create({data:{tenantId:a.tenantId,targetType:'opportunity',targetId:recordId,customerId:id(row.customerId),method:f.method,content:f.content,nextAction:f.nextAction,nextFollowAt:due,createdBy:a.userId}});
+              await tx.opportunity.update({where,data:{lastFollowAt:now,followCount:{increment:1},...(f.nextAction?{nextAction:f.nextAction}:{}),...(due?{nextActionDate:due}:{})}});
+              await tx.customer.update({where:{id:id(row.customerId),tenantId:a.tenantId},data:{lastFollowAt:now,lastFollowBy:a.userId}});
+              let actionId:number|undefined,calendarId:number|undefined;
+              if(f.createAction){
+                requirePermission(a,'actions','create');
+                if(!due||due.toISOString().slice(0,10)<new Date(Date.now()+8*3600000).toISOString().slice(0,10))throw new BadRequestException('下一步行动须安排今天或今后日期');
+                if(!await tx.user.findFirst({where:{tenantId:a.tenantId,id:id(row.ownerId),status:'active',deletedAt:null}}))throw new ConflictException('商机负责人已停用，请先交接');
+                let startsAt:Date|undefined;
+                for(const minute of [600,630,660,690,780,810,840,870,900,930]){const start=new Date(due.getTime()+(minute-480)*60000);if(start<=now)continue;if(!await tx.calendarEntry.count({where:{tenantId:a.tenantId,ownerId:id(row.ownerId),status:'scheduled',freeBusy:'busy',startsAt:{lt:new Date(start.getTime()+1800000)},endsAt:{gt:start}}})){startsAt=start;break;}}
+                if(!startsAt)throw new ConflictException('该日工作时段已满，请选择其他跟进日期');
+                const actionPlan=await tx.actionPlan.create({data:{tenantId:a.tenantId,targetType:'customer',targetId:id(row.customerId),title:('商机跟进｜'+String(row.code)+'｜'+f.nextAction).slice(0,200),content:'商机#'+recordId+' '+String(row.name)+'\n本次记录：'+f.content+'\n下一步：'+f.nextAction,assigneeId:id(row.ownerId),dueDate:due,source:'manual',createdBy:a.userId}});
+                actionId=actionPlan.id;
+                const entry=await tx.calendarEntry.create({data:{tenantId:a.tenantId,ownerId:id(row.ownerId),title:actionPlan.title,description:'【拟定业务推进时段】行动#'+actionId+'；非客户确认会议。\n'+f.nextAction,location:'业务推进安排',startsAt,endsAt:new Date(startsAt.getTime()+1800000),origin:'crm_plan',externalId:'crm-action-plan:'+actionId,externalSnapshot:json({actionId,customerId:row.customerId,opportunityId:recordId,proposed:true})}});calendarId=entry.id;
+              }
+              return {id:recordId,kind,action,followupId:follow.id,actionId,calendarId};
+            }
             if (row.status !== 'open') throw new BadRequestException('仅开放商机可操作');
             if (action === 'advance') {
               // Keep the current stage as an ordering anchor even if it was deactivated.
@@ -1383,6 +1418,8 @@ export class WorkspaceService {
                 orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
               });
               if (!next || next.isWon) throw new BadRequestException('下一步需通过合同签约完成赢单');
+              const customer=await tx.customer.findFirst({where:{tenantId:a.tenantId,id:id(row.customerId),deletedAt:null},select:{name:true}});
+              if(pendingCustomerName(customer?.name)&&!['new','qualified'].includes(next.code))throw new BadRequestException('客户名字待核实，请先确认客户身份，再进入方案或商务阶段');
               if (new Prisma.Decimal(String(row.amount)).lte(0) || !row.demandSummary)
                 throw new BadRequestException('请先填写有效金额和需求摘要');
               await tx.opportunity.update({
@@ -1649,6 +1686,10 @@ export class WorkspaceService {
       },
       async (tx) => {
         if (kind === 'customers' && action === 'assign') await this.require(tx, a, kind, recordId);
+        if(kind==='opportunities'&&action==='follow'){
+          const opportunity=await this.require(tx,a,kind,recordId);
+          await this.require(tx,a,'customers',id(opportunity.customerId));
+        }
       },
     );
   }

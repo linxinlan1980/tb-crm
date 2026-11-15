@@ -57,7 +57,7 @@ export default function DashboardPage() {
       string,
       string
     >
-  )[data?.role ?? 'sales'];
+  )[data?.role ?? (user?.roles.includes('super_admin')?'admin':user?.roles.includes('gm')?'boss':user?.roles.includes('sales_manager')?'manager':'sales')];
   const can = (path: string) => menuAccess(path, user?.permissions ?? [], user?.roles.includes('super_admin') ?? false);
   const maxCount = Math.max(1, ...(data?.funnel.map((s) => s.count) ?? [1]));
   return (
@@ -92,6 +92,7 @@ export default function DashboardPage() {
         />
       )}
       <Spin spinning={loading}>
+        <div style={{visibility:data?'visible':'hidden',minHeight:300}}>
         <Row gutter={[16, 16]}>
           {[
             { title: '期间建档客户', value: data?.customers, path: '/customers' },
@@ -203,6 +204,7 @@ export default function DashboardPage() {
             </Col>
           )}
         </Row>
+        </div>
       </Spin>
     </div>
   );

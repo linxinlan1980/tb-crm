@@ -34,7 +34,7 @@ export const activityCapabilities = [
     outputSchema: {
       type: 'object',
       required: ['items', 'timeZone'],
-      properties: { items: { type: 'array', maxItems: 1000, items: { type: 'object' } }, timeZone: str },
+      properties: { items: { type: 'array', maxItems: 5000, items: { type: 'object' } }, timeZone: str },
     },
   },
   ...[false, true].map((update) => ({
