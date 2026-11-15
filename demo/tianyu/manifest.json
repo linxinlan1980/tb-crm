@@ -42,7 +42,7 @@
       "roleCode": "super_admin",
       "deptId": 1,
       "employeeNo": "TY00001",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1001,
@@ -51,7 +51,7 @@
       "roleCode": "gm",
       "deptId": 1,
       "employeeNo": "TY00002",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1010,
@@ -60,7 +60,7 @@
       "roleCode": "sales_manager",
       "deptId": 10,
       "employeeNo": "TY00003",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1011,
@@ -69,7 +69,7 @@
       "roleCode": "sales_manager",
       "deptId": 20,
       "employeeNo": "TY00004",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1100,
@@ -78,7 +78,7 @@
       "roleCode": "sales",
       "deptId": 10,
       "employeeNo": "TY00005",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1101,
@@ -87,7 +87,7 @@
       "roleCode": "sales",
       "deptId": 10,
       "employeeNo": "TY00006",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1102,
@@ -96,7 +96,7 @@
       "roleCode": "sales",
       "deptId": 10,
       "employeeNo": "TY00007",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1103,
@@ -105,7 +105,7 @@
       "roleCode": "sales",
       "deptId": 20,
       "employeeNo": "TY00008",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1104,
@@ -114,7 +114,7 @@
       "roleCode": "sales",
       "deptId": 20,
       "employeeNo": "TY00009",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1105,
@@ -123,7 +123,7 @@
       "roleCode": "sales",
       "deptId": 20,
       "employeeNo": "TY00010",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1200,
@@ -132,7 +132,7 @@
       "roleCode": "sales_manager",
       "deptId": 30,
       "employeeNo": "TY00011",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1201,
@@ -141,7 +141,7 @@
       "roleCode": "sales",
       "deptId": 30,
       "employeeNo": "TY00012",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1300,
@@ -150,7 +150,7 @@
       "roleCode": "sales",
       "deptId": 10,
       "employeeNo": "TY00013",
-      "password": "123456"
+      "password": "12345"
     },
     {
       "id": 1400,
@@ -159,7 +159,7 @@
       "roleCode": "super_admin",
       "deptId": 40,
       "employeeNo": "TY00014",
-      "password": "123456"
+      "password": "12345"
     }
   ],
   "sha256": "d63a7884bed1f1c996b01a1aa1b31dcd4e616dc3ab5fc2dc3f743b075fdf9813"

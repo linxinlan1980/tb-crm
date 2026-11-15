@@ -4,6 +4,7 @@ import { gzipSync } from 'node:zlib';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 export const VERSION = '1.0';
+export const DEMO_PASSWORD = '12345';
 export const AS_OF = '2026-11-15';
 export const accounts = [
   [1, 'admin', '天雨演示管理员', 'super_admin', 1],
@@ -711,7 +712,7 @@ export function exportData(directory) {
     companyName: '天雨阀门',
     fictional: true,
     counts: Object.fromEntries([...g].map(([m, r]) => [m, r.length])),
-    accounts: accounts.map((a) => ({ ...a, password: '123456' })),
+    accounts: accounts.map((a) => ({ ...a, password: DEMO_PASSWORD })),
     sha256: createHash('sha256').update(bytes).digest('hex'),
   };
   writeFileSync(directory + '/manifest.json', JSON.stringify(manifest, null, 2));

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { generate, exportData, VERSION, AS_OF, accounts } from '../demo/tianyu/generate.mjs';
+import { generate, exportData, VERSION, AS_OF, accounts, DEMO_PASSWORD } from '../demo/tianyu/generate.mjs';
 const require = createRequire(new URL('../packages/database/package.json', import.meta.url));
 const { PrismaClient } = require('@prisma/client'),
   bcrypt = require('bcrypt');
@@ -26,7 +26,7 @@ export async function installTianyu(db, env) {
   assert.equal(await db.contract.count(), 0);
   assert.equal(await db.user.count(), 1, 'Requires only the initial admin');
   const data = generate(),
-    passwordHash = await bcrypt.hash('123456', 12);
+    passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
   const order = [
     'department',
     'user',
@@ -145,7 +145,15 @@ export async function installTianyu(db, env) {
       });
       await tx.tenant.update({
         where: { id: tenant.id },
-        data: { config: { ...config, tianyuDemoVersion: VERSION, tianyuDemoAsOf: AS_OF, tianyuDemoCounts: counts } },
+        data: {
+          config: {
+            ...config,
+            tianyuDemoVersion: VERSION,
+            tianyuDemoAsOf: AS_OF,
+            tianyuDemoCounts: counts,
+            tianyuDemoCredentialRevision: 2,
+          },
+        },
       });
     },
     { isolationLevel: 'Serializable', timeout: 240000, maxWait: 10000 },

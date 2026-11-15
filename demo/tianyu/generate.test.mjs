@@ -26,6 +26,7 @@ test('deterministic public synthetic archive and scale', () => {
     assert.equal(rows('opportunity').length, 9000);
     assert.equal(rows('followUp').length, 30000);
     assert.equal(accounts.length, 14);
+    assert(first.accounts.every((a) => a.password === '12345'));
     assert(rows('customer').every((c) => c.website.startsWith('https://example.invalid/')));
     assert(rows('contact').every((c) => c.email.endsWith('@example.invalid') && !c.phone));
   } finally {
@@ -126,4 +127,13 @@ test('installer rejects production, wrong company, unapproved and remote targets
       (e) => !String(e).includes('database must not be accessed'),
     );
 });
-test('project progress reflects completed milestone weights and all milestones have a responsible owner',()=>{for(const project of rows('project')){const ms=rows('projectMilestone').filter(m=>m.projectId===project.id);assert.equal(ms.reduce((s,m)=>s+(m.status==='completed'?m.weight:0),0),project.progress);assert(ms.every(m=>m.ownerId===1200));}});
+test('project progress reflects completed milestone weights and all milestones have a responsible owner', () => {
+  for (const project of rows('project')) {
+    const ms = rows('projectMilestone').filter((m) => m.projectId === project.id);
+    assert.equal(
+      ms.reduce((s, m) => s + (m.status === 'completed' ? m.weight : 0), 0),
+      project.progress,
+    );
+    assert(ms.every((m) => m.ownerId === 1200));
+  }
+});
