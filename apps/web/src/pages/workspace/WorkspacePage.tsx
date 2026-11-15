@@ -227,7 +227,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           keyword: query,
           ...(poolType ? { poolType } : {}),
           ...(kind === 'customers' ? { customerCategory, channelBrand } : {}),
-          ...(personActive ? people : {}),
+          ...(personActive && kind !== 'products' ? people : {}),
           ...(dateActive?{...period,dateField}:{}),
         }),
       ]);
@@ -586,11 +586,11 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
       )}
       <Card>
         <Space wrap style={{marginBottom:12}}>
-          <Button onClick={() => {setPersonActive(v=>!v);setPage(1);}}>{personActive ? '人员筛选已启用' : '启用人员筛选'}</Button>
+          {kind !== 'products' && <Button onClick={() => {setPersonActive(v=>!v);setPage(1);}}>{personActive ? '人员筛选已启用' : '启用人员筛选'}</Button>}
           <Button type={dateActive?'primary':'default'} onClick={()=>{setDateActive(v=>!v);setPage(1);}}>{dateActive?'日期筛选已启用':'启用日期筛选'}</Button>
           {dateActive&&<Select aria-label="日期筛选依据" style={{width:180}} value={dateField} options={[...new Set(kind==='contracts'?['signDate','createdAt','startDate','endDate']:[defaultDateFields[kind]??'createdAt','createdAt'])].map(v=>({value:v,label:({signDate:'签约日期',createdAt:'建档日期',startDate:'服务开始日期',endDate:'服务结束日期',expectedCloseDate:'预计成交日期',dueDate:'到期日期',invoiceDate:'开票日期',receiptDate:'到账日期'}as Record<string,string>)[v]}))} onChange={v=>{setDateField(v);setPage(1);}}/>}
         </Space>
-        {personActive && <StatisticsPeople value={people} onChange={v => {setPeople(v);setPage(1);}}/>}
+        {personActive && kind !== 'products' && <StatisticsPeople value={people} onChange={v => {setPeople(v);setPage(1);}}/>}
         {dateActive&&<StatisticsPeriod value={period} onChange={v=>{setPeriod(v);setPage(1);}}/>}
         {kind === 'customers' && <Space wrap style={{ marginBottom: 16 }}>
           <Select aria-label="客户标记筛选" allowClear placeholder="全部客户标记" style={{ width: 180 }} value={customerCategory}

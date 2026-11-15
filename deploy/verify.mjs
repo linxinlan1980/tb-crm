@@ -29,7 +29,20 @@ for (const username of ['admin', 'manager', 'sales', 'boss']) {
     const res = await fetch(base + '/api/v1' + path, { headers: { Authorization: `Bearer ${token}` } });
     assert.equal(res.status, 200, username + path);
     const data = (await res.json()).data;
-    if (path === '/workspace/overview') assert(data.customers > 0, 'Seeded data visible');
+    if (path === '/workspace/overview') {
+      const actorId = JSON.parse(Buffer.from(token.split('.')[1], 'base64url')).sub;
+      assert.deepEqual(data.audience, { personRange: 'self', ownerIds: [actorId] }, 'Every role defaults to self');
+      const customers = await fetch(base + '/api/v1/workspace/customers?personRange=self&pageSize=1', {headers:{Authorization:`Bearer ${token}`}});
+      assert.equal(customers.status,200);
+      assert.equal(data.customers,(await customers.json()).data.meta.total,'Personal overview matches its scoped business records');
+      const company = await fetch(base + '/api/v1/workspace/overview?personRange=company', {headers:{Authorization:`Bearer ${token}`}});
+      if (['admin','boss'].includes(username)) {
+        assert.equal(company.status,200,'Company scope explicitly authorized');
+        const all = (await company.json()).data;
+        assert.deepEqual(all.audience,{personRange:'company',ownerIds:null});
+        assert(all.customers > 0,'Synthetic company fixtures visible only on explicit company selection');
+      } else assert.equal(company.status,403,'Unprivileged role cannot select company scope');
+    }
   }
   console.log(username + ': login, overview and schemas OK');
 }
