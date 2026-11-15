@@ -50,6 +50,8 @@
 
 接收方部署优先阅读[交付与Docker启动说明](docs/DELIVERY.md)。[C11新版材料](docs/releases/C11/README.md)提供24页可编辑PPT和四套操作/演示/AI接入/部署手册；总包包含原九张总体截图及15张专题截图。首次安装需要联网，不是通用离线首装包。
 
+新增[整套本机备份恢复与macOS服务守护](docs/operations/LOCAL_RECOVERY.md)：独立新库恢复、逐表及附件Hash核对、会话撤销、外发关闭、进程故障恢复。
+
 ## 本地安装与访问
 
 先阅读[公司帐套、手机H5及外网配置说明](docs/LOCAL_COMPANY_INSTALL.md)。需要Node.js 24、pnpm 11.25.0和本机MySQL 8。

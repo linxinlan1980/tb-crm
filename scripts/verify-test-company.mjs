@@ -11,6 +11,7 @@ export async function verifyTestCompany({
   dir = join(project, '.local/accounts'),
   url = 'http://127.0.0.1:3000',
   allowMarkedFormalTests = false,
+  adminPassword,
 } = {}) {
   const registry = JSON.parse(readFileSync(join(dir, 'registry.json'), 'utf8'));
   const entry = registry.accounts.find((a) => a.code === 'TEST' && a.status === 'ready' && a.purpose === 'test');
@@ -50,7 +51,7 @@ export async function verifyTestCompany({
       const result = await call('/auth/login', who, {
         tenantCode: 'TEST',
         username: who,
-        password: who === 'admin' ? config.SEED_ADMIN_PASSWORD : manifest.password,
+        password: who === 'admin' ? (adminPassword ?? config.SEED_ADMIN_PASSWORD) : manifest.password,
       });
       tokens[who] = result.accessToken;
       eq(result.user.company.purpose, 'test', 'explicit test marker');

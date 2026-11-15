@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, openSync, closeSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, openSync, closeSync, unlinkSync, rmdirSync } from 'node:fs';
 import { resolve, join, dirname, sep, extname } from 'node:path';
 import { homedir, networkInterfaces } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -13,6 +13,31 @@ const require = createRequire(join(project, 'packages/database/package.json'));
 const { PrismaClient } = require('@prisma/client');
 const hex = () => randomBytes(32).toString('hex');
 const error = (status, message) => Object.assign(new Error(message), { status });
+export function acquireInstallationLock(dir) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, 'gateway.lock');
+  const value = JSON.stringify({ pid: process.pid, nonce: hex() });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { writeFileSync(path, value, { mode: 0o600, flag: 'wx' }); return () => { if (existsSync(path) && readFileSync(path, 'utf8') === value) unlinkSync(path); }; }
+    catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      const old = readFileSync(path, 'utf8'); let pid;
+      try { pid = JSON.parse(old).pid; } catch { throw new Error('安装进程锁损坏，请由运维检查'); }
+      if (!Number.isInteger(pid) || pid <= 0) throw new Error('安装进程锁无效');
+      try { process.kill(pid, 0); throw new Error('同一帐套目录已有运行进程；请使用本机管理页面或先停止服务'); }
+      catch (probe) {
+        if (probe.code !== 'ESRCH') throw probe;
+        const recoveryLock = join(dir, 'gateway-lock-recovery');
+        try { mkdirSync(recoveryLock, { mode: 0o700 }); } catch { throw new Error('安装进程锁正在恢复，请稍后重试'); }
+        try {
+          if (readFileSync(path, 'utf8') !== old) throw new Error('安装进程锁发生变化，请重试');
+          unlinkSync(path);
+        } finally { rmdirSync(recoveryLock); }
+      }
+    }
+  }
+  throw new Error('无法取得安装进程锁');
+}
 export function accountInput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((k) => !['code', 'name', 'purpose'].includes(k))) throw error(400, '只允许公司编码、名称和用途');
   if (typeof value.code !== 'string' || !/^[A-Z][A-Z0-9_-]{1,29}$/.test(value.code)) throw error(400, '公司编码为2至30位大写字母、数字、下划线或短横线');
@@ -36,14 +61,16 @@ export function proxyConfiguration(remote, port) {
   return `# 部署前先安装证书并验证 nginx -t；此配置不会自动生效。\nserver {\n    listen ${url.port || 443} ssl;\n    server_name ${url.hostname};\n    ssl_certificate /etc/nginx/certs/crm.crt;\n    ssl_certificate_key /etc/nginx/certs/crm.key;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    client_max_body_size 3m;\n    location ^~ /__accounts { deny all; }\n    location / {\n        proxy_pass http://127.0.0.1:${port};\n        proxy_set_header Host $http_host;\n        proxy_set_header X-Forwarded-Proto https;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_read_timeout 60s;\n    }\n}\n`;
 }
 export class LocalAccountStore {
-  constructor({ dir = join(project, '.local/accounts'), rootUrl, webPort = 3000, basePort = 4300, test = false, sqlAccountHost = '127.0.0.1' } = {}) {
+  constructor({ dir = join(project, '.local/accounts'), rootUrl, webPort = 3000, basePort = 4300, test = false, sqlAccountHost = '127.0.0.1', supervise = false } = {}) {
     this.dir = resolve(dir); this.rootUrl = rootUrl; this.webPort = webPort; this.basePort = basePort; this.test = test;
     if (![webPort, basePort].every((p) => Number.isInteger(p) && p >= 1024 && p <= 65525)) throw error(400, '端口配置无效');
-    this.workers = new Map(); this.tail = Promise.resolve();
+    this.workers = new Map(); this.tail = Promise.resolve(); this.supervise = supervise; this.stopping = false; this.restartTimers = new Set(); this.restartFailures = new Map();
     if (sqlAccountHost !== '127.0.0.1' && !(test && sqlAccountHost === '%')) throw error(400, '正式安装仅允许本机数据库账号；通配主机仅用于隔离CI容器测试');
     this.sqlAccountHost = sqlAccountHost;
   }
   async init() {
+    const recovery = join(this.dir, 'restore-receipt.json');
+    if (existsSync(recovery) && JSON.parse(readFileSync(recovery, 'utf8')).status !== 'verified-offline') throw error(503, '帐套恢复尚未验证完成，禁止启动或新建公司');
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     this.registryFile = join(this.dir, 'registry.json');
     this.tokenFile = join(this.dir, 'management-token.txt');
@@ -111,6 +138,7 @@ export class LocalAccountStore {
     return { account, config: JSON.parse(readFileSync(account.configFile, 'utf8')) };
   }
   async start(code) {
+    if (this.stopping) throw error(503, '服务正在停止');
     if (this.workers.has(code)) return;
     const { account, config } = this.config(code);
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => ['PATH', 'HOME', 'SystemRoot', 'TEMP', 'TMPDIR', 'LANG', 'TZ'].includes(key)));
@@ -125,7 +153,12 @@ export class LocalAccountStore {
     let listening = false;
     child.stdout.on('data', (b) => { if (String(b).includes('API running on http')) listening = true; });
     this.workers.set(code, child);
-    child.once('exit', () => { if (this.workers.get(code) === child) this.workers.delete(code); });
+    const startedAt = Date.now();
+    child.once('exit', () => {
+      if (this.workers.get(code) === child) this.workers.delete(code);
+      if (Date.now() - startedAt > 60000) this.restartFailures.delete(code);
+      if (this.supervise && !this.stopping) this.scheduleRestart(code);
+    });
     for (let i = 0; i < 150; i++) {
       if (child.exitCode !== null) throw error(503, '帐套服务启动失败，请查看本机日志');
       if (listening) {
@@ -135,8 +168,31 @@ export class LocalAccountStore {
     }
     child.kill('SIGTERM'); throw error(503, '帐套服务启动超时');
   }
+  scheduleRestart(code) {
+    const failures = (this.restartFailures.get(code) || 0) + 1;
+    this.restartFailures.set(code, failures);
+    const timer = setTimeout(() => {
+      this.restartTimers.delete(timer);
+      if (!this.stopping && !this.workers.has(code)) void this.start(code).catch(() => {
+        // Exit handler schedules the next attempt; no credentials or raw errors in logs.
+        console.error(`公司帐套 ${code} 重启未完成，请检查本机日志`);
+      });
+    }, Math.min(30000, 1000 * 2 ** Math.min(failures - 1, 5)));
+    this.restartTimers.add(timer); timer.unref();
+  }
   async startAll() { for (const a of this.registry.accounts) if (a.status === 'ready') { try { await this.start(a.code); } catch { console.error(`公司帐套 ${a.code} 服务未启动，请查看本机日志`); } } }
-  async stop() { for (const child of this.workers.values()) child.kill('SIGTERM'); this.workers.clear(); await this.root?.$disconnect(); }
+  async stop() {
+    this.stopping = true;
+    for (const timer of this.restartTimers) clearTimeout(timer);
+    this.restartTimers.clear();
+    await Promise.all([...this.workers.values()].map(child => new Promise(done => {
+      if (child.exitCode !== null || child.signalCode !== null) { done(); return; }
+      const timeout = setTimeout(() => child.kill('SIGKILL'), 5000);
+      child.once('exit', () => { clearTimeout(timeout); done(); });
+      child.kill('SIGTERM');
+    })));
+    this.workers.clear(); await this.root?.$disconnect();
+  }
 }
 const isLoopback = (address) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
 function body(req) {
@@ -199,7 +255,10 @@ export function accountServer(store) {
   return server;
 }
 async function main() {
-  const store = await new LocalAccountStore({ rootUrl: process.env.ACCOUNT_ROOT_DATABASE_URL, webPort: Number(process.env.ACCOUNT_WEB_PORT || 3000) }).init();
+  const directory = resolve(process.env.ACCOUNT_DIRECTORY || join(project, '.local/accounts'));
+  const release = acquireInstallationLock(directory);
+  process.once('exit', release);
+  const store = await new LocalAccountStore({ dir: directory, rootUrl: process.env.ACCOUNT_ROOT_DATABASE_URL, webPort: Number(process.env.ACCOUNT_WEB_PORT || 3000), basePort: Number(process.env.ACCOUNT_BASE_PORT || 4300), supervise: true }).init();
   const command = process.argv[2] || 'serve';
   if (command === 'create') {
     try {

@@ -16,7 +16,11 @@ if (!process.env.ACCOUNT_ROOT_DATABASE_URL && !(await listening())) {
   for (let i = 0; i < 60 && !(await listening()); i++) await delay(250);
   if (!(await listening())) throw new Error('MySQL未就绪，请查看本机运行日志。');
 }
-const built = spawnSync('pnpm', ['build'], { stdio: 'inherit' });
-if (built.status !== 0) process.exit(built.status ?? 1);
+if (process.argv.includes('--no-build')) {
+  if (!existsSync('apps/api/dist/main.js') || !existsSync('apps/web/dist/index.html')) throw new Error('请先运行pnpm build；守护服务不自动构建代码。');
+} else {
+  const built = spawnSync('pnpm', ['build'], { stdio: 'inherit' });
+  if (built.status !== 0) process.exit(built.status ?? 1);
+}
 const app = spawn(process.execPath, [resolve('deploy/local-accounts.mjs'), 'serve'], { env: process.env, stdio: 'inherit' });
 process.on('SIGINT', () => app.kill('SIGINT')); process.on('SIGTERM', () => app.kill('SIGTERM')); app.on('exit', (status) => { process.exitCode = status ?? 1; });
