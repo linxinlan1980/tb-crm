@@ -19,7 +19,7 @@ async function main() {
     where: { code: 'TINGMENG' },
     update: {},
     create: {
-      name: '上海町萌网络科技有限公司',
+      name: '合成测试企业',
       code: 'TINGMENG',
       plan: 'enterprise',
       maxUsers: 50,

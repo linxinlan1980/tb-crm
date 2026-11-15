@@ -27,3 +27,16 @@ docs/reference/
 deploy/.env
 deploy/*.env
 backups/
+
+# Business exports and installation archives stay private.
+production-data/
+imports/
+uploads/
+*.xlsx
+*.xls
+*.crmbackup
+*.sql.gz
+*.dump
+*.sqlite
+*.sqlite3
+*.zip

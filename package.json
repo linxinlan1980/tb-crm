@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "description": "本地安装、多公司数据库隔离的 B2B CRM",
-  "author": "上海町萌网络科技有限公司",
+  "author": "Osborn Studio",
   "license": "MIT",
   "engines": {
     "node": ">=24 <25",
