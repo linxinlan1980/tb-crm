@@ -18,6 +18,13 @@ const allowedRoles = ['super_admin', 'sales_manager', 'sales', 'gm'];
 function administrator(actor: Actor) {
   if (!actor.roles.includes('super_admin')) throw new ForbiddenException('仅管理员可管理人员');
 }
+function mobile(value: unknown): string | null {
+  if (value == null || value === '') return null;
+  if(typeof value !== 'string') throw new BadRequestException('手机号格式无效');
+  const normalized=value.replace(/[\s()-]/g,'').replace(/^\+?86(?=1\d{10}$)/,'');
+  if(!/^1\d{10}$/.test(normalized)) throw new BadRequestException('请输入完整11位手机号');
+  return normalized;
+}
 function password(value: unknown) {
   if (
     typeof value !== 'string' ||
@@ -45,6 +52,8 @@ function view(user: UserRow) {
   return {
     id: user.id,
     username: user.username,
+    employeeNo: user.employeeNo,
+    phone: user.phone,
     name: user.name,
     email: user.email,
     deptId: user.deptId,
@@ -127,7 +136,7 @@ export class UserService {
   }
   async create(actor: Actor, body: Record<string, unknown>) {
     administrator(actor);
-    const data = envelope(body, ['username', 'name', 'password', 'deptId', 'roleIds', 'email', 'position']);
+    const data = envelope(body, ['username', 'name', 'password', 'deptId', 'roleIds', 'email', 'position', 'phone']);
     const username = text(data.username, '账号', 40);
     if (!/^[A-Za-z0-9_-]{2,40}$/.test(username))
       throw new BadRequestException('账号需2至40位字母、数字、下划线或短横线');
@@ -154,14 +163,17 @@ export class UserService {
       tenant.maxUsers
     )
       throw new ConflictException('企业可用账号数量已达上限');
-    if (await tx.user.findFirst({ where: { tenantId: actor.tenantId, username: text(data.username, '账号', 40) } }))
+    if (await tx.user.findFirst({ where: { tenantId: actor.tenantId, OR:[{username:text(data.username,'账号',40)},{employeeNo:text(data.username,'账号',40)},{phone:text(data.username,'账号',40)}] } }))
       throw new ConflictException('账号已存在');
+    const phone = mobile(data.phone);
+    if(phone && await tx.user.findFirst({where:{tenantId:actor.tenantId,deletedAt:null,OR:[{phone},{username:phone},{employeeNo:phone}]}})) throw new ConflictException('手机号已被其他人员使用');
     const refs = await this.references(tx, actor.tenantId, data, true);
     const user = await tx.user.create({
       data: {
         tenantId: actor.tenantId,
         username: text(data.username, '账号', 40),
         name: text(data.name, '姓名', 50),
+        phone,
         passwordHash: hash,
         status,
         deptId: refs.deptId,
@@ -170,6 +182,7 @@ export class UserService {
         createdBy: actor.userId,
       },
     });
+    await tx.user.update({where:{id:user.id},data:{employeeNo:'RY'+String(user.id).padStart(6,'0')}});
     await tx.userRole.createMany({
       data: refs.roleIds!.map((roleId) => ({ tenantId: actor.tenantId, userId: user.id, roleId })),
     });
@@ -177,7 +190,7 @@ export class UserService {
   }
   async update(actor: Actor, target: number, body: Record<string, unknown>) {
     administrator(actor);
-    const data = envelope(body, ['name', 'deptId', 'roleIds', 'email', 'position', 'status']);
+    const data = envelope(body, ['name', 'deptId', 'roleIds', 'email', 'position', 'status', 'phone']);
     return runCommand(this.prisma, actor, 'identity.user.update', body, async (tx) => {
       await tx.tenant.update({ where: { id: actor.tenantId }, data: { updatedAt: new Date() } });
       const user = await tx.user.findFirst({
@@ -186,6 +199,8 @@ export class UserService {
       });
       if (!user) throw new NotFoundException('用户不存在');
       checkVersion(user, body.expectedUpdatedAt);
+      const phone = data.phone === undefined ? user.phone : mobile(data.phone);
+      if(phone && await tx.user.findFirst({where:{tenantId:actor.tenantId,deletedAt:null,id:{not:target},OR:[{phone},{username:phone},{employeeNo:phone}]}})) throw new ConflictException('手机号已被其他人员使用');
       const refs = await this.references(tx, actor.tenantId, data);
       if (
         data.status !== undefined &&
@@ -304,6 +319,7 @@ export class UserService {
           email: data.email === undefined ? undefined : data.email ? text(data.email, '邮箱', 100) : null,
           position: data.position === undefined ? undefined : data.position ? text(data.position, '职位', 50) : null,
           status,
+          phone,
           updatedBy: actor.userId,
         },
       });
@@ -313,7 +329,7 @@ export class UserService {
           data: roleIds.map((roleId) => ({ tenantId: actor.tenantId, userId: target, roleId })),
         });
       }
-      if (securityChange)
+      if (securityChange || phone !== user.phone)
         await tx.authSession.updateMany({
           where: { tenantId: actor.tenantId, userId: target, revokedAt: null },
           data: { revokedAt: new Date() },

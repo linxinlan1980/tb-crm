@@ -115,6 +115,7 @@ export default function SystemPage() {
       form.setFieldsValue({
         name: u.name,
         username: u.username,
+        phone: u.phone,
         deptId: (u.dept as RecordRow)?.id,
         roleIds: (u.roles as RecordRow[]).map((r) => r.id),
         status: u.status,
@@ -226,7 +227,8 @@ export default function SystemPage() {
                   dataSource={users}
                   pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: setPage }}
                   columns={[
-                    { title: '账号', dataIndex: 'username' },
+                    { title: '人员编号', dataIndex: 'employeeNo' },
+                    { title: '手机号', dataIndex: 'phone' },
                     { title: '姓名', dataIndex: 'name' },
                     { title: '部门', dataIndex: 'dept', render: (v) => v?.name ?? '—' },
                     {
@@ -355,7 +357,8 @@ export default function SystemPage() {
           <Form.Item name="username" label="账号" rules={[{ required: true }]}>
             <Input disabled={!!editing} />
           </Form.Item>
-          <Form.Item name="name" label="姓名" rules={[{ required: true }]}>
+          <Form.Item name="phone" label="手机号（可登录）"><Input maxLength={30} /></Form.Item>
+          <Form.Item name="name" label="真实姓名（仅展示）" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
           {!editing && (

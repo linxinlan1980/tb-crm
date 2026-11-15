@@ -196,13 +196,11 @@ export default function BasicLayout() {
             <Typography.Text strong>客户经营与销售协同</Typography.Text>
             <Tag
               className="company-badge"
-              style={{ marginLeft: 12 }}
+              style={{ marginLeft: 12, maxWidth: mobile ? 'calc(100vw - 120px)' : 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               color={user?.company?.purpose === 'test' ? 'orange' : 'blue'}
             >
               {user?.company?.purpose === 'test' ? '测试帐套' : '正式帐套'} ·{' '}
-              {mobile || user?.company?.purpose === 'test'
-                ? (user?.company?.code ?? sessionStorage.getItem('companyCode'))
-                : (user?.company?.name ?? sessionStorage.getItem('companyCode'))}
+              {user?.company?.name ?? sessionStorage.getItem('companyCode')}
             </Tag>
           </div>
           <Dropdown

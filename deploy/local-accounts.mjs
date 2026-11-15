@@ -233,6 +233,9 @@ export function accountServer(store) {
         if (pathname === '/__accounts/start' && req.method === 'POST') { const input = await body(req); if (typeof input.code !== 'string') throw error(400, '公司编码无效'); await store.start(input.code); json(res, 200, { status: 'running' }); return; }
         throw error(404, '管理入口不存在');
       }
+      if (pathname === '/api/companies' && req.method === 'GET') {
+        json(res, 200, {items:store.registry.accounts.filter(a=>a.status==='ready').map(a=>({code:a.code,name:a.name,purpose:a.purpose||'business'}))}); return;
+      }
       if (pathname.startsWith('/api/')) {
         const header = req.headers['x-company-code'];
         const code = typeof header === 'string' && header ? header : store.registry.accounts.filter((a) => a.status === 'ready').length === 1 ? store.registry.accounts.find((a) => a.status === 'ready').code : '';

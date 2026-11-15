@@ -31,6 +31,7 @@ export async function initializeProduction(db, env) {
     const roles = [];
     for (const definition of definitions) roles.push(await tx.role.create({ data: { tenantId, isSystem: true, ...definition } }));
     const user = await tx.user.create({ data: { tenantId, username: env.ADMIN_USERNAME || 'admin', name: '企业管理员', deptId: department.id, passwordHash } });
+    await tx.user.update({where:{id:user.id},data:{employeeNo:'RY'+String(user.id).padStart(6,'0')}});
     await tx.userRole.create({ data: { tenantId, userId: user.id, roleId: roles[0].id } });
     await tx.department.update({ where: { id: department.id }, data: { leaderId: user.id } });
     const stages = [['new', '初步接洽', 10], ['qualified', '需求确认', 20], ['proposal', '方案报价', 40], ['negotiation', '商务谈判', 60], ['signing', '签约', 80], ['delivery', '交付', 90], ['acceptance', '验收', 95], ['closed', '结项', 100]];

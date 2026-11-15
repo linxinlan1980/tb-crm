@@ -193,6 +193,7 @@ model User {
   id            Int        @id @default(autoincrement())
   tenantId      Int        @map("tenant_id")
   username      String     @db.VarChar(50)
+  employeeNo    String?    @map("employee_no") @db.VarChar(40)
   passwordHash  String     @map("password_hash") @db.VarChar(200)
   name          String     @db.VarChar(50)
   phone         String?    @db.VarChar(200)
@@ -215,6 +216,8 @@ model User {
   roles         UserRole[]
 
   @@unique([tenantId, username])
+  @@unique([tenantId, employeeNo])
+  @@index([tenantId, phone])
   @@index([tenantId, deptId])
   @@index([dingtalkUserid])
   @@map("users")

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Form, Input, Button, Card, message, Typography } from 'antd';
+import { Form, Input, Button, Card, message, Typography, Select } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { authApi } from '../../services/auth.api';
@@ -9,6 +9,8 @@ const { Title, Text } = Typography;
 
 export default function LoginPage() {
   const [form] = Form.useForm();
+  const [companies,setCompanies] = useState<{code:string;name:string}[]>([]);
+  useEffect(()=>{fetch('/api/companies').then(r=>r.ok?r.json():Promise.reject()).then((r:{items:{code:string;name:string}[]})=>{setCompanies(r.items);const requested=new URLSearchParams(window.location.search).get('company');if(requested&&r.items.some(a=>a.code===requested))form.setFieldValue('tenantCode',requested);else if(r.items.length===1)form.setFieldValue('tenantCode',r.items[0].code);}).catch(()=>message.error('帐套列表读取失败，请刷新重试'));},[form]);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -39,12 +41,12 @@ export default function LoginPage() {
           <Title level={4} style={{ marginBottom: 4 }}>伴圆 CRM</Title>
           <Text type="secondary">AI 原生 · 客户经营与销售协同</Text>
         </div>
-        <Form form={form} initialValues={{tenantCode: new URLSearchParams(window.location.search).get('company') ?? undefined, username:"admin"}} name="login" onFinish={onFinish} size="large" autoComplete="on">
+        <Form form={form} initialValues={{}} name="login" onFinish={onFinish} size="large" autoComplete="on">
           <Form.Item name="tenantCode" rules={[{ required: true, message: '请输入企业编码' }, { pattern: /^[A-Z][A-Z0-9_-]{1,29}$/, message: '企业编码为2至30位大写字母、数字、下划线或短横线' }]}>
-            <Input placeholder="企业编码（安装时设置）" aria-label="企业编码" autoComplete="organization" />
+            <Select placeholder="请选择公司帐套" aria-label="公司帐套" options={companies.map(c=>({value:c.code,label:c.name}))} />
           </Form.Item>
-          <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
-            <Input prefix={<UserOutlined />} placeholder="用户名" autoComplete="username" />
+          <Form.Item name="username" rules={[{ required: true, message: '请输入手机号或人员编号' }, { pattern: /^[A-Za-z0-9_-]{2,50}$/, message: '请用手机号或人员编号，不使用姓名登录' }]}>
+            <Input prefix={<UserOutlined />} placeholder="手机号或人员编号" autoComplete="username" />
           </Form.Item>
           <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
             <Input.Password prefix={<LockOutlined />} placeholder="密码" autoComplete="current-password" />

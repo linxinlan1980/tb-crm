@@ -8,7 +8,7 @@ export class LoginDto {
   @Matches(/^[A-Za-z][A-Za-z0-9_-]{1,29}$/)
   tenantCode?: string;
 
-  @ApiProperty({ example: 'linxinlan', description: '登录用户名' })
+  @ApiProperty({ example: 'linxinlan', description: '手机号、唯一人员编号或管理员账号；不使用中文姓名匹配' })
   @IsString()
   @IsNotEmpty({ message: '用户名不能为空' })
   @MaxLength(50)

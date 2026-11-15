@@ -18,6 +18,7 @@ export interface RemotePerson {
   name: string;
   departmentIds: string[];
   position: string | null;
+  phone?: string;
 }
 export interface DirectorySnapshot {
   bindingHash: string;
@@ -156,6 +157,11 @@ export async function readDirectory(binding: DwsBinding, read: DwsRead): Promise
         if (employee.orgUserId !== person.externalId) throw new Error('人员详情编号不一致');
         person.name = required(employee.orgUserName, 50);
         person.position = typeof employee.orgTitle === 'string' ? employee.orgTitle.slice(0, 50) || null : null;
+        const visibleMobile = person.externalId === binding.userId ? self.orgUserMobile : employee.orgUserMobile;
+        if (typeof visibleMobile === 'string') {
+          const phone=visibleMobile.replace(/[\s()-]/g,'').replace(/^\+?86(?=1\d{10}$)/,'');
+          if(/^1\d{10}$/.test(phone)) person.phone=phone;
+        }
         person.departmentIds = [...new Set(person.departmentIds)];
         snapshot.people.push(person);
       } catch {

@@ -81,12 +81,21 @@ try {
   const createBody = command({
     username: 'staff',
     name: '合成销售',
+    phone: '13900002222',
     password: pw,
     deptId: dept.id,
     roleIds: [role('sales')],
   });
   let staff = (await call('/system/users', 'POST', createBody, admin, 201)).data;
   const replay = (await call('/system/users', 'POST', createBody, admin, 201)).data;
+  ok(/^RY\d{6,}$/.test(staff.employeeNo), 'Personnel identifier assigned');
+  ok((await login(staff.employeeNo)).user.id === staff.id, 'Unique personnel ID login');
+  ok((await login('13900002222')).user.id === staff.id, 'Mobile login');
+  await login('合成销售', pw, 400);
+  const clash=command({username:'phone_clash',name:'合成销售',password:pw,phone:'13900002222',roleIds:[role('sales')]});
+  await call('/system/users','POST',clash,admin,409);
+  const sameName=(await call('/system/users','POST',command({username:'same_name',name:'合成销售',password:pw,roleIds:[role('sales')]}),admin,201)).data;
+  ok(sameName.employeeNo!==staff.employeeNo, 'Same names have separate unique personnel IDs');
   ok(replay.id === staff.id, 'Create idempotency');
   ok((await db.user.count({ where: { username: 'staff' } })) === 1, 'No duplicate user');
   ok(!JSON.stringify(staff).includes('passwordHash'), 'No password hash in user response');

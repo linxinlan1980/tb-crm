@@ -339,6 +339,10 @@ export class DirectorySyncService implements OnModuleInit {
           createdPeople++;
           await tx.user.update({ where: { id: localId }, data: { dingtalkUserid: source.externalId } });
         }
+        if (source.phone) {
+          if(await tx.user.findFirst({where:{tenantId:actor.tenantId,deletedAt:null,phone:source.phone,id:{not:localId}}})) throw new ConflictException('同步手机号对应多人，请先核对，未更新任何人员');
+          await tx.user.update({where:{id:localId},data:{phone:source.phone}});
+        }
         await saveMapping('user', source.externalId, source.name, localId);
       }
       const summary = {

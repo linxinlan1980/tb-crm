@@ -34,3 +34,10 @@ test('control plane requires separate token, trusted host and origin', async () 
     assert.equal((await fetch(url + '/__accounts/remote', { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'none', url: '' }) })).status, 200);
   } finally { await new Promise((done) => server.close(done)); }
 });
+
+test('public company selector exposes only Chinese names and routing codes, not private database configuration', async () => {
+ const store={webPort:0,registry:{accounts:[{code:'TINGMENG',name:'町萌网络',status:'ready',database:'private_db',configFile:'/private/config',purpose:'business'},{code:'FAILED',name:'未完成公司',status:'failed'}]}};
+ const server=accountServer(store);await new Promise(r=>server.listen(0,'127.0.0.1',r));store.webPort=server.address().port;
+ try {const r=await fetch('http://127.0.0.1:'+store.webPort+'/api/companies');assert.equal(r.status,200);assert.deepEqual(await r.json(),{items:[{code:'TINGMENG',name:'町萌网络',purpose:'business'}]});}
+ finally {await new Promise(r=>server.close(r));}
+});

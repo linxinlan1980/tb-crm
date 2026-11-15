@@ -53,16 +53,19 @@ export class AuthService {
   }
   async login(dto: LoginDto) {
     const tenantCode = dto.tenantCode ?? 'TINGMENG';
-    const key = digest(tenantCode.toLowerCase() + ':' + dto.username.toLowerCase());
+    const identifier = dto.username.trim();
+    const matches = await this.prisma.system.user.findMany({
+      where: { deletedAt: null, tenant: { code: tenantCode }, OR: [
+        { username: identifier }, { employeeNo: identifier }, { phone: identifier },
+      ] }, include, take: 2,
+    });
+    // Names are display-only. A duplicated phone or a cross-field collision cannot select an arbitrary person.
+    const user = matches.length === 1 ? matches[0] : null;
+    const key = digest(tenantCode.toLowerCase() + ':' + (user?.username ?? identifier).toLowerCase());
     const attempt = await this.prisma.system.authAttempt.findUnique({ where: { key } });
-    const now = new Date(),
-      windowMs = 15 * 60 * 1000;
+    const now = new Date(), windowMs = 15 * 60 * 1000;
     if (attempt && now.getTime() - attempt.windowStartedAt.getTime() < windowMs && attempt.failures >= 8)
       throw new HttpException('登录失败次数过多，请15分钟后重试', 429);
-    const user = await this.prisma.system.user.findFirst({
-      where: { username: dto.username, deletedAt: null, tenant: { code: tenantCode } },
-      include,
-    });
     const passwordValid = await bcrypt.compare(dto.password, user?.passwordHash || dummyHash);
     if (!user || !passwordValid) {
       await this.transaction(async (tx) => {
@@ -318,7 +321,7 @@ export class AuthService {
         dataScope: authority.dataScope,
         company: {
           code: user.tenant.code,
-          name: user.tenant.name,
+          name: process.env.TENANT_NAME || user.tenant.name,
           purpose: process.env.ACCOUNT_PURPOSE === 'test' ? 'test' : 'business',
         },
       },

@@ -7,6 +7,8 @@ const user = {
   properties: {
     id: integer,
     username: string,
+    employeeNo: {anyOf:[string,{type:'null'}]},
+    phone: {anyOf:[string,{type:'null'}]},
     name: string,
     status: { enum: ['active', 'inactive', 'resigned'] },
     roles: {
@@ -21,6 +23,7 @@ const user = {
   },
 };
 const userFields = {
+  phone: {anyOf:[{type:'string',maxLength:30},{type:'null'}]},
   name: { type: 'string', minLength: 1, maxLength: 50 },
   deptId: nullableId,
   roleIds: { type: 'array', minItems: 1, maxItems: 1, uniqueItems: true, items: integer },
