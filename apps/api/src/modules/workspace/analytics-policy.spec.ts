@@ -10,6 +10,19 @@ import {
 } from './analytics-policy';
 const date = (s: string) => new Date(s);
 const q = () => reportQuery({ year: '2026' }, date('2026-11-15T12:00:00Z'));
+describe('explicit reporting date intervals',()=>{
+  it('uses inclusive 2010 through 2060 business-day bounds',()=>{
+    const r=reportQuery({from:'2010-01-01',to:'2060-12-31'});
+    expect(r.start.toISOString()).toBe('2010-01-01T00:00:00.000Z');
+    expect(r.end.toISOString()).toBe('2061-01-01T00:00:00.000Z');
+    for(const bad of [{from:'2009-12-31',to:'2026-01-01'},{from:'2026-01-01',to:'2061-01-01'},{from:'2026-02-31',to:'2026-03-10'},{from:'2026-12-01',to:'2026-11-01'}])expect(()=>reportQuery(bad)).toThrow();
+    expect(()=>reportQuery({from:'2026-01-01'})).toThrow();
+  });
+  it('does not merge identically numbered months in different years',()=>{
+    const r=forecastReport([opp({id:1,amount:decimal(10),expectedCloseDate:date('2025-12-20')}),opp({id:2,amount:decimal(20),expectedCloseDate:date('2026-01-20')}),opp({id:3,amount:decimal(99),expectedCloseDate:date('2025-01-20')})],[stage],reportQuery({from:'2025-12-01',to:'2026-01-31'}));
+    expect(r.monthly.map(m=>[m.year,m.month,m.amount])).toEqual([[2025,12,'10.00'],[2026,1,'20.00']]);
+  });
+});
 const opp = (extra: Partial<ForecastRow> = {}): ForecastRow => ({
   id: 1,
   name: 'Synthetic',

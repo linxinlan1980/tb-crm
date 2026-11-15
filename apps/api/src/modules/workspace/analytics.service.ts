@@ -101,7 +101,7 @@ export class AnalyticsService {
         return {
           version: '1.0',
           generatedAt: new Date().toISOString(),
-          period: { year: q.year, month: q.month },
+          period: { year: q.year, month: q.month, from: q.start.toISOString().slice(0,10), to: new Date(q.end.getTime()-1).toISOString().slice(0,10), explicitRange: q.explicitRange },
           currency: 'CNY',
           scope: '当前归属权限；预计成交日期归期；关闭日使用Asia/Shanghai；缺日期池为当前可见范围全部年份',
           ...result,
@@ -217,7 +217,7 @@ export class AnalyticsService {
         return {
           version: '1.0',
           generatedAt: new Date().toISOString(),
-          period: { year: q.year, month: q.month },
+          period: { year: q.year, month: q.month, from: q.start.toISOString().slice(0,10), to: new Date(q.end.getTime()-1).toISOString().slice(0,10), explicitRange: q.explicitRange },
           source: q.source,
           currency: 'CNY',
           balanceAsOf: q.today.toISOString().slice(0, 10),
@@ -257,11 +257,11 @@ export class AnalyticsService {
             })),
           },
           notices: [
-            ...(result.summary.undatedPlanCount ? [`有${result.summary.undatedPlanCount}条计划未填预计回款日，余额${result.summary.undatedOutstanding}元仍计入应收，单列“日期待补”；不计入月度计划或逾期。`] : []),
+            ...(result.summary.undatedPlanCount ? [`有${result.summary.undatedPlanCount}条计划未填预计回款日，余额${result.summary.undatedOutstanding}元${q.explicitRange ? '待补日期后纳入所选区间余额' : '仍计入全部应收并单列日期待补'}；不编造月度计划或逾期。`] : []),
             '到账按收款日期归期，仅包含当前已复核或有来源的历史导入且未作废记录；不是银行核验。',
             '已核销/未核销及应收余额为当前值，不是历史月末余额；不与到账重复相加。',
             '计划按到期日统计，不能代替客户承诺日期；旧签约规则生成的30天计划需核对付款条款。',
-            '月份仅筛选期间计划/到账；当前余额和账龄不受期间限制。按销售筛选排除未绑定合同款。',
+            q.explicitRange ? '起止日期同时筛选计划、到账及对应到期计划的当前余额/账龄；不是所选结束日的历史余额快照。按销售筛选排除未绑定合同款。' : '旧版年份/月参数仅筛选期间计划/到账；当前余额和账龄不受期间限制。按销售筛选排除未绑定合同款。',
             q.source === 'legacy'
               ? '当前为历史只读记录，不计入正式台账实绩。'
               : '当前为本地管理台账；未绑定合同到账单列，不强行归销售。',

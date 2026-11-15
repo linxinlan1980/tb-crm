@@ -1,5 +1,7 @@
 import type { SpreadsheetCell } from '../../utils/xlsx';
 import { csvCell } from '../../utils/csv';
+import { useSearchParams } from 'react-router-dom';
+import StatisticsPeriod, { defaultStatisticsRange } from '../../components/StatisticsPeriod';
 import { useEffect, useState, useRef } from 'react';
 import {
   Alert,
@@ -60,6 +62,8 @@ const labels: Record<string, string> = {
   level: '级别',
   status: '状态',
   poolType: '客户池',
+  customerCategory: '客户标记',
+  channelBrand: '销售渠道',
   stage: '阶段',
   amount: '金额',
   totalAmountInclTax: '价税合计',
@@ -134,7 +138,7 @@ const stages: Record<string, string> = {
 const display = (name: string, v: unknown) =>
   v === null || v === undefined ? (
     '—'
-  ) : name === 'status' || name === 'poolType' || name === 'acceptanceState' ? (
+  ) : name === 'status' || name === 'poolType' || name === 'acceptanceState' || name === 'customerCategory' || name === 'channelBrand' ? (
     <Tag
       color={
         ['approved', 'signed', 'completed', 'won', 'delivered'].includes(String(v))
@@ -160,6 +164,13 @@ const display = (name: string, v: unknown) =>
     String(v)
   );
 export default function WorkspacePage({ kind, poolType }: { kind: string; poolType?: string }) {
+  const [params]=useSearchParams();
+  const [dateActive,setDateActive]=useState(()=>!!params.get('from'));
+  const [period,setPeriod]=useState(()=>({from:params.get('from')??defaultStatisticsRange().from,to:params.get('to')??defaultStatisticsRange().to}));
+  const defaultDateFields:Record<string,string>={contracts:'signDate',opportunities:'expectedCloseDate','payment-plans':'dueDate',invoices:'invoiceDate',receipts:'receiptDate',actions:'dueDate',tasks:'dueDate'};
+  const [dateField,setDateField]=useState(defaultDateFields[kind]??'createdAt');
+  const [customerCategory, setCustomerCategory] = useState<string>();
+  const [channelBrand, setChannelBrand] = useState<string>();
   const [spec, setSpec] = useState<Resource>(),
     [rows, setRows] = useState<RecordRow[]>([]),
     [total, setTotal] = useState(0),
@@ -209,6 +220,8 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           pageSize: 20,
           keyword: query,
           ...(poolType ? { poolType } : {}),
+          ...(kind === 'customers' ? { customerCategory, channelBrand } : {}),
+          ...(dateActive?{...period,dateField}:{}),
         }),
       ]);
       setSpec(specs.find((s) => s.key === kind));
@@ -228,7 +241,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
   }, [kind, poolType]);
   useEffect(() => {
     void load();
-  }, [kind, poolType, page, query]);
+  }, [kind, poolType, page, query, customerCategory, channelBrand,dateActive,dateField,period.from,period.to]);
   const openDetail = async (row: RecordRow) => {
     try {
       setDetail(await get<RecordRow>(`/workspace/${kind}/${row.id}`));
@@ -460,7 +473,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     }) ?? [];
   const primary = spec?.name ?? 'name';
   const extras: Record<string, string[]> = {
-    customers: ['industry', 'poolType', 'ownerName'],
+    customers: ['customerCategory', 'channelBrand', 'industry', 'poolType', 'ownerName'],
     contacts: ['customerName', 'title', 'phone', 'email'],
     leads: ['contactName', 'source', 'status', 'assigneeName'],
     opportunities: ['stage', 'amount', 'ownerName'],
@@ -563,6 +576,18 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
         />
       )}
       <Card>
+        <Space wrap style={{marginBottom:12}}>
+          <Button type={dateActive?'primary':'default'} onClick={()=>{setDateActive(v=>!v);setPage(1);}}>{dateActive?'日期筛选已启用':'启用日期筛选'}</Button>
+          {dateActive&&<Select aria-label="日期筛选依据" style={{width:180}} value={dateField} options={[...new Set(kind==='contracts'?['signDate','createdAt','startDate','endDate']:[defaultDateFields[kind]??'createdAt','createdAt'])].map(v=>({value:v,label:({signDate:'签约日期',createdAt:'建档日期',startDate:'服务开始日期',endDate:'服务结束日期',expectedCloseDate:'预计成交日期',dueDate:'到期日期',invoiceDate:'开票日期',receiptDate:'到账日期'}as Record<string,string>)[v]}))} onChange={v=>{setDateField(v);setPage(1);}}/>}
+        </Space>
+        {dateActive&&<StatisticsPeriod value={period} onChange={v=>{setPeriod(v);setPage(1);}}/>}
+        {kind === 'customers' && <Space wrap style={{ marginBottom: 16 }}>
+          <Select aria-label="客户标记筛选" allowClear placeholder="全部客户标记" style={{ width: 180 }} value={customerCategory}
+            options={[{ value: 'direct', label: '普通直客' }, { value: 'sales_channel', label: '销售渠道客户' }]}
+            onChange={v => { setCustomerCategory(v); setPage(1); }} />
+          <Select aria-label="销售渠道筛选" allowClear placeholder="全部销售渠道" style={{ width: 180 }} value={channelBrand}
+            options={['钉钉','用友','其他'].map(v => ({ value: v, label: v }))} onChange={v => { setChannelBrand(v); setPage(1); }} />
+        </Space>}
         <Input.Search
           style={{ width: 320, marginBottom: 20 }}
           placeholder={`搜索${spec?.title ?? ''}`}

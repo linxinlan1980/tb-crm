@@ -1,5 +1,6 @@
 import { menuAccess } from '../../services/access';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import StatisticsPeriod, { defaultStatisticsRange } from '../../components/StatisticsPeriod';
 import { useNavigate } from 'react-router-dom';
 import { Alert, Button, Card, Col, Empty, Progress, Row, Space, Spin, Statistic, Table, Tag, Typography } from 'antd';
 import { ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -13,6 +14,7 @@ interface Overview {
   pipeline: string;
   signedAmount: string;
   received: string;
+  invoiced: string;
   outstanding: string;
   overdue: string;
   projects: number;
@@ -22,25 +24,32 @@ interface Overview {
   users: RecordRow[];
 }
 export default function DashboardPage() {
+  const [period, setPeriod] = useState(defaultStatisticsRange);
+  const revision = useRef(0);
   const [data, setData] = useState<Overview>(),
     [error, setError] = useState(''),
     [loading, setLoading] = useState(false);
   const user = useAuthStore((s) => s.user),
     navigate = useNavigate();
   const load = async () => {
+    const requestRevision = ++revision.current;
     setLoading(true);
+    setData(undefined);
     try {
-      setData(await get<Overview>('/workspace/overview'));
+      const result = await get<Overview>('/workspace/overview', { ...period });
+      if (requestRevision !== revision.current) return;
+      setData(result);
       setError('');
     } catch (e) {
-      setError(errorText(e));
+      if (requestRevision === revision.current) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (requestRevision === revision.current) setLoading(false);
     }
   };
   useEffect(() => {
     void load();
-  }, []);
+    return () => { revision.current++; };
+  }, [period.from, period.to]);
   const role = (
     { admin: '系统管理工作台', manager: '团队经营工作台', sales: '我的销售工作台', boss: '经营驾驶舱' } as Record<
       string,
@@ -68,6 +77,8 @@ export default function DashboardPage() {
           刷新数据
         </Button>
       </div>
+      <StatisticsPeriod value={period} onChange={setPeriod} />
+      <Alert type="info" showIcon style={{ marginBottom: 16 }} message="客户/项目按建档日，管道按预计成交日，合同按签约日，回款/开票按实际日期，未收和逾期限定所选到期计划。不是历史期末余额快照。" />
       {error && <Alert message={error} type="error" showIcon />}
       {!!data?.restrictedModules?.length && (
         <Alert
@@ -80,17 +91,19 @@ export default function DashboardPage() {
       <Spin spinning={loading}>
         <Row gutter={[16, 16]}>
           {[
-            { title: '可见客户', value: data?.customers, path: '/customers' },
-            { title: '进行中商机', value: data?.openOpportunities, path: '/opportunities' },
-            { title: '销售管道金额', value: money(data?.pipeline), prefix: '¥', path: '/opportunities/board' },
-            { title: '已签合同额', value: money(data?.signedAmount), prefix: '¥', path: '/contracts' },
-            { title: '交付项目', value: data?.projects, path: '/projects' },
-            { title: '当前未收金额', value: money(data?.outstanding), prefix: '¥', path: '/finance/payment-plans' },
+            { title: '期间建档客户', value: data?.customers, path: '/customers' },
+            { title: '期间预计成交商机', value: data?.openOpportunities, path: '/opportunities' },
+            { title: '期间销售管道金额', value: money(data?.pipeline), prefix: '¥', path: '/opportunities/board' },
+            { title: '期间签约合同额', value: money(data?.signedAmount), prefix: '¥', path: '/contracts' },
+            { title: '期间立项项目', value: data?.projects, path: '/projects' },
+            { title: '期间到期计划 · 当前未收', value: money(data?.outstanding), prefix: '¥', path: '/finance/payment-plans' },
+            { title: '期间实际回款', value: money(data?.received), prefix: '¥', path: '/receipts' },
+            { title: '期间实际开票', value: money(data?.invoiced), prefix: '¥', path: '/invoices' },
           ]
             .filter((k) => can(k.path))
             .map((k) => (
               <Col xs={24} sm={12} xl={8} key={k.title}>
-                <Card className="metric-card" onClick={() => navigate(k.path)} hoverable>
+                <Card className="metric-card" onClick={() => navigate(`${k.path}?from=${period.from}&to=${period.to}`)} hoverable>
                   <Statistic title={k.title} value={k.value ?? '—'} prefix={k.prefix} />
                   <div style={{ marginTop: 16, color: '#64748b' }}>
                     查看明细 <ArrowRightOutlined />
@@ -174,8 +187,8 @@ export default function DashboardPage() {
                 </Card>
               )}
               {can('/finance/payment-plans') && (
-                <Card title="当前应收概览" style={{ marginTop: 20 }}>
-                  <Statistic title="逾期未收" prefix="¥" value={money(data?.overdue)} />
+                <Card title="区间到期计划余额" style={{ marginTop: 20 }}>
+                  <Statistic title="所选计划当前逾期未收" prefix="¥" value={money(data?.overdue)} />
                   <Alert
                     type="info"
                     message="收款与核销使用本地业务台账"

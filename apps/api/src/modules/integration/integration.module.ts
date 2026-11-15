@@ -6,9 +6,10 @@ import { IntegrationController } from './integration.controller';
 import { PlatformService } from './platform.service';
 import { DirectorySyncController } from './directory-sync.controller';
 import { DirectorySyncService } from './directory-sync.service';
+import { CalendarInboundService } from './calendar-inbound.service';
 @Module({
   controllers: [IntegrationController, DirectorySyncController, CalendarController, ActivitySyncController],
-  providers: [PlatformService, DirectorySyncService, CalendarService, ActivitySyncService],
+  providers: [PlatformService, DirectorySyncService, CalendarService, ActivitySyncService, CalendarInboundService],
   exports: [PlatformService],
 })
 export class IntegrationModule {}

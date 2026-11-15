@@ -7,6 +7,10 @@ import { grantInput } from './agent-policy';
 import { randomUUID } from 'node:crypto';
 const actor = (permissions: string[]): Actor => ({userId:1,tenantId:1,sessionId:randomUUID(),deptId:1,roles:['sales'],permissions,dataScope:'self'});
 describe('delegated report contract', () => {
+  it('passes explicit date ranges through both transports',()=>{
+    const v={from:'2010-01-01',to:'2060-12-31'};expect(reportInput(v)).toEqual(v);expect(reportMcpInput.parse(v)).toEqual(v);
+    for(const bad of [{year:2061},{from:'2009-12-31'},{from:'2026-02-31'}])expect(()=>reportInput(bad)).toThrow();
+  });
   it('requires independent opportunity read, or finance and contract read together', () => {
     expect(allowedReportCapabilities(actor(['customer:read']))).toHaveLength(0);
     expect(allowedReportCapabilities(actor(['opportunity:read'])).map(c=>c.id)).toEqual(['report.sales.forecast']);

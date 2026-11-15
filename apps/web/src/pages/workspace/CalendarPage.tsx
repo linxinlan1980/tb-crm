@@ -36,6 +36,7 @@ interface Entry {
   status: string;
   revision: number;
   updatedAt: string;
+  origin?: string;
 }
 const local = (value?: string) => dayjs(value).tz('Asia/Shanghai');
 export default function CalendarPage() {
@@ -56,6 +57,8 @@ export default function CalendarPage() {
     [saving, setSaving] = useState(false),
     [form] = Form.useForm();
   const [detailDay, setDetailDay] = useState<Dayjs | null>(null);
+  const [pulling,setPulling]=useState(false);
+  async function pullCalendar(){setPulling(true);try{const r=await post<{created:number;updated:number;unchanged:number}>('/integrations/dingtalk-activities/pull',{});message.success(`已读取本人未来31天钉钉日程：新增${r.created}，更新${r.updated}，未变${r.unchanged}`);await load();}catch(e){message.error(errorText(e));}finally{setPulling(false);}}
   const screens = Grid.useBreakpoint();
   useEffect(() => {
     if (screens.xs) setView('list');
@@ -138,7 +141,7 @@ export default function CalendarPage() {
     visibleRows.filter(
       (r) =>
         local(r.startsAt).startOf('day').valueOf() <= date.startOf('day').valueOf() &&
-        local(r.endsAt).valueOf() > date.startOf('day').valueOf(),
+        (local(r.endsAt).valueOf() > date.startOf('day').valueOf() || Date.parse(r.startsAt)===Date.parse(r.endsAt)&&local(r.startsAt).isSame(date,'day')),
     );
   const event = (r: Entry) => (
     <button
@@ -166,6 +169,7 @@ export default function CalendarPage() {
     >
       {local(r.startsAt).format('HH:mm')} {r.status === 'cancelled' ? '[已取消] ' : ''}
       {r.title}
+      {r.origin==='dingtalk'&&<Tag color="blue">钉钉</Tag>}
     </button>
   );
   const calendar = (
@@ -204,6 +208,7 @@ export default function CalendarPage() {
           <Button loading={loading} onClick={() => void load()}>
             刷新日程
           </Button>
+          {canUpdate&&<Button loading={pulling} onClick={()=>void pullCalendar()}>读取近期钉钉日程</Button>}
           {canCreate && (
             <Button type="primary" onClick={() => open(null)}>
               新建日程
@@ -293,7 +298,7 @@ export default function CalendarPage() {
       )}
     </Space>
   );
-  const readOnly = editing ? !canUpdate : !canCreate;
+  const readOnly = editing ? !canUpdate || editing.origin === 'dingtalk' : !canCreate;
   return (
     <div>
       <div className="page-heading">

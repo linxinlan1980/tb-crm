@@ -18,6 +18,7 @@ const entryFields = {
 };
 const jobVersion = { expectedUpdatedAt: version };
 export const activityCapabilities = [
+  {id:'integration.calendar.pull',route:'POST /integrations/dingtalk-activities/pull',permission:'own bound identity and action read/update',effect:'external-read-and-local-write',inputSchema:{type:'object',additionalProperties:false,properties:{}},outputSchema:{type:'object',required:['created','updated','unchanged','from','until','sourceHash']}},
   {
     id: 'calendar.list',
     route: 'GET /calendar',

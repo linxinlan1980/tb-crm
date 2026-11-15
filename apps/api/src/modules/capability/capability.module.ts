@@ -1,3 +1,5 @@
+import { ApprovalRequestService } from './approval-request.service';
+import { ApprovalRequestController } from './approval-request.controller';
 import { WorkspaceModule } from '../workspace/workspace.module';
 import { ApprovalModule } from '../approval/approval.module';
 import { McpController } from './mcp.controller';
@@ -13,12 +15,13 @@ import { AgentMcpController } from './agent-mcp.controller';
 @Module({
   imports: [CustomerModule, WorkspaceModule, ApprovalModule],
   controllers: [
+    ApprovalRequestController,
     CapabilityController,
     McpController,
     AgentControlController,
     AgentRuntimeController,
     AgentMcpController,
   ],
-  providers: [CapabilityService, AgentService, ReportCapabilityService],
+  providers: [ApprovalRequestService, CapabilityService, AgentService, ReportCapabilityService],
 })
 export class CapabilityModule {}

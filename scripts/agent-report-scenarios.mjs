@@ -13,24 +13,24 @@ export async function verifyAgentReports({ db, url, actors, owner, outsider, pas
     const out = await r.json(); eq(r.status,expected,path); return out.data;
   }
   const grant = (token,capabilities=['report.sales.forecast','report.cash.collections'],maxCalls=100) => call('/agent-control/grants',token,{requestKey:randomUUID(),name:'【测试】销售回款只读',purpose:'【测试】隔离范围验证',minutes:20,maxCalls,capabilities},201);
-  const invoke = (g,id='report.sales.forecast',input={year:2099,ownerId:owner.id},expected=201,requestKey=randomUUID()) => call('/agent-runtime/invoke',g.token,{requestKey,capabilityId:id,input},expected);
+  const invoke = (g,id='report.sales.forecast',input={year:2059,ownerId:owner.id},expected=201,requestKey=randomUUID()) => call('/agent-runtime/invoke',g.token,{requestKey,capabilityId:id,input},expected);
   const grants=[];
   for (const actor of actors) {
     const g=await grant(actor.token);grants.push(g);
     const f=await invoke(g);eq(f.result.result.summary.open,'100.01','four role delegation matches original scope');
-    const cash=await invoke(g,'report.cash.collections',{year:2099,ownerId:owner.id});eq(cash.result.result.summary.received,'50.00','four role cash read matches human filters');
+    const cash=await invoke(g,'report.cash.collections',{year:2059,ownerId:owner.id});eq(cash.result.result.summary.received,'50.00','four role cash read matches human filters');
     eq(cash.executor,'agent');eq(cash.result.capabilityId,'report.cash.collections');
   }
   const g=grants[0], userToken=actors[0].token;
   const foreignGrant=await grant(alienToken,['report.sales.forecast']);
   eq((await invoke(foreignGrant)).result.result.summary.open,'0.00','foreign company cannot read main company owner');
-  eq((await invoke(foreignGrant,'report.sales.forecast',{year:2099})).result.result.summary.open,'777777.00','foreign grant sees only its own company');
-  eq((await invoke(g,'report.sales.forecast',{year:2099,ownerId:outsider.id})).result.result.summary.open,'0.00');
-  eq((await invoke(grants[1],'report.sales.forecast',{year:2099,deptId:outsider.deptId})).result.result.summary.open,'0.00');
-  await invoke(g,'report.sales.forecast',{year:2099,tenantId:999},400);
-  await invoke(g,'report.cash.collections',{year:2099,sql:'SELECT 1'},400);
-  await invoke(g,'report.sales.forecast',{year:'2099'},400);
-  await invoke(g,'report.sales.forecast',{year:2099,pageSize:101},400);
+  eq((await invoke(foreignGrant,'report.sales.forecast',{year:2059})).result.result.summary.open,'777777.00','foreign grant sees only its own company');
+  eq((await invoke(g,'report.sales.forecast',{year:2059,ownerId:outsider.id})).result.result.summary.open,'0.00');
+  eq((await invoke(grants[1],'report.sales.forecast',{year:2059,deptId:outsider.deptId})).result.result.summary.open,'0.00');
+  await invoke(g,'report.sales.forecast',{year:2059,tenantId:999},400);
+  await invoke(g,'report.cash.collections',{year:2059,sql:'SELECT 1'},400);
+  await invoke(g,'report.sales.forecast',{year:'2059'},400);
+  await invoke(g,'report.sales.forecast',{year:2059,pageSize:101},400);
   const readKey=randomUUID();await invoke(g,undefined,undefined,201,readKey);await invoke(g,undefined,undefined,409,readKey);
   const execution=await invoke(g);const receipt=await call('/agent-runtime/receipts/'+execution.executionId,g.token);
   eq(receipt.capabilityId,'report.sales.forecast');eq(receipt.status,'succeeded');
@@ -54,14 +54,14 @@ export async function verifyAgentReports({ db, url, actors, owner, outsider, pas
       const tools=(await client.listTools()).tools;
       for(const id of ['report.sales.forecast','report.cash.collections']) {const tool=tools.find(t=>t.name===id);eq(!!tool,true);eq(tool.annotations.readOnlyHint,true);}
       if(delegated)eq(tools.map(t=>t.name).sort(),['agent.receipt','report.cash.collections','report.sales.forecast']);
-      const result=await client.callTool({name:'report.sales.forecast',arguments:{year:2099,ownerId:owner.id,...(delegated?{requestKey:randomUUID()}:{})}});
+      const result=await client.callTool({name:'report.sales.forecast',arguments:{year:2059,ownerId:owner.id,...(delegated?{requestKey:randomUUID()}:{})}});
       eq(!!result.isError,false);const out=JSON.parse(result.content[0].text);eq((delegated?out.result.result:out.result).summary.open,'100.01');
-      const invalid=await client.callTool({name:'report.sales.forecast',arguments:{year:2099,tenantId:99,...(delegated?{requestKey:randomUUID()}:{})}});eq(invalid.isError,true);
+      const invalid=await client.callTool({name:'report.sales.forecast',arguments:{year:2059,tenantId:99,...(delegated?{requestKey:randomUUID()}:{})}});eq(invalid.isError,true);
     } finally {await client.close();}
   }
   const small=await grant(userToken,['report.sales.forecast'],1);
   const statuses=await Promise.all([1,2].map(async()=>{
-    const r=await fetch(url+'/agent-runtime/invoke',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+small.token},body:JSON.stringify({requestKey:randomUUID(),capabilityId:'report.sales.forecast',input:{year:2099}})});await r.text();return r.status;
+    const r=await fetch(url+'/agent-runtime/invoke',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+small.token},body:JSON.stringify({requestKey:randomUUID(),capabilityId:'report.sales.forecast',input:{year:2059}})});await r.text();return r.status;
   }));eq(statuses.sort(),[201,403]);eq((await db.agentGrant.findUniqueOrThrow({where:{id:small.id}})).usedCalls,1);
   function sql(statement) {
     const u=new URL(process.env.DATABASE_URL), binary=process.env.MYSQL_BIN_DIR?join(process.env.MYSQL_BIN_DIR,'mysql'):'mysql';
@@ -82,7 +82,7 @@ export async function verifyAgentReports({ db, url, actors, owner, outsider, pas
     const human=new Client({name:'synthetic-report-human-revocation',version:'1.0.0'});
     try {
       await human.connect(new StreamableHTTPClientTransport(new URL(url+'/mcp'),{requestInit:{headers:{Authorization:'Bearer '+actors[3].token}}}));
-      const read=human.callTool({name:'report.sales.forecast',arguments:{year:2099,ownerId:owner.id}});
+      const read=human.callTool({name:'report.sales.forecast',arguments:{year:2059,ownerId:owner.id}});
       let inAudit=false;
       for(let i=0;i<150;i++) {const state=await db.$queryRawUnsafe(`SELECT IS_USED_LOCK('${trigger}') AS holder`);if(state[0].holder!==null){inAudit=true;break;}await delay(10);}
       eq(inAudit,true,'human read paused inside success audit');

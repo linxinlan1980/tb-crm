@@ -91,6 +91,7 @@ export default function BasicLayout() {
       children: [
         { key: '/contracts', label: '合同管理' },
         { key: '/orders', label: '订单管理' },
+        ...(isAdmin ? [{ key: '/business-rules', label: '内部提醒与审批规则' }] : []),
         ...(isAdmin ? [{ key: '/source-archives', label: '历史资料与补录来源' }] : []),
       ],
     },

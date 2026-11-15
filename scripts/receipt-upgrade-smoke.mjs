@@ -55,6 +55,9 @@ const auditColumns = async (add) => {
   await db.$executeRawUnsafe(add
     ? 'ALTER TABLE contracts ADD COLUMN signing_company VARCHAR(200) NULL'
     : 'ALTER TABLE contracts DROP COLUMN signing_company');
+  await db.$executeRawUnsafe(add
+    ? "ALTER TABLE customers ADD COLUMN customer_category VARCHAR(20) NOT NULL DEFAULT 'direct', ADD COLUMN channel_brand VARCHAR(50) NULL"
+    : 'ALTER TABLE customers DROP COLUMN customer_category, DROP COLUMN channel_brand');
 };
 try {
   const archive = run('git', ['archive', prior, 'packages/database/prisma'], { encoding: null }).stdout;

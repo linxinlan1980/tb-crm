@@ -37,6 +37,8 @@ export const statusNames: Record<string, string> = {
   saas_sub: 'SaaS订阅',
   channel: '渠道合同',
   other: '其他 / 待分类',
+  direct: '普通直客',
+  sales_channel: '销售渠道客户',
   website: '官网',
   referral: '转介绍',
   exhibition: '展会',

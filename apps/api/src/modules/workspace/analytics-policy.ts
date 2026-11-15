@@ -60,6 +60,8 @@ export function reportQuery(q: Record<string, string>, now = new Date()) {
     'detail',
     'contractId',
     'bucket',
+    'from',
+    'to',
   ];
   if (Object.keys(q).some((k) => !allowed.includes(k))) throw new BadRequestException('存在未定义的报表参数');
   const integer = (key: string, fallback: number, min: number, max: number) => {
@@ -69,7 +71,7 @@ export function reportQuery(q: Record<string, string>, now = new Date()) {
     if (!Number.isSafeInteger(n) || n < min || n > max) throw new BadRequestException(`${key}超出范围`);
     return n;
   };
-  const year = integer('year', Number(businessDay(now).slice(0, 4)), 2000, 2100);
+  const year = integer('year', Number(businessDay(now).slice(0, 4)), 2010, 2060);
   const month = integer('month', 0, 0, 12);
   const source = q.source ?? 'managed';
   if (!['managed', 'legacy'].includes(source)) throw new BadRequestException('source只允许managed或legacy');
@@ -78,6 +80,15 @@ export function reportQuery(q: Record<string, string>, now = new Date()) {
     throw new BadRequestException('detail无效');
   const bucket = q.bucket ?? 'open';
   if (!['open', 'won', 'lost', 'closed', 'undated'].includes(bucket)) throw new BadRequestException('bucket无效');
+  const explicitRange = q.from !== undefined || q.to !== undefined;
+  const parseDay = (value: string | undefined) => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value < '2010-01-01' || value > '2060-12-31' || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0,10) !== value)
+      throw new BadRequestException('起止日期须为2010—2060年的有效日期');
+    return new Date(value+'T00:00:00.000Z');
+  };
+  const start = explicitRange ? parseDay(q.from) : new Date(Date.UTC(year, month ? month - 1 : 0, 1));
+  const end = explicitRange ? new Date(parseDay(q.to).getTime() + 86400000) : new Date(Date.UTC(year, month || 12, 1));
+  if (end <= start) throw new BadRequestException('结束日期不能早于开始日期');
   return {
     year,
     month,
@@ -89,10 +100,18 @@ export function reportQuery(q: Record<string, string>, now = new Date()) {
     source,
     detail,
     bucket,
-    start: new Date(Date.UTC(year, month ? month - 1 : 0, 1)),
-    end: new Date(Date.UTC(year, month || 12, 1)),
+    start,
+    end,
+    explicitRange,
     today: new Date(businessDay(now) + 'T00:00:00.000Z'),
   };
+}
+export function reportMonths(q: ReportQuery) {
+  if (!q.explicitRange) return Array.from({ length: 12 }, (_, i) => ({ year: q.year, month: i + 1 }));
+  const months: { year: number; month: number }[] = [];
+  for (let d = new Date(Date.UTC(q.start.getUTCFullYear(), q.start.getUTCMonth(), 1)); d < q.end; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)))
+    months.push({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 });
+  return months;
 }
 export function inPeriod(d: Date | null, q: ReportQuery) {
   return !!d && d >= q.start && d < q.end;
@@ -138,10 +157,10 @@ export function forecastReport(
       excluded: items.filter((r) => weight(r) === null).length,
     };
   });
-  const monthly = Array.from({ length: 12 }, (_, i) => {
-    const items = open.filter((r) => r.expectedCloseDate?.getUTCMonth() === i);
+  const monthly = reportMonths(q).map(({ year, month }) => {
+    const items = open.filter((r) => r.expectedCloseDate?.getUTCMonth() === month - 1 && r.expectedCloseDate?.getUTCFullYear() === year);
     return {
-      month: i + 1,
+      year, month,
       amount: sumMoney(items.map((r) => r.amount)),
       weighted: sumMoney(
         items.flatMap((r) => {
@@ -149,7 +168,7 @@ export function forecastReport(
           return w === null ? [] : [w];
         }),
       ),
-      won: sumMoney(won.filter((r) => closedDay(r.closedAt)?.getUTCMonth() === i).map((r) => r.amount)),
+      won: sumMoney(won.filter((r) => closedDay(r.closedAt)?.getUTCMonth() === month - 1 && closedDay(r.closedAt)?.getUTCFullYear() === year).map((r) => r.amount)),
     };
   });
   const owners = [...new Set([...open, ...won, ...lost].map((r) => r.ownerId))].map((ownerId) => ({
@@ -221,13 +240,13 @@ export function collectionReport(contracts: ContractRow[], plans: PlanRow[], rec
   const validPlans = plans.filter((p) => p.status !== 'cancelled');
   const confirmed = receipts.filter((r) => r.status === 'confirmed' && inPeriod(r.receiptDate, q));
   const due = validPlans.filter((p) => inPeriod(p.dueDate, q));
-  const balancePlans = validPlans.filter((p) => decimal(p.outstandingAmount).gt(0));
+  const balancePlans = validPlans.filter((p) => decimal(p.outstandingAmount).gt(0) && (!q.explicitRange || inPeriod(p.dueDate,q)));
   const overdue = balancePlans.filter((p) => p.dueDate && p.dueDate < q.today);
   const undated = validPlans.filter((p) => !p.dueDate);
-  const monthly = Array.from({ length: 12 }, (_, i) => ({
-    month: i + 1,
-    planned: sumMoney(due.filter((p) => p.dueDate?.getUTCMonth() === i).map((p) => p.amount)),
-    received: sumMoney(confirmed.filter((r) => r.receiptDate.getUTCMonth() === i).map((r) => r.amount)),
+  const monthly = reportMonths(q).map(({ year, month }) => ({
+    year, month,
+    planned: sumMoney(due.filter((p) => p.dueDate?.getUTCMonth() === month - 1 && p.dueDate?.getUTCFullYear() === year).map((p) => p.amount)),
+    received: sumMoney(confirmed.filter((r) => r.receiptDate.getUTCMonth() === month - 1 && r.receiptDate.getUTCFullYear() === year).map((r) => r.amount)),
   }));
   const aging = [
     [0, 0, '未逾期'],
@@ -244,11 +263,11 @@ export function collectionReport(contracts: ContractRow[], plans: PlanRow[], rec
     });
     return { name, count: items.length, amount: sumMoney(items.map((p) => p.outstandingAmount)) };
   });
-  if (undated.length) buckets.push({ name: '日期待补', count: undated.filter(p => decimal(p.outstandingAmount).gt(0)).length,
+  if (undated.length && !q.explicitRange) buckets.push({ name: '日期待补', count: undated.filter(p => decimal(p.outstandingAmount).gt(0)).length,
     amount: sumMoney(undated.map(p => p.outstandingAmount)) });
   const contractPlans = grouped(validPlans, (p) => p.contractId);
   const contractReceipts = grouped(confirmed, (r) => r.contractId ?? 0);
-  const matrix = contracts.map((c) => {
+  const matrix = contracts.filter(c => !q.explicitRange || inPeriod(c.signDate,q) || (contractPlans.get(c.id)??[]).some(p=>inPeriod(p.dueDate,q)) || (contractReceipts.get(c.id)?.length??0)>0).map((c) => {
     const cp = contractPlans.get(c.id) ?? [],
       cr = contractReceipts.get(c.id) ?? [];
     return {
@@ -260,14 +279,14 @@ export function collectionReport(contracts: ContractRow[], plans: PlanRow[], rec
       status: c.status,
       planned: sumMoney(cp.filter((p) => inPeriod(p.dueDate, q)).map((p) => p.amount)),
       received: sumMoney(cr.map((r) => r.amount)),
-      currentOutstanding: sumMoney(cp.map((p) => p.outstandingAmount)),
-      currentOverdue: sumMoney(cp.filter((p) => p.dueDate && p.dueDate < q.today).map((p) => p.outstandingAmount)),
+      currentOutstanding: sumMoney(cp.filter(p => !q.explicitRange || inPeriod(p.dueDate,q)).map((p) => p.outstandingAmount)),
+      currentOverdue: sumMoney(cp.filter((p) => p.dueDate && p.dueDate < q.today && (!q.explicitRange || inPeriod(p.dueDate,q))).map((p) => p.outstandingAmount)),
       months: monthly.map((m) => ({
-        month: m.month,
+        year: m.year, month: m.month,
         planned: sumMoney(
-          cp.filter((p) => inPeriod(p.dueDate, q) && p.dueDate!.getUTCMonth() + 1 === m.month).map((p) => p.amount),
+          cp.filter((p) => inPeriod(p.dueDate, q) && p.dueDate!.getUTCMonth() + 1 === m.month && p.dueDate!.getUTCFullYear() === m.year).map((p) => p.amount),
         ),
-        received: sumMoney(cr.filter((r) => r.receiptDate.getUTCMonth() + 1 === m.month).map((r) => r.amount)),
+        received: sumMoney(cr.filter((r) => r.receiptDate.getUTCMonth() + 1 === m.month && r.receiptDate.getUTCFullYear() === m.year).map((r) => r.amount)),
       })),
     };
   });

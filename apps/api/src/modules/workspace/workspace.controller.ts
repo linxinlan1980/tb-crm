@@ -8,8 +8,8 @@ export class WorkspaceController {
   @Get('schema') schema(@CurrentUser() a: Actor) {
     return this.service.schema(a);
   }
-  @Get('overview') overview(@CurrentUser() a: Actor) {
-    return this.service.overview(a);
+  @Get('overview') overview(@CurrentUser() a: Actor, @Query() q: Record<string, string>) {
+    return this.service.overview(a, q);
   }
   @Get(':kind') list(@CurrentUser() a: Actor, @Param('kind') kind: string, @Query() q: Record<string, string>) {
     return this.service.list(a, kind, q);

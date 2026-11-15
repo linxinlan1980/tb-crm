@@ -5,6 +5,7 @@ import type { Actor } from '../../common/types/actor';
 import { CalendarService } from './calendar.service';
 import { ActivitySyncService } from './activity-sync.service';
 import { activityCapabilities } from './activity.contract';
+import { CalendarInboundService } from './calendar-inbound.service';
 @Controller('calendar')
 export class CalendarController {
   constructor(private service: CalendarService) {}
@@ -31,7 +32,8 @@ export class CalendarController {
 }
 @Controller('integrations/dingtalk-activities')
 export class ActivitySyncController {
-  constructor(private service: ActivitySyncService) {}
+  constructor(private service: ActivitySyncService, private inbound: CalendarInboundService) {}
+  @Post('pull') pull(@CurrentUser() a: Actor) { return this.inbound.refresh(a); }
   @Get('schema') schema() {
     return activityCapabilities;
   }

@@ -458,7 +458,7 @@ export default function ApprovalCenterPage() {
           <Alert
             type="info"
             showIcon
-            message="会签：同一步内全部人员同意后才能流转；任一驳回会结束申请。转审不会代替审批意见。"
+            message="会签须同一步全员同意；或签由同一步任一有权人员同意即可通过，其余节点记为无需处理。任一驳回会结束申请。"
             style={{ marginBottom: 16 }}
           />
         )}
@@ -479,7 +479,7 @@ export default function ApprovalCenterPage() {
               >
                 <List.Item.Meta
                   title={`第${n.nodeOrder}步 · ${n.nodeName} · ${n.approverName}`}
-                  description={`${({ transferred: '已转交', pending: '待处理', approved: '已通过', rejected: '已驳回' } as Record<string, string>)[n.action] ?? n.action}${n.comment ? ' · ' + n.comment : ''}`}
+                  description={`${({ skipped: '或签已结束，无需处理', transferred: '已转交', pending: '待处理', approved: '已通过', rejected: '已驳回' } as Record<string, string>)[n.action] ?? n.action}${n.comment ? ' · ' + n.comment : ''}`}
                 />
               </List.Item>
             )}

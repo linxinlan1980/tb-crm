@@ -34,7 +34,7 @@ export class CalendarService {
     return this.prisma.system.$transaction(async (tx) => {
       await validateActor(tx, a);
       const items = await tx.calendarEntry.findMany({
-        where: { tenantId: a.tenantId, ownerId: a.userId, startsAt: { lt: end }, endsAt: { gt: start } },
+        where: { tenantId: a.tenantId, ownerId: a.userId, OR: [{ startsAt: { gte: start, lt: end } }, { startsAt: { lt: start }, endsAt: { gt: start } }] },
         orderBy: { startsAt: 'asc' },
         take: 1001,
       });
@@ -79,6 +79,7 @@ export class CalendarService {
             where: { id: id(entryId), tenantId: a.tenantId, ownerId: a.userId },
           });
           if (!prior) throw new NotFoundException('日程不存在或不属于本人');
+          if (prior.origin === 'dingtalk') throw new BadRequestException('钉钉来源日程请在钉钉修改后同步，避免修改会议参与人或重复创建');
           checkVersion(prior, body.expectedUpdatedAt);
           updatedAt = new Date(Math.max(Date.now(), prior.updatedAt.getTime() + 1));
         }

@@ -11,7 +11,7 @@ import { PrismaService } from '../../database/prisma.service';
 import type { Actor } from '../../common/types/actor';
 import { admin } from '../workspace/access';
 import { checkVersion, id, json, object, runCommand, text, type Tx } from '../workspace/command-runner';
-import { allApprovers, condition, flowInput, type FlowField } from './flow-rules';
+import { allApprovers, anySignature, condition, flowInput, type FlowField } from './flow-rules';
 import { applyContractChange } from '../workspace/contract-change-policy';
 import { pageCursor, requireTransfer, transferInput } from './transfer-policy';
 
@@ -359,7 +359,7 @@ export class ApprovalService {
     if (!flow) throw new NotFoundException('流程不存在');
     const amount = this.amount(body.amount);
     const matches = condition(flow.conditionExpr ?? 'always', amount);
-    const nodes: { name: string; approverId: number; order: number; mode: 'all' | 'single' }[] = [];
+    const nodes: { name: string; approverId: number; order: number; mode: 'all' | 'any' | 'single' }[] = [];
     for (const n of flow.nodes) {
       if (!condition(n.conditionExpr ?? 'always', amount)) continue;
       for (const approverId of await this.resolveMany(
@@ -373,7 +373,7 @@ export class ApprovalService {
           name: n.nodeName,
           approverId,
           order: n.nodeOrder,
-          mode: n.approverType === 'users_all' ? 'all' : 'single',
+          mode: n.approverType === 'users_all' ? 'all' : n.approverType === 'users_any' ? 'any' : 'single',
         });
     }
     return { matches, nodes, version: flow.version };
@@ -391,10 +391,11 @@ export class ApprovalService {
     applicantId: number,
     requireLeader = true,
   ) {
-    if (type !== 'users_all') return [await this.resolve(tx, tenantId, type, value, applicantId, requireLeader)];
+    if (!['users_all', 'users_any'].includes(type)) return [await this.resolve(tx, tenantId, type, value, applicantId, requireLeader)];
     const result: number[] = [];
-    for (const userId of allApprovers(value))
+    for (const userId of allApprovers(value).filter(id => type !== 'users_any' || id !== applicantId))
       result.push(await this.resolve(tx, tenantId, 'user', String(userId), applicantId, requireLeader));
+    if (!result.length) throw new BadRequestException('或签必须保留至少一位有效的非申请人审批人');
     return result;
   }
   async matchFlow(tx: Tx, a: Actor, bizType: string, amount: Prisma.Decimal, flowId?: number) {
@@ -477,7 +478,7 @@ export class ApprovalService {
               name: n.nodeName,
               approverId: n.approverId,
               order: n.nodeOrder,
-              mode: n.approverType === 'users_all' ? 'all' : 'single',
+              mode: n.approverType === 'users_all' ? 'all' : n.approverType === 'users_any' ? 'any' : 'single',
             })),
           },
         }),
@@ -563,6 +564,12 @@ export class ApprovalService {
       )
         throw new ForbiddenException('不是当前节点审批人，或审批已处理');
       await tx.approvalNode.update({ where: { id: node.id }, data: { action, comment, actedAt: new Date() } });
+      // Group semantics come from the server-authored immutable snapshot, never the live edited flow.
+      const anyMode = anySignature(approval.formData, node.nodeOrder);
+      if (anyMode) await tx.approvalNode.updateMany({
+        where: { tenantId: a.tenantId, approvalId, nodeOrder: node.nodeOrder, action: 'pending' },
+        data: { action: 'skipped', actedAt: new Date(), comment: action === 'approved' ? '同组或签已由其他审批人同意，自动结束等待' : '同组或签已驳回，自动结束等待' },
+      });
       const next =
         action === 'approved'
           ? await tx.approvalNode.findFirst({

@@ -68,9 +68,13 @@ model CalendarEntry {
   freeBusy String @default("busy") @map("free_busy") @db.VarChar(10)
   status String @default("scheduled") @db.VarChar(20)
   revision Int @default(1)
+  origin String @default("crm") @db.VarChar(20)
+  externalId String? @map("external_id") @db.VarChar(200)
+  externalSnapshot Json? @map("external_snapshot")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   @@index([tenantId, ownerId, startsAt])
+  @@unique([tenantId, ownerId, externalId])
   @@map("calendar_entries")
 }
 model ActivitySyncSetting {
@@ -306,6 +310,8 @@ model Customer {
   name              String       @db.VarChar(200)
   nameFingerprint   String?      @map("name_fingerprint") @db.Char(64)
   shortName         String?      @map("short_name") @db.VarChar(100)
+  customerCategory  String       @default("direct") @map("customer_category") @db.VarChar(20)
+  channelBrand      String?      @map("channel_brand") @db.VarChar(50)
   groupId           Int?         @map("group_id")
   industry          String?      @db.VarChar(50)
   level             String?      @db.VarChar(20)
@@ -2042,6 +2048,7 @@ enum ApprovalAction {
   rejected
   transferred
   added
+  skipped
 }
 
 // ============ 11. 里程碑模板域 ============
@@ -2235,6 +2242,7 @@ enum ApproverType {
   dept_leader
   applicant_leader
   users_all
+  users_any
 }
 
 model AiAuditLog {

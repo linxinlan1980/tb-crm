@@ -8,7 +8,6 @@ import {
   Col,
   Drawer,
   Empty,
-  InputNumber,
   Row,
   Select,
   Space,
@@ -23,6 +22,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
 import { get, money, errorText } from '../../services/workspace';
+import StatisticsPeriod, { defaultStatisticsRange } from '../../components/StatisticsPeriod';
 type Detail = {
   id: number;
   name?: string;
@@ -49,7 +49,7 @@ type Detail = {
   nextAction?: string | null;
   status?: string;
   closedAt?: string | null;
-  months?: { month: number; planned: string; received: string }[];
+  months?: { year?: number; month: number; planned: string; received: string }[];
 };
 type Paginated = { items: Detail[]; meta: { page: number; pageSize: number; total: number } };
 type Report = {
@@ -73,7 +73,7 @@ type Report = {
     currentOutstanding?: string;
     currentOverdue?: string;
   }[];
-  monthly: { month: number; amount?: string; weighted?: string; won?: string; planned?: string; received?: string }[];
+  monthly: { year?: number; month: number; amount?: string; weighted?: string; won?: string; planned?: string; received?: string }[];
   aging?: { name: string; count: number; amount: string }[];
   details?: Paginated;
   matrix?: Paginated;
@@ -106,9 +106,9 @@ function Trend({ rows, forecast }: { rows: Report['monthly']; forecast: boolean 
       >
         {rows.map((r) => (
           <div
-            key={r.month}
+            key={`${r.year}-${r.month}`}
             style={{ minWidth: 32, flex: 1 }}
-            title={`${r.month}月：${m(forecast ? r.weighted : r.planned)} / ${m(forecast ? r.won : r.received)}`}
+            title={`${r.year ?? ''}-${r.month}：${m(forecast ? r.weighted : r.planned)} / ${m(forecast ? r.won : r.received)}`}
           >
             <div style={{ height: 105, display: 'flex', alignItems: 'flex-end', gap: 3 }}>
               <div
@@ -128,7 +128,7 @@ function Trend({ rows, forecast }: { rows: Report['monthly']; forecast: boolean 
                 }}
               />
             </div>
-            <small>{r.month}月</small>
+            <small>{r.year}-{r.month}月</small>
           </div>
         ))}
       </div>
@@ -142,8 +142,8 @@ async function exportDetail(rows: Detail[], name: string, columns: ColumnsType<D
       : [],
   );
   const numeric = new Set(['amount', 'weighted', 'planned', 'received', 'currentOutstanding', 'currentOverdue', 'allocatedAmount', 'unallocatedAmount', 'outstandingAmount', 'receivedAmount']);
-  const months = rows.some((r) => r.months);
-  const headers = [...keys.map(c => c.title), ...(months ? Array.from({length:12}, (_,i)=>[`${i+1}月计划`,`${i+1}月已回`]).flat() : [])];
+  const months = rows.find(r => r.months)?.months ?? [];
+  const headers = [...keys.map(c => c.title), ...months.flatMap(v => [`${v.year ?? ''}-${v.month}计划`,`${v.year ?? ''}-${v.month}已回`])];
   const values: SpreadsheetCell[][] = rows.map(r => [
     ...keys.map(c => {
       const v = r[c.key];
@@ -153,7 +153,7 @@ async function exportDetail(rows: Detail[], name: string, columns: ColumnsType<D
       if (numeric.has(c.key) && typeof v === 'string') return { decimal: v };
       return typeof v === 'number' ? v : v == null ? '' : String(v);
     }),
-    ...(months ? Array.from({length:12},(_,i)=>[{decimal:r.months?.[i]?.planned??'0.00'},{decimal:r.months?.[i]?.received??'0.00'}]).flat() : []),
+    ...months.flatMap((_v,i)=>[{decimal:r.months?.[i]?.planned??'0.00'},{decimal:r.months?.[i]?.received??'0.00'}]),
   ]);
   try {
     if (format === 'xlsx') {
@@ -170,11 +170,8 @@ export default function AnalyticsPage() {
   const [options, setOptions] = useState<Options>();
   const [kind, setKind] = useState(new URLSearchParams(window.location.search).get('tab') === 'collections' ? 'collections' : 'forecast'),
     [section, setSection] = useState('contracts');
-  const [year, setYear] = useState(
-    Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric' }).format(new Date())),
-  );
-  const [month, setMonth] = useState(0),
-    [ownerId, setOwnerId] = useState<number>(),
+  const [period, setPeriod] = useState(defaultStatisticsRange);
+  const [ownerId, setOwnerId] = useState<number>(),
     [source, setSource] = useState('managed');
   const [bucket, setBucket] = useState('open');
   const [deptId, setDeptId] = useState<number>();
@@ -200,8 +197,7 @@ export default function AnalyticsPage() {
     setSelected(undefined);
     try {
       const r = await get<Report>('/analytics/' + kind, {
-        year,
-        month,
+        ...period,
         ownerId,
         deptId,
         source,
@@ -222,7 +218,7 @@ export default function AnalyticsPage() {
     return () => {
       seq.current++;
     };
-  }, [options, kind, year, month, ownerId, deptId, source, page, section, bucket]);
+  }, [options, kind, period.from, period.to, ownerId, deptId, source, page, section, bucket]);
   const reset = (fn: () => void) => {
     fn();
     setPage(1);
@@ -289,8 +285,8 @@ export default function AnalyticsPage() {
             monetary('期间到账', 'received'),
             monetary('当前未收', 'currentOutstanding'),
             monetary('当前逾期', 'currentOverdue'),
-            ...Array.from({ length: 12 }, (_, i) => ({
-              title: `${i + 1}月 · 计划 / 已回`,
+            ...(data?.monthly ?? []).map((month, i) => ({
+              title: `${month.year}-${month.month} · 计划 / 已回`,
               width: 165,
               render: (_: unknown, r: Detail) => {
                 const cell = r.months?.[i];
@@ -354,25 +350,8 @@ export default function AnalyticsPage() {
         ]}
       />
       <Card size="small" style={{ marginBottom: 18 }}>
+        <StatisticsPeriod value={period} onChange={v => reset(() => setPeriod(v))} />
         <Space wrap>
-          <span>年份</span>
-          <InputNumber
-            aria-label="报表年份"
-            min={2000}
-            max={2100}
-            value={year}
-            onChange={(v) => v && reset(() => setYear(v))}
-          />
-          <Select
-            aria-label="报表月份"
-            style={{ width: 130 }}
-            value={month}
-            onChange={(v) => reset(() => setMonth(v))}
-            options={[
-              { value: 0, label: '全年' },
-              ...Array.from({ length: 12 }, (_, i) => ({ value: i + 1, label: `${i + 1}月` })),
-            ]}
-          />
           <Select
             aria-label="负责人"
             showSearch
@@ -470,10 +449,10 @@ export default function AnalyticsPage() {
                   <Table
                     size="small"
                     pagination={false}
-                    rowKey="month"
+                    rowKey={r => `${r.year}-${r.month}`}
                     dataSource={data.monthly}
                     columns={[
-                      { title: '月份', dataIndex: 'month', render: (v: number) => `${v}月` },
+                      { title: '月份', dataIndex: 'month', render: (_v: number, r: Report['monthly'][number]) => `${r.year}-${r.month}月` },
                       {
                         title: forecast ? '开放商机' : '到期计划',
                         dataIndex: forecast ? 'amount' : 'planned',
@@ -587,10 +566,10 @@ export default function AnalyticsPage() {
               title={forecast ? '商机明细 · 所选口径' : '项目 / 计划 / 到账明细'}
               extra={
                 <Space wrap>
-                  <Button icon={<DownloadOutlined />} disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${year}-${month || '全年'}-${forecast ? '销售预测' : section}`, columns)}>
+                  <Button icon={<DownloadOutlined />} disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${period.from}至${period.to}-${forecast ? '销售预测' : section}`, columns)}>
                     导出 Excel
                   </Button>
-                  <Button disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${year}-${month || '全年'}-${forecast ? '销售预测' : section}`, columns, 'csv')}>导出 CSV</Button>
+                  <Button disabled={!detailData?.items.length} onClick={() => void exportDetail(detailData?.items ?? [], `${period.from}至${period.to}-${forecast ? '销售预测' : section}`, columns, 'csv')}>导出 CSV</Button>
                 </Space>
               }
             >
@@ -667,11 +646,11 @@ export default function AnalyticsPage() {
             {selected.months && (
               <Table
                 size="small"
-                rowKey="month"
+                rowKey={r => `${r.year}-${r.month}`}
                 pagination={false}
                 dataSource={selected.months}
                 columns={[
-                  { title: '月份', dataIndex: 'month' },
+                  { title: '月份', dataIndex: 'month', render: (_v: number, r: NonNullable<Detail['months']>[number]) => `${r.year}-${r.month}月` },
                   { title: '计划', dataIndex: 'planned', render: m },
                   { title: '已回', dataIndex: 'received', render: m },
                 ]}

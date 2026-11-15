@@ -371,6 +371,7 @@ export default function FlowDesignerPage() {
                           options={[
                             { value: 'user', label: '指定审批人' },
                             { value: 'users_all', label: '多人会签（全同意）' },
+                            { value: 'users_any', label: '多人或签（任一同意）' },
                             { value: 'role', label: '按角色' },
                             { value: 'dept_leader', label: '部门负责人' },
                           ]}
@@ -386,7 +387,7 @@ export default function FlowDesignerPage() {
                                 rules={[{ required: true }]}
                                 getValueProps={(value: unknown) => ({
                                   value:
-                                    type === 'users_all'
+                                    ['users_all', 'users_any'].includes(type)
                                       ? typeof value === 'string'
                                         ? value.split(',').filter(Boolean)
                                         : []
@@ -397,10 +398,10 @@ export default function FlowDesignerPage() {
                                 }
                               >
                                 <Select
-                                  style={{ width: type === 'users_all' ? 300 : 180 }}
-                                  mode={type === 'users_all' ? 'multiple' : undefined}
-                                  maxCount={type === 'users_all' ? 8 : undefined}
-                                  placeholder={type === 'users_all' ? '指定2—8位会签人，全员同意后流转' : '选择审批人'}
+                                  style={{ width: ['users_all', 'users_any'].includes(type) ? 300 : 180 }}
+                                  mode={['users_all', 'users_any'].includes(type) ? 'multiple' : undefined}
+                                  maxCount={['users_all', 'users_any'].includes(type) ? 8 : undefined}
+                                  placeholder={type === 'users_any' ? '指定2—8位或签人，任一同意后流转' : type === 'users_all' ? '指定2—8位会签人，全员同意后流转' : '选择审批人'}
                                   options={(type === 'role' ? people.roles : people.users).map((p) => ({
                                     value: String(type === 'role' ? p.code : p.id),
                                     label: String(p.name),

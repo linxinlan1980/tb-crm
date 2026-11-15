@@ -15,6 +15,7 @@ import { AttachmentController } from './attachment.controller';
 import { AttachmentService } from './attachment.service';
 import { SourceArchiveController } from './source-archive.controller';
 import { SourceArchiveService } from './source-archive.service';
+import { BusinessRulesController } from './business-rules.controller';
 @Module({
   imports: [ApprovalModule],
   controllers: [
@@ -26,6 +27,7 @@ import { SourceArchiveService } from './source-archive.service';
     ServiceTicketController,
     AttachmentController,
     SourceArchiveController,
+    BusinessRulesController,
   ],
   providers: [
     AnalyticsService,

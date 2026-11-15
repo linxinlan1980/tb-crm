@@ -309,6 +309,8 @@ export class ActivitySyncService implements OnModuleInit, OnModuleDestroy {
         throw new ForbiddenException('日程同步未开启或权限已收回');
       const entry = await tx.calendarEntry.findFirst({ where: { id: sourceId, tenantId, ownerId } });
       if (!entry) throw new NotFoundException('日程不存在或不属于本人');
+      if (entry.origin === 'dingtalk') return null;
+      if (process.env.CRM_ACTIVITY_SYNC_FROM && entry.startsAt < new Date(process.env.CRM_ACTIVITY_SYNC_FROM+'T00:00:00+08:00')) return null;
       if (entry.status === 'cancelled' && !link) return null;
       payload = {
         marker,
@@ -330,6 +332,7 @@ export class ActivitySyncService implements OnModuleInit, OnModuleDestroy {
         include: { approval: { include: { nodes: true } } },
       });
       if (!node) throw new NotFoundException('审批节点不存在或不属于本人');
+      if (process.env.CRM_ACTIVITY_SYNC_FROM && node.approval.createdAt < new Date(process.env.CRM_ACTIVITY_SYNC_FROM+'T00:00:00+08:00')) return null;
       const approval = node.approval,
         anchor = approval.nodes.find((n) => n.id === approval.currentNodeId);
       const active =
@@ -374,6 +377,7 @@ export class ActivitySyncService implements OnModuleInit, OnModuleDestroy {
           where: {
             tenantId,
             ownerId,
+            origin: 'crm',
             status: 'scheduled',
             startsAt: { gte: new Date(Date.now() - 7 * 86400000), lte: new Date(Date.now() + 93 * 86400000) },
           },
@@ -383,7 +387,7 @@ export class ActivitySyncService implements OnModuleInit, OnModuleDestroy {
       : [];
     const nodes = setting.todoEnabled
       ? await tx.approvalNode.findMany({
-          where: { tenantId, approverId: ownerId, action: 'pending', approval: { status: 'pending' } },
+          where: { tenantId, approverId: ownerId, action: 'pending', approval: { status: 'pending', ...(process.env.CRM_ACTIVITY_SYNC_FROM ? { createdAt: { gte: new Date(process.env.CRM_ACTIVITY_SYNC_FROM+'T00:00:00+08:00') } } : {}) } },
           select: { id: true },
           take: 201,
         })

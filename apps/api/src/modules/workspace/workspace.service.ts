@@ -27,7 +27,8 @@ import {
 import { cleanInput, resource, resources } from './registry';
 import { uniqueCustomerIdentity } from './customer-identity';
 import { creditCode, identityMatch, type IdentityInput } from './customer-matching';
-import { businessDay } from './analytics-policy';
+import { businessDay, reportQuery } from './analytics-policy';
+import { businessPolicy, notifyOpportunity } from './business-policy';
 import { recalculateCustomerContracts } from './contract-change-policy';
 import { paymentSchedule, paymentScheduleSchema } from './payment-schedule';
 import { financeEventsForActor, hideReceiptCorrectionFields } from './finance-policy';
@@ -242,6 +243,10 @@ export class WorkspaceService {
                   page: { type: 'integer', minimum: 1 },
                   pageSize: { type: 'integer', minimum: 1, maximum: 100 },
                   keyword: { type: 'string', maxLength: 100 },
+                  from: { type:'string',format:'date',description:'Inclusive 2010..2060 business date; provide to together' },
+                  to: { type:'string',format:'date' },
+                  dateField:{type:'string',description:'Resource-specific server allowlisted date axis'},
+                  ...(key==='customers'?{customerCategory:{enum:['direct','sales_channel']},channelBrand:{enum:['钉钉','用友','其他']}}:{}),
                 },
               },
               outputSchema: { type: 'object', required: ['items', 'meta'] },
@@ -486,6 +491,22 @@ export class WorkspaceService {
       where.poolType = query.poolType;
     }
     if (kind === 'customers' && query.ownerId) where.ownerId = id(Number(query.ownerId));
+    if (kind === 'customers' && query.customerCategory) {
+      if (!['direct','sales_channel'].includes(query.customerCategory)) throw new BadRequestException('客户标记无效');
+      where.customerCategory = query.customerCategory;
+    }
+    if (kind === 'customers' && query.channelBrand) {
+      if (!['钉钉','用友','其他'].includes(query.channelBrand)) throw new BadRequestException('渠道标记无效');
+      where.channelBrand = query.channelBrand;
+    }
+    if (query.from || query.to) {
+      const p=reportQuery({from:query.from,to:query.to});
+      const defaults: Record<string,string>={contracts:'signDate',opportunities:'expectedCloseDate','payment-plans':'dueDate',invoices:'invoiceDate',receipts:'receiptDate',actions:'dueDate',tasks:'dueDate'};
+      const field=query.dateField ?? defaults[kind] ?? 'createdAt';
+      const allowed=kind==='contracts'?['createdAt','signDate','startDate','endDate']:[defaults[kind]??'createdAt','createdAt'];
+      if(!allowed.includes(field))throw new BadRequestException('日期筛选字段无效');
+      where[field]={gte:new Date(p.start.getTime()-(field==='createdAt'?8*3600000:0)),lt:new Date(p.end.getTime()-(field==='createdAt'?8*3600000:0))};
+    }
     if (query.customerId && r.fields.some((f) => f.key === 'customerId'))
       where.customerId = id(Number(query.customerId));
     const [items, total] = await Promise.all([
@@ -1112,7 +1133,7 @@ export class WorkspaceService {
         }
         if (recordId && row?.updatedAt)
           data.updatedAt = new Date(Math.max(Date.now(), new Date(row.updatedAt).getTime() + 1));
-        const result = recordId
+        let result = recordId
           ? await this.db(tx, kind).update({ where: { id: recordId, tenantId: a.tenantId }, data })
           : await this.db(tx, kind).create({ data: { ...base, ...defaults, ...data } });
         if (kind === 'projects' && !recordId)
@@ -1132,6 +1153,17 @@ export class WorkspaceService {
             where: { id: id(data.customerId ?? row?.customerId), tenantId: a.tenantId },
             data: { lastFollowAt: new Date(), lastFollowBy: a.userId },
           });
+        if (!recordId && ['opportunities','contracts'].includes(kind)) {
+          const policy = await businessPolicy(tx, a.tenantId);
+          if (policy && new Date() >= new Date(policy.fromDate+'T00:00:00+08:00') && kind === 'opportunities') await notifyOpportunity(tx, a, result, policy);
+          if (policy && new Date() >= new Date(policy.fromDate+'T00:00:00+08:00') && kind === 'contracts') {
+            if (policy.autoSubmitContracts) {
+              if (new Prisma.Decimal(String(result.amount)).lte(0)) throw new BadRequestException('自动提交审批的合同金额必须大于零');
+              const approval = await this.approval.start(tx, a, { bizType: 'contract', bizId: result.id, bizNo: String(result.contractNo), title: String(result.name), amount: new Prisma.Decimal(String(result.amount)), flowId: policy.contractFlowId });
+              result = await this.db(tx, kind).update({ where: { id: result.id, tenantId: a.tenantId }, data: { approvalId: approval.id, status: 'pending_approval' } });
+            }
+          }
+        }
         return result;
       },
     );
@@ -1655,27 +1687,30 @@ export class WorkspaceService {
     });
     return { id: row.id, version, total: total.toString(), items };
   }
-  async overview(a: Actor) {
+  async overview(a: Actor, query: Record<string, string> = {}) {
+    if (Object.keys(query).some(k => !['from','to'].includes(k))) throw new BadRequestException('工作台日期筛选参数无效');
+    const period = query.from || query.to ? reportQuery(query) : null;
+    const dates = (field: string, timestamp = false) => period ? { [field]: { gte: new Date(period.start.getTime() - (timestamp ? 8*3600000 : 0)), lt: new Date(period.end.getTime() - (timestamp ? 8*3600000 : 0)) } } : {};
     const tx = this.prisma.system;
-    const [customers, opps, contracts, projects, plans, actions, users] = await Promise.all([
+    const [customers, opps, contracts, projects, plans, actions, users, receipts, invoices] = await Promise.all([
       hasPermission(a, resourcePermission('customers', 'read'))
-        ? tx.customer.findMany({ where: await this.scope(tx, a, 'customers') })
+        ? tx.customer.findMany({ where: { ...(await this.scope(tx, a, 'customers')), ...dates('createdAt',true) } })
         : Promise.resolve([]),
       hasPermission(a, resourcePermission('opportunities', 'read'))
-        ? tx.opportunity.findMany({ where: await this.scope(tx, a, 'opportunities') })
+        ? tx.opportunity.findMany({ where: { ...(await this.scope(tx, a, 'opportunities')), ...dates('expectedCloseDate') } })
         : Promise.resolve([]),
       hasPermission(a, resourcePermission('contracts', 'read'))
-        ? tx.contract.findMany({ where: await this.scope(tx, a, 'contracts') })
+        ? tx.contract.findMany({ where: { ...(await this.scope(tx, a, 'contracts')), ...dates('signDate') } })
         : Promise.resolve([]),
       hasPermission(a, resourcePermission('projects', 'read'))
-        ? tx.project.findMany({ where: await this.scope(tx, a, 'projects') })
+        ? tx.project.findMany({ where: { ...(await this.scope(tx, a, 'projects')), ...dates('createdAt',true) } })
         : Promise.resolve([]),
       hasPermission(a, resourcePermission('payment-plans', 'read'))
-        ? tx.paymentPlan.findMany({ where: await this.scope(tx, a, 'payment-plans') })
+        ? tx.paymentPlan.findMany({ where: { ...(await this.scope(tx, a, 'payment-plans')), ...dates('dueDate') } })
         : Promise.resolve([]),
       hasPermission(a, 'action:read')
         ? tx.actionPlan.findMany({
-            where: { ...(await this.scope(tx, a, 'actions')), status: { in: ['pending', 'in_progress', 'overdue'] } },
+            where: { ...(await this.scope(tx, a, 'actions')), ...dates('dueDate'), status: { in: ['pending', 'in_progress', 'overdue'] } },
             take: 20,
             orderBy: { dueDate: 'asc' },
           })
@@ -1689,6 +1724,8 @@ export class WorkspaceService {
         },
         select: { id: true, name: true, deptId: true },
       }),
+      period && hasPermission(a,'finance:read') ? tx.receipt.findMany({where:{...(await this.scope(tx,a,'receipts')),status:'confirmed',...dates('receiptDate')}}) : Promise.resolve([]),
+      period && hasPermission(a,'finance:read') ? tx.invoice.findMany({where:{...(await this.scope(tx,a,'invoices')),status:{in:['invoiced','sent','received','verified']},...dates('invoiceDate')}}) : Promise.resolve([]),
     ]);
     const sum = (values: Prisma.Decimal[]) => values.reduce((n, v) => n.add(v), new Prisma.Decimal(0)).toString();
     const stages = await tx.opportunityStage.findMany({
@@ -1707,7 +1744,8 @@ export class WorkspaceService {
       signedAmount: sum(
         contracts.filter((c) => ['signed', 'executing', 'completed'].includes(c.status)).map((c) => c.amount),
       ),
-      received: sum(plans.map((p) => p.receivedAmount)),
+      received: period ? sum(receipts.map(r=>r.amount)) : sum(plans.map((p) => p.receivedAmount)),
+      invoiced: sum(invoices.map(i=>i.amount)),
       outstanding: sum(plans.map((p) => p.outstandingAmount)),
       overdue: sum(plans.filter((p) => p.dueDate && p.dueDate < today && p.status !== 'cancelled').map((p) => p.outstandingAmount)),
       projects: projects.length,

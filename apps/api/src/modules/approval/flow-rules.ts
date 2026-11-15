@@ -7,9 +7,17 @@ export interface FlowField {
   type: 'text' | 'number' | 'date';
   required: boolean;
 }
+export function anySignature(formData: unknown, order: number): boolean {
+  if (!formData || typeof formData !== 'object' || Array.isArray(formData)) return false;
+  const snapshot = (formData as Record<string, unknown>).flowSnapshot;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false;
+  const nodes = (snapshot as Record<string, unknown>).nodes;
+  return Array.isArray(nodes) && nodes.some(value => value && typeof value === 'object' && !Array.isArray(value) &&
+    (value as Record<string, unknown>).order === order && (value as Record<string, unknown>).mode === 'any');
+}
 export interface FlowNodeInput {
   name: string;
-  approverType: 'user' | 'users_all' | 'role' | 'dept_leader';
+  approverType: 'user' | 'users_all' | 'users_any' | 'role' | 'dept_leader';
   approverValue: string;
   condition: string;
 }
@@ -71,12 +79,12 @@ export function flowInput(value: unknown): FlowInput {
   const nodes = body.nodes.map((value): FlowNodeInput => {
     const node = object(value),
       type = node.approverType;
-    if (!['user', 'users_all', 'role', 'dept_leader'].includes(String(type)))
+    if (!['user', 'users_all', 'users_any', 'role', 'dept_leader'].includes(String(type)))
       throw new BadRequestException('审批人类型无效');
     const approverValue =
       type === 'dept_leader'
         ? ''
-        : type === 'users_all'
+        : type === 'users_all' || type === 'users_any'
           ? allApprovers(node.approverValue).join(',')
           : text(node.approverValue, '审批人', 100);
     const expression = typeof node.condition === 'string' ? node.condition.trim() : 'always';

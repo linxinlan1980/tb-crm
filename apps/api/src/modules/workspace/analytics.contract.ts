@@ -4,7 +4,9 @@ const inputSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    year: { type: 'integer', minimum: 2000, maximum: 2100 },
+    year: { type: 'integer', minimum: 2010, maximum: 2060 },
+    from: { type: 'string', format: 'date', description: 'Inclusive first business day,2010-01-01..2060-12-31; provide to together' },
+    to: { type: 'string', format: 'date', description: 'Inclusive last business day,2010-01-01..2060-12-31' },
     month: { type: 'integer', minimum: 0, maximum: 12 },
     ownerId: { type: 'integer', minimum: 1, maximum: 2147483647 },
     deptId: { type: 'integer', minimum: 1, maximum: 2147483647 },

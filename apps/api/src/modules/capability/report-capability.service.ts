@@ -9,7 +9,7 @@ import { json, validateActor } from '../workspace/command-runner';
 export function reportInput(input: unknown): Record<string, string> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('报表参数必须为对象');
   const numeric: Record<string, [number, number]> = {
-    year: [2000, 2100], month: [0, 12], ownerId: [1, 2147483647], deptId: [1, 2147483647],
+    year: [2010, 2060], month: [0, 12], ownerId: [1, 2147483647], deptId: [1, 2147483647],
     contractId: [1, 2147483647], page: [1, 1000000], pageSize: [1, 100],
   };
   const enums: Record<string, readonly string[]> = {
@@ -22,7 +22,8 @@ export function reportInput(input: unknown): Record<string, string> {
       const [min, max] = numeric[key];
       if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) throw new BadRequestException(key + '必须为范围内整数');
       query[key] = String(value);
-    } else if (Object.hasOwn(enums, key) && typeof value === 'string' && enums[key].includes(value)) query[key] = value;
+    } else if (['from','to'].includes(key) && typeof value==='string' && /^20[0-9]{2}-[0-9]{2}-[0-9]{2}$/.test(value) && value>='2010-01-01' && value<='2060-12-31' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0,10)===value) query[key]=value;
+    else if (Object.hasOwn(enums, key) && typeof value === 'string' && enums[key].includes(value)) query[key] = value;
     else throw new BadRequestException('存在未定义或无效报表参数');
   }
   return query;
