@@ -10,6 +10,8 @@ import { ArrowRightOutlined, ReloadOutlined } from '@ant-design/icons';
 import { get, errorText, money, type RecordRow } from '../../services/workspace';
 import { useAuthStore } from '../../stores/useAuthStore';
 interface Overview {
+  businessSummary?:{signed:string;unpaid:string;invoiced:string;invoiceUnpaid:string|null;construction:string}|null;
+  businessProjectAccess?:boolean;
   restrictedModules?: string[];
   role: string;
   customers: number;
@@ -84,7 +86,7 @@ export default function DashboardPage() {
       </div>
       <StatisticsPeriod value={period} onChange={setPeriod} />
       <StatisticsPeople value={people} onChange={setPeople} />
-      <Alert type="info" showIcon style={{ marginBottom: 16 }} message="客户/项目按建档日，管道按预计成交日，合同按签约日，回款/开票按实际日期，未收和逾期限定所选到期计划。不是历史期末余额快照。" />
+      <Alert type="info" showIcon style={{ marginBottom: 16 }} message="客户按建档日，商机按预计成交日。合同及相关开票、未收、在建金额按所选签约日期归集，展示这批合同当前累计值；实际回款另按到账日期统计。软件返佣单列。" />
       {error && <Alert message={error} type="error" showIcon />}
       {!!data?.restrictedModules?.length && (
         <Alert
@@ -100,12 +102,15 @@ export default function DashboardPage() {
           {[
             { title: '期间建档客户', value: data?.customers, path: '/customers' },
             { title: '期间预计成交商机', value: data?.openOpportunities, path: '/opportunities' },
-            { title: '期间销售管道金额', value: money(data?.pipeline), prefix: '¥', path: '/opportunities/board' },
-            { title: '期间签约合同额', value: money(data?.signedAmount), prefix: '¥', path: '/contracts' },
-            { title: '期间立项项目', value: data?.projects, path: '/projects' },
-            { title: '期间到期计划 · 当前未收', value: money(data?.outstanding), prefix: '¥', path: '/finance/payment-plans' },
-            { title: '期间实际回款', value: money(data?.received), prefix: '¥', path: '/receipts' },
-            { title: '期间实际开票', value: money(data?.invoiced), prefix: '¥', path: '/invoices' },
+            { title: '我方待签业务报价', value: money(data?.pipeline), prefix: '¥', path: '/opportunities/board' },
+            ...(data?.businessSummary?[
+              {title:'已签合同金额',value:money(data.businessSummary.signed),prefix:'¥',path:'/analytics'},
+              {title:'合同未回款',value:money(data.businessSummary.unpaid),prefix:'¥',path:'/analytics'},
+              {title:'开票金额',value:money(data.businessSummary.invoiced),prefix:'¥',path:'/analytics'},
+              {title:'开票未回款',value:data.businessSummary.invoiceUnpaid===null?'待核实':money(data.businessSummary.invoiceUnpaid),prefix:data.businessSummary.invoiceUnpaid===null?undefined:'¥',path:'/analytics'},
+              ...(data.businessProjectAccess?[{title:'建设中项目金额',value:money(data.businessSummary.construction),prefix:'¥',path:'/analytics'}]:[]),
+            ]:[{ title: '期间签约合同额', value: money(data?.signedAmount), prefix: '¥', path: '/contracts' }]),
+            { title: '期间实际业务回款', value: money(data?.received), prefix: '¥', path: '/receipts' },
           ]
             .filter((k) => can(k.path))
             .map((k) => (

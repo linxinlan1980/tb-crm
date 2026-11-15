@@ -34,7 +34,7 @@ export const resources: Record<string, Resource> = {
       f('name', '客户名称', 'text', true),
       f('shortName', '客户简称'),
       f('customerCategory', '客户标记', 'select', false, { options: ['direct', 'sales_channel'] }),
-      f('channelBrand', '销售渠道', 'select', false, { options: ['钉钉', '用友', '其他'] }),
+      f('channelBrand', '销售渠道', 'select', false, { options: ['钉钉', '用友', '阿里', '其他'] }),
       f('creditCode', '统一社会信用代码'),
       f('companyPhone', '企业联系电话'),
       f('legalPerson', '法定代表人'),

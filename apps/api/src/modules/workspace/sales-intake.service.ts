@@ -19,6 +19,7 @@ import { salesIntakeMeta, salesForecastEligible } from './sales-intake-policy';
 import { reportQuery } from './analytics-policy';
 import { statisticsScope } from './statistics-scope';
 import { salesActivityBody, contractPlanBody, actionCalendarBody, followupTime } from './sales-activity-policy';
+import {ownTradeAmount,currentTrade} from './trade-policy';
 import { pendingCustomerName } from './pending-customer';
 const provider = 'crm-sales-intake';
 const identifier = z.string().uuid();
@@ -476,8 +477,8 @@ export class SalesIntakeService {
             code: code('KH'),
             name: c.name,
             ...identity,
-            customerCategory: c.channel === 'direct' ? 'direct' : 'sales_channel',
-            channelBrand: c.channel === 'direct' ? null : c.channel,
+            customerCategory: c.customerCategory??'direct',
+            channelBrand: c.customerCategory==='sales_channel'&&c.channel!=='direct'?c.channel:null,
             source: 'historical_intake',
             ownerId: a.userId,
             ownerDeptId: a.deptId,
@@ -485,7 +486,7 @@ export class SalesIntakeService {
             protectUntil: new Date(Date.now() + 30 * 86400000),
             createdBy: a.userId,
             remark: c.notes,
-            tags: json({ salesIntake: { identityStatus: c.identityStatus, batchKey: m.batchKey } }),
+            tags: json({ salesIntake: { identityStatus: c.identityStatus, batchKey: m.batchKey,sourceChannel:c.channel } }),
           },
         });
         ids.customers[c.key] = row.id;
@@ -824,9 +825,9 @@ export class SalesIntakeService {
             name: o.name,
             stage: o.stage,
             outcome: o.status,
-            amount: knownSalesAmount(o) ? o.amount.toFixed(2) : null,
+            amount: knownSalesAmount(o) ? ownTradeAmount(o)?.toFixed(2)??null : null,
             forecastEligible: salesForecastEligible(o),
-            amountBasis: typeof m.amountBasis === 'string' ? m.amountBasis : '当前商机金额',
+            amountBasis: currentTrade(o).reason??(typeof m.amountBasis === 'string' ? m.amountBasis : '当前商机金额'),
             sourceDate,
             channel: typeof m.channel === 'string' ? m.channel : (o.source ?? 'direct'),
             ownerId: o.ownerId,

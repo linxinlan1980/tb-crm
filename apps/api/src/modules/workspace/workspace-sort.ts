@@ -91,6 +91,7 @@ export function sortBusinessRows<T>(rows: readonly T[], key: string, order: 'asc
   });
 }
 export const reportSortFields = [
+  'expectedDate','invoiced','commission','weight','customerName','signDate','unpaid',
   'id',
   'name',
   'contractNo',

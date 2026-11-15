@@ -31,6 +31,9 @@ import { statisticsResourceFilter, statisticsOptions, statisticsScope, statistic
 import { businessDay, reportQuery } from './analytics-policy';
 import { businessPolicy, notifyOpportunity } from './business-policy';
 import { recalculateCustomerContracts } from './contract-change-policy';
+import {businessReport} from './business-report-policy';
+import {contractTrades} from './trade-store';
+import {ownTradeAmount} from './trade-policy';
 import { salesAmountProjection, salesIntakeMeta, salesForecastEligible } from './sales-intake-policy';
 import { followupTime } from './sales-activity-policy';
 import { opportunityFollowInput, opportunityFollowSchema } from './opportunity-follow-policy';
@@ -255,7 +258,7 @@ export class WorkspaceService {
                   from: { type:'string',format:'date',description:'Inclusive 2010..2060 business date; provide to together' },
                   to: { type:'string',format:'date' },
                   dateField:{type:'string',description:'Resource-specific server allowlisted date axis'},
-                  ...(key==='customers'?{customerCategory:{enum:['direct','sales_channel']},channelBrand:{enum:['钉钉','用友','其他']}}:{}),
+                  ...(key==='customers'?{customerCategory:{enum:['direct','sales_channel']},channelBrand:{enum:['钉钉','用友','阿里','其他']}}:{}),
                 },
               },
               outputSchema: { type: 'object', required: ['items', 'meta'] },
@@ -514,7 +517,7 @@ export class WorkspaceService {
       where.customerCategory = query.customerCategory;
     }
     if (kind === 'customers' && query.channelBrand) {
-      if (!['钉钉','用友','其他'].includes(query.channelBrand)) throw new BadRequestException('渠道标记无效');
+      if (!['钉钉','用友','阿里','其他'].includes(query.channelBrand)) throw new BadRequestException('渠道标记无效');
       where.channelBrand = query.channelBrand;
     }
     if (query.from || query.to) {
@@ -1816,8 +1819,21 @@ export class WorkspaceService {
       where: { tenantId: a.tenantId, isActive: true },
       orderBy: { sortOrder: 'asc' },
     });
+    const allFinancialContractIds=[...new Set([...contracts.map(c=>c.id),...plans.map(p=>p.contractId),...invoices.map(i=>i.contractId),...receipts.flatMap(r=>r.contractId?[r.contractId]:[])])];
+    const trades=await contractTrades(tx,a.tenantId,allFinancialContractIds),commissionIds=new Set([...trades].filter(([,t])=>t.category==='software_commission').map(([id])=>id));
+    let businessSummary:ReturnType<typeof businessReport>['summary']|null=null;
+    const businessProjectAccess=hasPermission(a,'project:read');
+    if(hasPermission(a,'finance:read')&&hasPermission(a,'contract:read')){
+      const cids=contracts.filter(c=>c.currency==='CNY'&&['signed','executing','completed'].includes(c.status)).map(c=>c.id);
+      const bp=await tx.paymentPlan.findMany({where:{AND:[await scoped('payment-plans'),{contractId:{in:cids}}]}});
+      const bi=await tx.invoice.findMany({where:{AND:[await scoped('invoices'),{contractId:{in:cids}}]}});
+      const bj=businessProjectAccess?await tx.project.findMany({where:{AND:[await this.scope(tx,a,'projects'),{contractId:{in:cids}}]}}):[];
+      if([contracts,bp,bi,bj].some(rows=>rows.length>10000))throw new BadRequestException('统计超过10000条，请缩小日期或人员范围');
+      const bc=await tx.customer.findMany({where:{tenantId:a.tenantId,id:{in:contracts.map(c=>c.customerId)}},select:{id:true,name:true,customerCategory:true,channelBrand:true}});
+      businessSummary=businessReport(contracts,bp,bi,bj,trades,new Map(bc.map(c=>[c.id,c])),period??reportQuery({from:'2010-01-01',to:'2060-12-31'})).summary;
+    }
     const today = new Date(businessDay(new Date()) + 'T00:00:00.000Z');
-    return {
+    return {businessSummary,businessProjectAccess,
       audience,
       restrictedModules: ['customers', 'opportunities', 'contracts', 'projects', 'payment-plans', 'actions'].filter(
         (kind) => !hasPermission(a, resourcePermission(kind, 'read')),
@@ -1825,12 +1841,12 @@ export class WorkspaceService {
       role: admin(a) ? 'admin' : boss(a) ? 'boss' : manager(a) ? 'manager' : 'sales',
       customers: customers.length,
       openOpportunities: opps.filter((o) => o.status === 'open').length,
-      pipeline: sum(opps.filter((o) => o.status === 'open' && salesForecastEligible(o)).map((o) => o.amount)),
+      pipeline: sum(opps.filter((o) => o.status === 'open' && salesForecastEligible(o)).map((o) => ownTradeAmount(o)??new Prisma.Decimal(0))),
       signedAmount: sum(
-        contracts.filter((c) => ['signed', 'executing', 'completed'].includes(c.status)).map((c) => c.amount),
+        contracts.filter((c) => ['signed', 'executing', 'completed'].includes(c.status)&&!commissionIds.has(c.id)).map((c) => c.amount),
       ),
-      received: period ? sum(receipts.map(r=>r.amount)) : sum(plans.map((p) => p.receivedAmount)),
-      invoiced: sum(invoices.map(i=>i.amount)),
+      received: period ? sum(receipts.filter(r=>!r.contractId||!commissionIds.has(r.contractId)).map(r=>r.amount)) : sum(plans.map((p) => p.receivedAmount)),
+      invoiced: sum(invoices.filter(i=>!commissionIds.has(i.contractId)).map(i=>i.amount)),
       outstanding: sum(plans.map((p) => p.outstandingAmount)),
       overdue: sum(plans.filter((p) => p.dueDate && p.dueDate < today && p.status !== 'cancelled').map((p) => p.outstandingAmount)),
       projects: projects.length,
@@ -1838,7 +1854,7 @@ export class WorkspaceService {
         name: s.name,
         code: s.code,
         count: opps.filter((o) => o.status === 'open' && o.stage === s.code).length,
-        amount: sum(opps.filter((o) => o.status === 'open' && o.stage === s.code && salesForecastEligible(o)).map((o) => o.amount)),
+        amount: sum(opps.filter((o) => o.status === 'open' && o.stage === s.code && salesForecastEligible(o)).map((o) => ownTradeAmount(o)??new Prisma.Decimal(0))),
       })),
       actions,
       users,

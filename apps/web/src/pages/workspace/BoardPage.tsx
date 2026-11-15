@@ -102,7 +102,7 @@ export default function BoardPage() {
                 <Card key={r.id} size="small" style={{ marginBottom: 12 }}>
                   <Button type="link" style={{padding:0,height:'auto',whiteSpace:'normal',textAlign:'left',fontWeight:600}} onClick={()=>navigate(`/opportunities?id=${r.id}`)}>{String(r.name)}</Button>
                   <div style={{marginTop:8,fontWeight:500}}>客户：{canCustomer?<Button type="link" style={{padding:0,height:'auto',whiteSpace:'normal',textAlign:'left'}} onClick={()=>navigate(`/customers?id=${String(r.customerId)}`)}>{String(r.customerName??'客户名字待核实')}</Button>:String(r.customerName??'客户名字待核实')}</div>
-                  <Typography.Paragraph style={{ marginTop: 12 }}>¥{money(r.amount)}</Typography.Paragraph>
+                  <Typography.Paragraph style={{ marginTop: 12 }}>我方金额：{r.amount===null?'待核实':'¥'+money(r.amount)}</Typography.Paragraph>{r.projectQuoteAmount!==undefined&&<Typography.Paragraph type="secondary">原整包报价 ¥{money(r.projectQuoteAmount)} · 厂商产品部分 ¥{money(r.vendorProductAmount)}</Typography.Paragraph>}
                   <Tag color={r.status==='lost'?'red':r.status==='won'?'green':'blue'}>{({won:'已赢单',lost:'已掉单',cancelled:'已取消',on_hold:'暂缓'} as Record<string,string>)[String(r.status)]??'进行中'}</Tag>
                   <Typography.Paragraph type="secondary" style={{marginTop:8,marginBottom:0}}>{String(r.ownerName??'')} · {String(r.expectedCloseDate??'').slice(0,10)}</Typography.Paragraph>
                   <Typography.Paragraph type="secondary" style={{marginTop:4,marginBottom:0}}>跟进 {Number(r.followCount??0)} 次 · 最近 {r.lastFollowAt?String(r.lastFollowAt).slice(0,10):'待记录'}</Typography.Paragraph>

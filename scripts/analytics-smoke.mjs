@@ -89,7 +89,7 @@ try {
   for (const token of [at, mt, adt, gt]) eq((await call('/analytics/collections?year=2059&ownerId=' + a.id, token)).summary.received, '50.00', 'four role scoped totals');
   eq((await call('/analytics/collections?year=2059&source=legacy', at)).summary.received, '900.00', 'legacy separate');
   await call('/analytics/collections?year=2059&ownerId=' + a.id, xt, 403);
-  const schemas = await call('/analytics/schema', at); eq(schemas.length, 2, 'versioned report catalog');
+  const schemas = await call('/analytics/schema', at); eq(schemas.length, 3, 'versioned report catalog');
   const options = await call('/analytics/options', mt); ok(!options.owners.some((u) => u.id === b.id), 'no other-team options');
   for (const [token, expected, range] of [[mt, '100.01', 'department'], [adt, '1000099.01', 'company'], [gt, '1000099.01', 'company']]) {
     const own = await call('/analytics/forecast?year=2059', token);
@@ -170,6 +170,39 @@ try {
   await call('/analytics/forecast?sortBy=healthFactors',at,400);
   await call('/analytics/forecast?sortOrder=sideways',at,400);
   await call('/workspace/actions?personRange=person&ownerId='+b.id+'&sortBy=dueDate',at,403);
+  // New business metrics: the channel can be the paying customer; only software commission is excluded.
+  await db.customer.update({where:{id:customer.id},data:{customerCategory:'sales_channel',channelBrand:'用友'}});
+  const tc=await db.contract.create({data:{tenantId:tid,contractNo:'TRADE'+suffix,name:'Synthetic channel service',customerId:customer.id,ownerId:a.id,contractType:'outsource',amount:'1000',totalReceived:'400',totalOutstanding:'600',status:'signed',signDate:new Date('2058-06-01')}});
+  const ccTrade=await db.contract.create({data:{tenantId:tid,contractNo:'COMM'+suffix,name:'Synthetic commission',customerId:customer.id,ownerId:a.id,contractType:'channel',amount:'500',totalReceived:'100',totalOutstanding:'400',status:'signed',signDate:new Date('2058-06-01')}});
+  const ti=await db.invoice.create({data:{tenantId:tid,invoiceNo:'TI'+suffix,contractId:tc.id,customerId:customer.id,invoiceTitle:'Synthetic',amount:'600',status:'invoiced'}});
+  await db.paymentPlan.createMany({data:[{tenantId:tid,contractId:tc.id,planNo:'T1'+suffix,amount:'600',receivedAmount:'200',outstandingAmount:'400',invoiceId:ti.id,dueDate:new Date('2058-07-01'),status:'partial'},{tenantId:tid,contractId:tc.id,planNo:'T2'+suffix,amount:'200',receivedAmount:'0',outstandingAmount:'200',dueDate:null},{tenantId:tid,contractId:tc.id,planNo:'T3'+suffix,amount:'200',receivedAmount:'200',outstandingAmount:'0',status:'completed'}]});
+  const to=await makeOpp('TRADEO',a.id,customer.id,{amount:'1000',expectedCloseDate:new Date('2058-07-01')});
+  const classify={requestKey:randomUUID(),items:[{kind:'contracts',id:ccTrade.id,expectedUpdatedAt:ccTrade.updatedAt.toISOString(),category:'software_commission',reason:'Synthetic documented software commission',sourceIds:['synthetic:commission']},{kind:'opportunities',id:to.id,expectedUpdatedAt:to.updatedAt.toISOString(),category:'business',ownAmount:'400',vendorProductAmount:'600',reason:'Synthetic service 400, vendor software 600',sourceIds:['synthetic:quote']}]};
+  await call('/trade/classify',at,403,classify);
+  const classified=await call('/trade/classify',adt,201,classify);eq(classified.items.length,2,'Atomic trade classifications');
+  eq(await call('/trade/classify',adt,201,classify),classified,'Classification receipt replay, no duplicate writes');
+  await call('/trade/classify',adt,409,{...classify,requestKey:randomUUID()});
+  await call('/trade/classify',adt,400,{...classify,tenantId:tid,requestKey:randomUUID()});
+  await call('/trade/opportunities/'+to.id,bt,404);
+  eq((await call('/workspace/opportunities/'+to.id,at)).amount,'400','Own service projection replaces gross quote in board/detail');
+  eq((await db.opportunity.findUniqueOrThrow({where:{id:to.id}})).amount.toFixed(2),'1000.00','Original quote amount unchanged');
+  const reg={requestKey:randomUUID(),contracts:[{id:tc.id,expectedUpdatedAt:tc.updatedAt.toISOString(),stage:'acceptance',plannedEndDate:'2058-12-01',reason:'Synthetic historical delivery closing documented by operator',sourceIds:['synthetic:history']}]};
+  await call('/trade/project-register',at,403,reg);
+  const registered=await call('/trade/project-register',adt,201,reg);eq(registered.actualAcceptancesCreated,0,'Historical construction does not fake actual acceptance');
+  eq(await call('/trade/project-register',adt,201,reg),registered,'Historical registration idempotent');
+  eq(await db.project.count({where:{tenantId:tid,contractId:tc.id}}),1,'One existing contract project preserved');
+  const pr=await db.project.findUniqueOrThrow({where:{id:registered.projects[0].projectId}});eq(pr.actualStartDate,null,'No fabricated actual start');eq(pr.acceptanceState,'not_requested','No fabricated acceptance');
+  for(const token of [at,mt,adt,freshBoss]){
+    const r=await call('/analytics/business?year=2058&ownerId='+a.id,token);
+    eq(r.summary.signed,'1000.00','Channel-paying service included, commission excluded');eq(r.summary.unpaid,'600.00','Contract outstanding');eq(r.summary.invoiced,'600.00','Valid invoices');eq(r.summary.invoiceUnpaid,'400.00','Invoice-specific remaining amount');eq(r.summary.construction,'1000.00','Construction deduplicated by contract');eq(r.summary.commission,'500.00','Commission separate');eq(r.cashProjection.total,'600.00','Cash projection never double-counts invoice receivable');
+  }
+  await call('/analytics/business?year=2058&personRange=company',at,403);
+  eq((await call('/analytics/business?year=2058',bt)).summary.signed,'0.00','Outsider business report is empty');
+  await call('/analytics/business?year=2058&ownerId='+a.id,xt,403);
+  const grant=await call('/agent-control/grants',at,201,{requestKey:randomUUID(),name:'Synthetic business report',purpose:'Synthetic shared report verification',minutes:5,maxCalls:3,capabilities:['report.business.cash']});
+  const agentReport=await call('/agent-runtime/invoke',grant.token,201,{requestKey:randomUUID(),capabilityId:'report.business.cash',input:{year:2058,sortBy:'amount',sortOrder:'desc'}});
+  eq(agentReport.result.result.summary.signed,'1000.00','Agent and web share business report');
+  await call('/agent-runtime/invoke',grant.token,403,{requestKey:randomUUID(),capabilityId:'report.business.cash',input:{year:2058,personRange:'company'}});
   await db.opportunity.createMany({ data: Array.from({ length: 10001 }, (_, i) => ({ tenantId: tid, code: 'B' + suffix + i, name: 'Synthetic bounded query', ownerId: b.id, customerId: customerB.id, stage: stage.code, amount: '0.01', expectedCloseDate: future })) });
   await call('/analytics/forecast?year=2059', bt, 400);
   await db.user.update({ where: { id: a.id }, data: { status: 'inactive' } });

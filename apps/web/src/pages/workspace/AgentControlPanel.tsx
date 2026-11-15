@@ -62,6 +62,7 @@ interface Execution {
 }
 const empty = <T,>(): Page<T> => ({ items: [], nextCursor: null });
 const names: Record<string, string> = {
+  'report.business.cash':'读取合同与回款经营统计（返佣单列，只读）',
   'report.sales.forecast': '读取销售预测（含明细，只读）',
   'report.cash.collections': '读取回款与应收（含明细，只读）',
   'customer.search': '查询客户摘要',

@@ -27,6 +27,7 @@ import { PlusOutlined, ReloadOutlined, ExportOutlined } from '@ant-design/icons'
 import ContractChanges from './ContractChanges';
 import AttachmentPanel from './AttachmentPanel';
 import QuoteHistory, { QuoteLines } from './QuoteHistory';
+import TradeClassificationPanel from './TradeClassificationPanel';
 import OpportunityFollowup from './OpportunityFollowup';
 import BusinessSort, { type BusinessSortValue } from '../../components/BusinessSort';
 import {
@@ -611,7 +612,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
             options={[{ value: 'direct', label: '普通直客' }, { value: 'sales_channel', label: '销售渠道客户' }]}
             onChange={v => { setCustomerCategory(v); setPage(1); }} />
           <Select aria-label="销售渠道筛选" allowClear placeholder="全部销售渠道" style={{ width: 180 }} value={channelBrand}
-            options={['钉钉','用友','其他'].map(v => ({ value: v, label: v }))} onChange={v => { setChannelBrand(v); setPage(1); }} />
+            options={['钉钉','用友','阿里','其他'].map(v => ({ value: v, label: v }))} onChange={v => { setChannelBrand(v); setPage(1); }} />
         </Space>}
         <Input.Search
           style={{ width: 320, marginBottom: 20 }}
@@ -666,6 +667,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                 <QuoteLines items={(detail.quoteSnapshot as Record<string, unknown>).items} />
               </Card>
             )}
+            {['contracts','opportunities'].includes(kind)&&<TradeClassificationPanel kind={kind} id={detail.id} version={detail.updatedAt} onChanged={()=>{void openDetail(detail);void load();}}/>}
             {detail.related && typeof detail.related === 'object' && (
               <>
               {kind==='opportunities'&&<Space style={{marginTop:20}}><OpportunityFollowup row={detail} onChanged={()=>{void openDetail(detail);void load();}}/></Space>}

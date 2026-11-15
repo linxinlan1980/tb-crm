@@ -1,6 +1,7 @@
 import Table from '../../components/BusinessTable';
 import BusinessSort, { type BusinessSortValue } from '../../components/BusinessSort';
 import SalesFunnel from './SalesFunnel';
+import BusinessAnalytics from './BusinessAnalytics';
 import StatisticsPeople, { defaultStatisticsPeople } from '../../components/StatisticsPeople';
 import type { SpreadsheetCell } from '../../utils/xlsx';
 import { csvCell } from '../../utils/csv';
@@ -172,7 +173,7 @@ async function exportDetail(rows: Detail[], name: string, columns: ColumnsType<D
 export default function AnalyticsPage() {
   const [sorting,setSorting]=useState<BusinessSortValue>({sortBy:'id',sortOrder:'desc'});
   const [options, setOptions] = useState<Options>();
-  const [kind, setKind] = useState(new URLSearchParams(window.location.search).get('tab') === 'collections' ? 'collections' : 'forecast'),
+  const [kind, setKind] = useState(new URLSearchParams(window.location.search).get('tab') === 'collections' ? 'collections' : 'business'),
     [section, setSection] = useState('contracts');
   const [period, setPeriod] = useState(defaultStatisticsRange);
   const [people, setPeople] = useState(defaultStatisticsPeople);
@@ -188,11 +189,12 @@ export default function AnalyticsPage() {
     get<Options>('/analytics/options')
       .then((o) => {
         setOptions(o);
-        if (!o.canForecast && o.canCollections) setKind('collections');
+        if (!o.canCollections && o.canForecast) setKind('forecast');
       })
       .catch((e) => setError(errorText(e)));
   }, []);
   const load = async () => {
+    if(kind==='business'){setData(undefined);return;}
     const id = ++seq.current;
     setBusy(true);
     setError('');
@@ -322,10 +324,10 @@ export default function AnalyticsPage() {
   ];
   const cards = forecast
     ? [
-        ['期间开放商机', 'open'],
-        ['阶段加权签约预测', 'weighted'],
+        ['我方待签业务报价', 'open'],
+        ['阶段权重参考金额', 'weighted'],
         ['期间已赢单', 'won'],
-        ['关闭商机赢单率', 'winRate'],
+        ['待补关闭日期商机', 'unknownClosedCount'],
       ]
     : [
         ['期间到期计划', 'planned'],
@@ -338,7 +340,7 @@ export default function AnalyticsPage() {
       <div className="page-heading">
         <div>
           <div className="eyebrow">SALES & CASH ANALYTICS</div>
-          <h1>销售预测与回款分析</h1>
+          <h1>合同、回款与销售统计</h1>
           <Typography.Text type="secondary">从商机、计划到实际到账，按同一权限范围核对每个数字。</Typography.Text>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={!options || busy}>
@@ -349,7 +351,8 @@ export default function AnalyticsPage() {
         activeKey={kind}
         onChange={(k) => reset(() => setKind(k))}
         items={[
-          ...(options?.canForecast ? [{ key: 'forecast', label: '销售预测' }] : []),
+          ...(options?.canCollections?[{key:'business',label:'合同与回款经营统计'}]:[]),
+          ...(options?.canForecast ? [{ key: 'forecast', label: '商机报价与阶段参考' }] : []),
           ...(options?.canCollections ? [{ key: 'collections', label: '回款、应收与项目矩阵' }] : []),
         ]}
       />
@@ -357,7 +360,7 @@ export default function AnalyticsPage() {
         <StatisticsPeriod value={period} onChange={v => reset(() => setPeriod(v))} />
         <Space wrap>
           <StatisticsPeople value={people} onChange={v => reset(() => setPeople(v))} />
-          {!forecast && (
+          {kind==='collections' && (
             <Select
               aria-label="收款来源"
               style={{ width: 180 }}
@@ -373,7 +376,7 @@ export default function AnalyticsPage() {
       </Card>
       {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
       <Spin spinning={busy}>
-        {data ? (
+        {kind==='business'&&options?.canCollections?<BusinessAnalytics period={period} people={people}/>:data ? (
           <>
             {forecast && <SalesFunnel period={period} people={people}/>}
             <Row gutter={[16, 16]}>
@@ -400,13 +403,14 @@ export default function AnalyticsPage() {
                     <Statistic
                       title={title}
                       value={
-                        key === 'winRate'
+                        key === 'unknownClosedCount'
+                          ? data.summary[key]+' 个' : key === 'winRate'
                           ? data.summary[key] === null
                             ? '暂无关闭商机'
                             : `${data.summary[key]}%`
                           : m(data.summary[key])
                       }
-                      prefix={key === 'winRate' ? undefined : '¥'}
+                      prefix={['winRate','unknownClosedCount'].includes(key) ? undefined : '¥'}
                     />
                   </Card>
                 </Col>
