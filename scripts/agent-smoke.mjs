@@ -162,6 +162,7 @@ try {
   for (const [username, roleCode] of [
     ['sales', 'sales'],
     ['peer', 'sales'],
+    ['handover', 'sales'],
     ['manager', 'sales_manager'],
     ['boss', 'gm'],
     ['admin2', 'super_admin'],
@@ -606,7 +607,13 @@ try {
   await revoke(managerGrant, manager);
   const peerGrant = await issue(issueBody({ capabilities: ['customer.search'] }), peer);
   const peerView = (await call('/system/users/' + users.peer.id, 'GET', undefined, admin)).data;
-  await call('/system/users/' + users.peer.id, 'PUT', req({ status: 'inactive' }, peerView), admin);
+  await call('/system/users/' + users.peer.id, 'PUT', req({ status: 'inactive' }, peerView), admin, 409);
+  const peerAsset = await detail('customers', peerCustomer, admin);
+  await command('customers', peerAsset, 'assign', { userId: users.handover.id, reason: '【测试】停用前完成客户交接' }, admin);
+  ok((await db.customer.findUniqueOrThrow({ where: { id: peerCustomer.id } })).ownerId === users.handover.id,
+    'Sales asset transferred through shared command before offboarding');
+  const peerAfterHandover = (await call('/system/users/' + users.peer.id, 'GET', undefined, admin)).data;
+  await call('/system/users/' + users.peer.id, 'PUT', req({ status: 'inactive' }, peerAfterHandover), admin);
   await invoke(peerGrant, invokeBody('customer.search', {}), 401);
   await revoke(peerGrant, admin);
   // Same-tenant admin can stop but never approve another owner's proposal.
