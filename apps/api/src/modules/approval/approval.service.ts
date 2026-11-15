@@ -1,3 +1,5 @@
+import { assertNativeEvidence, type NativeEvidence } from '../integration/dws-native-approval';
+import { roleAuthority } from '../../common/types/role-authority';
 import {
   Injectable,
   BadRequestException,
@@ -29,7 +31,7 @@ export class ApprovalService {
   constructor(private readonly prisma: PrismaService) {}
   private async event(
     tx: Tx,
-    a: Actor,
+    a: Pick<Actor, 'tenantId' | 'userId'>,
     approvalId: number,
     action: string,
     note: string,
@@ -85,17 +87,22 @@ export class ApprovalService {
       include: { nodes: { orderBy: [{ nodeOrder: 'asc' }, { id: 'asc' }] } },
     });
     if (!approval) throw new NotFoundException('审批不存在或不可见');
+    const externalLink = await this.prisma.system.integrationMapping.findFirst({
+      where: { tenantId: a.tenantId, provider: 'dws-oa', kind: 'approval', localId: approvalId },
+    });
     const people = await this.prisma.system.user.findMany({
       where: { tenantId: a.tenantId, id: { in: approval.nodes.map((n) => n.approverId) } },
       select: { id: true, name: true },
     });
     return {
       ...approval,
+      nativeLinked: !!externalLink,
       activeOrder: approval.nodes.find((n) => n.id === approval.currentNodeId)?.nodeOrder,
       nodes: approval.nodes.map((n) => ({
         ...n,
         approverName: people.find((u) => u.id === n.approverId)?.name ?? '历史人员',
         canTransfer:
+          !externalLink &&
           approval.status === 'pending' &&
           n.action === 'pending' &&
           (admin(a) ||
@@ -157,6 +164,12 @@ export class ApprovalService {
   async transfer(a: Actor, approvalId: number, nodeId: number, body: Record<string, unknown>) {
     const { targetUserId, reason } = transferInput(body);
     return runCommand(this.prisma, a, 'approval.transfer', { ...body, approvalId, nodeId }, async (tx) => {
+      if (
+        await tx.integrationMapping.findFirst({
+          where: { tenantId: a.tenantId, provider: 'dws-oa', kind: 'approval', localId: approvalId },
+        })
+      )
+        throw new ForbiddenException('钉钉原生审批连接期间不支持本地转审，请先核对并解除外部流程');
       const approval = await tx.approval.findFirst({ where: { tenantId: a.tenantId, id: approvalId } });
       const node = await tx.approvalNode.findFirst({ where: { tenantId: a.tenantId, approvalId, id: nodeId } });
       if (!approval || !node) throw new NotFoundException('审批或节点不存在');
@@ -391,9 +404,10 @@ export class ApprovalService {
     applicantId: number,
     requireLeader = true,
   ) {
-    if (!['users_all', 'users_any'].includes(type)) return [await this.resolve(tx, tenantId, type, value, applicantId, requireLeader)];
+    if (!['users_all', 'users_any'].includes(type))
+      return [await this.resolve(tx, tenantId, type, value, applicantId, requireLeader)];
     const result: number[] = [];
-    for (const userId of allApprovers(value).filter(id => type !== 'users_any' || id !== applicantId))
+    for (const userId of allApprovers(value).filter((id) => type !== 'users_any' || id !== applicantId))
       result.push(await this.resolve(tx, tenantId, 'user', String(userId), applicantId, requireLeader));
     if (!result.length) throw new BadRequestException('或签必须保留至少一位有效的非申请人审批人');
     return result;
@@ -545,94 +559,190 @@ export class ApprovalService {
     const comment =
       action === 'rejected' ? text(body.comment, '驳回原因', 1000) : String(body.comment ?? '同意').slice(0, 1000);
     return runCommand(this.prisma, a, `approval.${action}`, { ...body, approvalId, nodeId }, async (tx) => {
-      const approval = await tx.approval.findFirst({
-        where: { tenantId: a.tenantId, id: approvalId, status: 'pending' },
-      });
-      const node = await tx.approvalNode.findFirst({
-        where: { tenantId: a.tenantId, id: nodeId, approvalId, approverId: a.userId, action: 'pending' },
-      });
-      const anchor = approval?.currentNodeId
-        ? await tx.approvalNode.findFirst({ where: { tenantId: a.tenantId, approvalId, id: approval.currentNodeId } })
-        : null;
       if (
-        !approval ||
-        !node ||
-        !anchor ||
-        anchor.action !== 'pending' ||
-        anchor.nodeOrder !== node.nodeOrder ||
-        approval.applicantId === a.userId
+        await tx.integrationMapping.findFirst({
+          where: { tenantId: a.tenantId, provider: 'dws-oa', kind: 'approval', localId: approvalId },
+        })
       )
-        throw new ForbiddenException('不是当前节点审批人，或审批已处理');
-      await tx.approvalNode.update({ where: { id: node.id }, data: { action, comment, actedAt: new Date() } });
-      // Group semantics come from the server-authored immutable snapshot, never the live edited flow.
-      const anyMode = anySignature(approval.formData, node.nodeOrder);
-      if (anyMode) await tx.approvalNode.updateMany({
-        where: { tenantId: a.tenantId, approvalId, nodeOrder: node.nodeOrder, action: 'pending' },
-        data: { action: 'skipped', actedAt: new Date(), comment: action === 'approved' ? '同组或签已由其他审批人同意，自动结束等待' : '同组或签已驳回，自动结束等待' },
-      });
-      const next =
-        action === 'approved'
-          ? await tx.approvalNode.findFirst({
-              where: { tenantId: a.tenantId, approvalId, action: 'pending', nodeOrder: { gte: node.nodeOrder } },
-              orderBy: [{ nodeOrder: 'asc' }, { id: 'asc' }],
-            })
-          : null;
-      const status = next ? 'pending' : action;
-      await tx.approval.update({
-        where: { id: approvalId },
-        data: {
-          status,
-          currentNodeId: next?.id ?? null,
-          completedAt: next ? null : new Date(),
-          updatedAt: new Date(Math.max(Date.now(), approval.updatedAt.getTime() + 1)),
-        },
-      });
-      const recipients =
-        next && next.nodeOrder > node.nodeOrder
-          ? await tx.approvalNode.findMany({
-              where: { tenantId: a.tenantId, approvalId, action: 'pending', nodeOrder: next.nodeOrder },
-              select: { approverId: true },
-            })
-          : [];
-      if (!next) recipients.push({ approverId: approval.applicantId });
-      if (recipients.length)
-        await tx.notification.createMany({
-          data: recipients.map((r) => ({
-            tenantId: a.tenantId,
-            userId: r.approverId,
-            type: next ? 'approval.created' : 'approval.completed',
-            title: approval.title,
-            content: next ? '审批已流转至你' : action === 'approved' ? '申请已通过' : '申请已驳回',
-            bizType: approval.bizType,
-            bizId: approval.id,
-          })),
-        });
-      if (!next) await this.callback(tx, a.tenantId, approval.bizType, approval.bizId, approval.id, action, a.userId);
-      await this.event(
-        tx,
-        a,
-        approvalId,
-        action,
-        comment,
-        {
-          nodeName: node.nodeName,
-          nodeOrder: node.nodeOrder,
-          status,
-          nextNodeId: next?.id ?? null,
-          waitingForCountersign: next?.nodeOrder === node.nodeOrder,
-        },
-        node.id,
-      );
-      return {
-        id: approvalId,
-        status,
-        nextNode: next?.nodeName,
-        waitingForCountersign: next?.nodeOrder === node.nodeOrder,
-      };
+        throw new ForbiddenException('此申请已连接钉钉原生审批，请在钉钉处理并同步结果');
+      return this.applyDecision(tx, a, approvalId, nodeId, action, comment);
     });
+  }
+  private async applyDecision(
+    tx: Tx,
+    a: Pick<Actor, 'tenantId' | 'userId'>,
+    approvalId: number,
+    nodeId: number,
+    action: 'approved' | 'rejected',
+    comment: string,
+    externalEvidence?: unknown,
+  ) {
+    const approval = await tx.approval.findFirst({
+      where: { tenantId: a.tenantId, id: approvalId, status: 'pending' },
+    });
+    const node = await tx.approvalNode.findFirst({
+      where: { tenantId: a.tenantId, id: nodeId, approvalId, approverId: a.userId, action: 'pending' },
+    });
+    const anchor = approval?.currentNodeId
+      ? await tx.approvalNode.findFirst({ where: { tenantId: a.tenantId, approvalId, id: approval.currentNodeId } })
+      : null;
+    if (
+      !approval ||
+      !node ||
+      !anchor ||
+      anchor.action !== 'pending' ||
+      anchor.nodeOrder !== node.nodeOrder ||
+      approval.applicantId === a.userId
+    )
+      throw new ForbiddenException('不是当前节点审批人，或审批已处理');
+    await tx.approvalNode.update({ where: { id: node.id }, data: { action, comment, actedAt: new Date() } });
+    // Group semantics come from the server-authored immutable snapshot, never the live edited flow.
+    const anyMode = anySignature(approval.formData, node.nodeOrder);
+    if (anyMode)
+      await tx.approvalNode.updateMany({
+        where: { tenantId: a.tenantId, approvalId, nodeOrder: node.nodeOrder, action: 'pending' },
+        data: {
+          action: 'skipped',
+          actedAt: new Date(),
+          comment: action === 'approved' ? '同组或签已由其他审批人同意，自动结束等待' : '同组或签已驳回，自动结束等待',
+        },
+      });
+    const next =
+      action === 'approved'
+        ? await tx.approvalNode.findFirst({
+            where: { tenantId: a.tenantId, approvalId, action: 'pending', nodeOrder: { gte: node.nodeOrder } },
+            orderBy: [{ nodeOrder: 'asc' }, { id: 'asc' }],
+          })
+        : null;
+    const status = next ? 'pending' : action;
+    await tx.approval.update({
+      where: { id: approvalId },
+      data: {
+        status,
+        currentNodeId: next?.id ?? null,
+        completedAt: next ? null : new Date(),
+        updatedAt: new Date(Math.max(Date.now(), approval.updatedAt.getTime() + 1)),
+      },
+    });
+    const recipients =
+      next && next.nodeOrder > node.nodeOrder
+        ? await tx.approvalNode.findMany({
+            where: { tenantId: a.tenantId, approvalId, action: 'pending', nodeOrder: next.nodeOrder },
+            select: { approverId: true },
+          })
+        : [];
+    if (!next) recipients.push({ approverId: approval.applicantId });
+    if (recipients.length)
+      await tx.notification.createMany({
+        data: recipients.map((r) => ({
+          tenantId: a.tenantId,
+          userId: r.approverId,
+          type: next ? 'approval.created' : 'approval.completed',
+          title: approval.title,
+          content: next ? '审批已流转至你' : action === 'approved' ? '申请已通过' : '申请已驳回',
+          bizType: approval.bizType,
+          bizId: approval.id,
+        })),
+      });
+    if (!next) await this.callback(tx, a.tenantId, approval.bizType, approval.bizId, approval.id, action, a.userId);
+    await this.event(
+      tx,
+      a,
+      approvalId,
+      action,
+      comment,
+      {
+        nodeName: node.nodeName,
+        nodeOrder: node.nodeOrder,
+        status,
+        nextNodeId: next?.id ?? null,
+        waitingForCountersign: next?.nodeOrder === node.nodeOrder,
+        ...(externalEvidence ? { externalApproval: externalEvidence } : {}),
+      },
+      node.id,
+    );
+    return {
+      id: approvalId,
+      status,
+      nextNode: next?.nodeName,
+      waitingForCountersign: next?.nodeOrder === node.nodeOrder,
+    };
+  }
+  /** Trusted provider evidence only. No controller accepts this object or impersonates its actual decision maker. */
+  async applyNativeDecision(tx: Tx, evidence: NativeEvidence) {
+    assertNativeEvidence(evidence);
+    if (!['approved', 'rejected'].includes(evidence.status) || !evidence.decisionUserId)
+      throw new BadRequestException('钉钉尚无有效人工审批决定');
+    const e = evidence.expected;
+    const approval = await tx.approval.findFirst({
+      where: { id: e.approvalId, tenantId: e.tenantId, status: 'pending', bizType: 'contract', bizId: e.contractId },
+    });
+    const contract = await tx.contract.findFirst({
+      where: {
+        id: e.contractId,
+        tenantId: e.tenantId,
+        status: 'pending_approval',
+        approvalId: e.approvalId,
+        deletedAt: null,
+      },
+    });
+    if (
+      !approval ||
+      !contract ||
+      approval.updatedAt.toISOString() !== e.approvalVersion ||
+      contract.updatedAt.toISOString() !== e.contractVersion
+    )
+      throw new ConflictException('本地单据或审批已改变，钉钉结果未覆盖');
+    const mapping = await tx.integrationMapping.findFirst({
+      where: { tenantId: e.tenantId, provider: 'dws-dingtalk', kind: 'user', externalId: evidence.decisionUserId },
+    });
+    const user = mapping
+      ? await tx.user.findFirst({
+          where: { id: mapping.localId, tenantId: e.tenantId, status: 'active', deletedAt: null },
+          include: { roles: { include: { role: true } } },
+        })
+      : null;
+    const needed = evidence.status === 'approved' ? 'approval:approve' : 'approval:reject';
+    if (
+      !user ||
+      !roleAuthority(user.roles.map((r) => r.role)).permissions.some(
+        (p) => p === '*' || p === 'approval:*' || p === needed,
+      )
+    )
+      throw new ForbiddenException('钉钉实际审批人的本地身份或权限已失效');
+    const node = await tx.approvalNode.findFirst({
+      where: {
+        tenantId: e.tenantId,
+        approvalId: e.approvalId,
+        id: { in: e.nodeIds },
+        approverId: user.id,
+        action: 'pending',
+      },
+    });
+    if (!node) throw new ConflictException('实际审批人不是本地当前待审批人');
+    return this.applyDecision(
+      tx,
+      { tenantId: e.tenantId, userId: user.id },
+      e.approvalId,
+      node.id,
+      evidence.status as 'approved' | 'rejected',
+      ('钉钉原生审批：' + (evidence.note || (evidence.status === 'approved' ? '同意' : '驳回'))).slice(0, 1000),
+      {
+        instanceId: evidence.instanceId,
+        evidenceHash: evidence.digest,
+        source: 'dingtalk-native',
+        actualDecisionUserId: evidence.decisionUserId,
+      },
+    );
   }
   async withdraw(a: Actor, approvalId: number, body: Record<string, unknown>) {
     return runCommand(this.prisma, a, 'approval.withdraw', { ...body, approvalId }, async (tx) => {
+      if (
+        await tx.integrationMapping.findFirst({
+          where: { tenantId: a.tenantId, provider: 'dws-oa', kind: 'approval', localId: approvalId },
+        })
+      )
+        throw new ForbiddenException('请先在钉钉撤销并同步核定，再处理本地撤回');
       const approval = await tx.approval.findFirst({
         where: { id: approvalId, tenantId: a.tenantId, applicantId: a.userId, status: 'pending' },
       });
@@ -665,19 +775,43 @@ export class ApprovalService {
       select: { id: true, nodeOrder: true },
     });
     const orders = new Map(anchors.map((n) => [n.id, n.nodeOrder]));
+    const linked = new Set(
+      (
+        await this.prisma.system.integrationMapping.findMany({
+          where: {
+            tenantId: a.tenantId,
+            provider: 'dws-oa',
+            kind: 'approval',
+            localId: { in: nodes.map((n) => n.approvalId) },
+          },
+          select: { localId: true },
+        })
+      ).map((v) => v.localId),
+    );
     return nodes
       .filter((n) => n.approval.currentNodeId !== null && orders.get(n.approval.currentNodeId) === n.nodeOrder)
-      .map((n) => ({ nodeId: n.id, nodeName: n.nodeName, approval: n.approval }));
+      .map((n) => ({
+        nodeId: n.id,
+        nodeName: n.nodeName,
+        approval: { ...n.approval, nativeLinked: linked.has(n.approvalId) },
+      }));
   }
   async initiated(a: Actor) {
-    return {
-      items: await this.prisma.system.approval.findMany({
-        where: { tenantId: a.tenantId, applicantId: a.userId },
-        include: { nodes: { orderBy: { nodeOrder: 'asc' } } },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      }),
-    };
+    const rows = await this.prisma.system.approval.findMany({
+      where: { tenantId: a.tenantId, applicantId: a.userId },
+      include: { nodes: { orderBy: { nodeOrder: 'asc' } } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const linked = new Set(
+      (
+        await this.prisma.system.integrationMapping.findMany({
+          where: { tenantId: a.tenantId, provider: 'dws-oa', kind: 'approval', localId: { in: rows.map((r) => r.id) } },
+          select: { localId: true },
+        })
+      ).map((v) => v.localId),
+    );
+    return { items: rows.map((r) => ({ ...r, nativeLinked: linked.has(r.id) })) };
   }
   private async callback(
     tx: Tx,

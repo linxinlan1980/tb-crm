@@ -126,6 +126,7 @@ export class DwsActivities {
     const self = record(record(entries[0]).orgEmployeeModel);
     if (self.corpId !== this.binding.corpId || self.userId !== this.binding.userId)
       throw new Error('钉钉企业或人员与帐套绑定不符');
+    return self;
   }
   async calendar(id: string) {
     required(id, 200);

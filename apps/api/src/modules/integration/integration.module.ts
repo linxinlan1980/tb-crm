@@ -1,3 +1,6 @@
+import { ApprovalModule } from '../approval/approval.module';
+import { NativeApprovalController } from './native-approval.controller';
+import { NativeApprovalService } from './native-approval.service';
 import { CalendarController, ActivitySyncController } from './activity.controller';
 import { CalendarService } from './calendar.service';
 import { ActivitySyncService } from './activity-sync.service';
@@ -8,8 +11,9 @@ import { DirectorySyncController } from './directory-sync.controller';
 import { DirectorySyncService } from './directory-sync.service';
 import { CalendarInboundService } from './calendar-inbound.service';
 @Module({
-  controllers: [IntegrationController, DirectorySyncController, CalendarController, ActivitySyncController],
-  providers: [PlatformService, DirectorySyncService, CalendarService, ActivitySyncService, CalendarInboundService],
+  imports:[ApprovalModule],
+  controllers: [NativeApprovalController,IntegrationController, DirectorySyncController, CalendarController, ActivitySyncController],
+  providers: [NativeApprovalService,PlatformService, DirectorySyncService, CalendarService, ActivitySyncService, CalendarInboundService],
   exports: [PlatformService],
 })
 export class IntegrationModule {}

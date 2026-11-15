@@ -62,11 +62,11 @@ export function bindingFromEnvironment(): DwsBinding | null {
   if (!profile || !corpId || !userId) return null;
   return { profile, corpId, userId };
 }
-export function dwsReader(binding: DwsBinding): DwsRead {
+export function dwsReader(binding: DwsBinding, executable = process.env.DWS_BINARY || 'dws'): DwsRead {
   return async (args) => {
     // Fixed executable/operator binding; no shell, arbitrary executable, profile or flags from HTTP.
     const { stdout } = await exec(
-      process.env.DWS_BINARY || 'dws',
+      executable,
       [...args, '--profile', binding.profile, '--format', 'json'],
       { timeout: 45000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
     );

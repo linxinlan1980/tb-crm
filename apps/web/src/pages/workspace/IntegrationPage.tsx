@@ -1,3 +1,4 @@
+import NativeApprovalPanel from './NativeApprovalPanel';
 import ActivitySyncPanel from './ActivitySyncPanel';
 import DingTalkBridge from './DingTalkBridge';
 import { useState, useEffect } from 'react';
@@ -122,6 +123,7 @@ export default function IntegrationPage() {
       <Tabs
         items={[
           { key: 'bridge', label: '钉钉组织同步', children: <DingTalkBridge /> },
+          {key:'native-approval',label:'钉钉原生审批（局域网）',children:<NativeApprovalPanel/>},
           { key: 'activities', label: '本人日程与审批提醒', children: <ActivitySyncPanel /> },
           { key: 'apps', label: '企业应用接口（高级）', children: <AppIntegrations /> },
         ]}

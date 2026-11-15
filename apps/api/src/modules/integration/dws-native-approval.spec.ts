@@ -1,0 +1,200 @@
+import {
+  DwsNativeApprovals,
+  assertNativeEvidence,
+  nativeFormLabels,
+  nativeHash,
+  nativeTemplate,
+  type NativeExpectation,
+  type NativeEvidence,
+} from './dws-native-approval';
+import { bindingHash, type DwsRead } from './dws-directory';
+import { nativeFormValues, parseNativePolicy } from './native-approval-policy';
+const binding = { profile: 'synthetic', corpId: 'synthetic-corp', userId: 'synthetic-self' };
+const values = Object.fromEntries(nativeFormLabels.map((v) => [v, 'Synthetic ' + v]));
+const expected: NativeExpectation = {
+  tenantId: 1,
+  approvalId: 1,
+  approvalVersion: '2026-11-15T00:00:00Z',
+  nodeIds: [1, 2],
+  contractId: 1,
+  contractVersion: '2026-11-15T00:00:00Z',
+  processCode: 'PROC-SYNTHETIC',
+  departmentId: 1,
+  originatorId: binding.userId,
+  approverIds: ['synthetic-a', 'synthetic-b'],
+  formValues: values,
+  templateHash: 'synthetic-hash',
+  bindingHash: bindingHash(binding),
+};
+function fixtures() {
+  return {
+    detail: {
+      errcode: 0,
+      result: {
+        processInstanceId: 'synthetic-instance',
+        processCode: expected.processCode,
+        originatorUserid: binding.userId,
+        originatorDeptId: '1',
+        status: 'COMPLETED',
+        processInstanceResult: 'agree',
+        formValueVOS: Object.entries(values).map(([name, value]) => ({ name, value })),
+        tasks: [
+          { userId: 'synthetic-a', taskStatus: 'COMPLETED', taskResult: 'AGREE' },
+          { userId: 'synthetic-b', taskStatus: 'CANCELED', taskResult: 'NONE' },
+        ],
+        operationRecords: [
+          { type: 'EXECUTE_TASK_NORMAL', userId: 'synthetic-a', result: 'AGREE', remark: 'Synthetic decision' },
+        ],
+      },
+    },
+    records: {
+      success: true,
+      result: {
+        processInstanceId: 'synthetic-instance',
+        operationRecords: [
+          { operationType: 'EXECUTE_TASK_NORMAL', operationResult: 'AGREE', userId: 'synthetic-a', operationTime: 1 },
+        ],
+      },
+    },
+  };
+}
+async function api(f = fixtures()) {
+  const read: DwsRead = async (args) =>
+    args[2] === 'get-self'
+      ? {
+          success: true,
+          result: [{ orgEmployeeModel: { corpId: binding.corpId, userId: binding.userId, depts: [{ deptId: 1 }] } }],
+        }
+      : args[2] === 'detail'
+        ? f.detail
+        : f.records;
+  const client = new DwsNativeApprovals(binding, read);
+  await client.verify();
+  return client;
+}
+describe('native approval provider evidence', () => {
+  it('rejects a department outside the verified owner identity', async () => {
+    await expect((await api()).evidence('synthetic-instance', { ...expected, departmentId: 2 })).rejects.toThrow();
+  });
+
+  it('keeps preview fingerprints stable across MySQL JSON key reordering', () =>
+    expect(nativeHash({ a: 1, b: { c: 2, d: 3 } })).toBe(nativeHash({ b: { d: 3, c: 2 }, a: 1 })));
+
+  it('binds actual manual OR decision to the full local snapshot', async () => {
+    const proof = await (await api()).evidence('synthetic-instance', expected);
+    expect(proof.status).toBe('approved');
+    expect(proof.decisionUserId).toBe('synthetic-a');
+    expect(() => assertNativeEvidence(proof)).not.toThrow();
+    expect(Object.isFrozen(proof.expected.approverIds)).toBe(true);
+  });
+  it('does not accept a JSON body masquerading as provider evidence', () =>
+    expect(() => assertNativeEvidence({} as NativeEvidence)).toThrow());
+  it.each(['instance', 'process', 'originator', 'department', 'form', 'task', 'decision'] as const)(
+    'rejects mismatched %s',
+    async (kind) => {
+      const f = fixtures();
+      if (kind === 'instance') f.detail.result.processInstanceId = 'other';
+      if (kind === 'process') f.detail.result.processCode = 'PROC-OTHER';
+      if (kind === 'originator') f.detail.result.originatorUserid = 'other';
+      if (kind === 'department') f.detail.result.originatorDeptId = '2';
+      if (kind === 'form') f.detail.result.formValueVOS[0].value = 'tampered';
+      if (kind === 'task') f.detail.result.tasks[0].userId = 'other';
+      if (kind === 'decision') f.records.result.operationRecords = [];
+      await expect((await api(f)).evidence('synthetic-instance', expected)).rejects.toThrow();
+    },
+  );
+  it('does not interpret running tasks as an approval', async () => {
+    const f = fixtures();
+    f.detail.result.status = 'RUNNING';
+    expect((await (await api(f)).evidence('synthetic-instance', expected)).status).toBe('pending');
+  });
+  it('verifies rejection against both tasks and actual manual records', async () => {
+    const f = fixtures();
+    f.detail.result.processInstanceResult = 'refuse';
+    f.detail.result.tasks[0].taskResult = 'REFUSE';
+    f.detail.result.operationRecords[0].result = 'REFUSE';
+    f.records.result.operationRecords[0].operationResult = 'REFUSE';
+    expect((await (await api(f)).evidence('synthetic-instance', expected)).status).toBe('rejected');
+  });
+  it('requires current own-profile verification before reading a decision', async () => {
+    const client = new DwsNativeApprovals(binding, async () => fixtures().detail);
+    await expect(client.evidence('synthetic-instance', expected)).rejects.toThrow();
+  });
+  it('includes full contract clauses in the submitted fingerprint', () => {
+    const v = {
+      approvalId: 1,
+      approvalVersion: 'v1',
+      contractId: 1,
+      contractVersion: 'v1',
+      contractNo: 'Synthetic-1',
+      name: 'Synthetic contract',
+      customerName: 'Synthetic customer',
+      signingCompany: 'Synthetic vendor',
+      amount: '0.01',
+      applicantName: 'Synthetic applicant',
+      paymentTerms: 'Synthetic terms',
+      remark: 'Synthetic remarks',
+      currency: 'CNY',
+      contractType: 'other',
+      taxRate: '0',
+      approverIds: ['a', 'b'],
+    };
+    const a = nativeFormValues(v),
+      b = nativeFormValues({ ...v, paymentTerms: 'Changed terms' });
+    expect(a['说明']).toContain('Synthetic terms');
+    expect(a['审核指纹']).not.toBe(b['审核指纹']);
+    expect(nativeHash(a)).not.toBe(nativeHash(b));
+  });
+  it('rejects profile and identity injection in settings', () => {
+    const v = {
+      enabled: true,
+      processCode: 'PROC-SYNTHETIC',
+      departmentId: 1,
+      flowId: 1,
+      fromDate: '2026-11-15',
+      autoPoll: true,
+    };
+    expect(parseNativePolicy(v)).toEqual(v);
+    for (const bad of [
+      { ...v, profile: 'other' },
+      { ...v, fromDate: '2026-02-31' },
+      { ...v, departmentId: -1 },
+    ])
+      expect(() => parseNativePolicy(bad)).toThrow();
+  });
+  it('only accepts a published fixed manual OR template without applicant auto-approval', () => {
+    const schema = {
+        items: nativeFormLabels.map((label, i) => ({
+          componentName: 'TextField',
+          props: { id: 'Synthetic-' + i, label, required: true },
+        })),
+      },
+      flow = {
+        type: 'start',
+        childNode: {
+          type: 'approver',
+          properties: {
+            activateType: 'ALL',
+            agreeAll: false,
+            approvalType: 'MANUAL',
+            actionerRules: [{ type: 'target_approval', approvals: [{ workNo: 'a' }, { workNo: 'b' }] }],
+          },
+        },
+      };
+    const t = {
+      processCode: 'PROC-SYNTHETIC',
+      name: 'Synthetic',
+      status: 'PUBLISHED',
+      properties: JSON.stringify({ autoExecuteOriginatorTasks: 'false' }),
+      schemaContent: JSON.stringify(schema),
+      processConfig: JSON.stringify(flow),
+    };
+    expect(nativeTemplate({ ok: true, data: { templates: [t] } }, 'PROC-SYNTHETIC').allowedUserIds).toEqual(['a', 'b']);
+    expect(() =>
+      nativeTemplate(
+        { ok: true, data: { templates: [{ ...t, properties: '{"autoExecuteOriginatorTasks":"true"}' }] } },
+        'PROC-SYNTHETIC',
+      ),
+    ).toThrow();
+  });
+});

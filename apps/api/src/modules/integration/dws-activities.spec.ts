@@ -70,7 +70,7 @@ describe('DingTalk own-user activity adapter', () => {
   });
   it('accepts a single identity in the CLI array shape', async () => {
     const { client } = fixture([{ success: true, result: Object.values(self.result) }]);
-    await expect(client.verifyIdentity()).resolves.toBeUndefined();
+    await expect(client.verifyIdentity()).resolves.toMatchObject({corpId:'test-corp',userId:'test-user'});
   });
   it('detects remote edits before writing and permits only explicit own-user overwrite', async () => {
     const edited = { ...event, result: { ...event.result, summary: 'Changed in DingTalk' } };

@@ -43,6 +43,7 @@ function BusinessChangeEvidence({ value }: { value: unknown }) {
   );
 }
 interface Approval extends RecordRow {
+  nativeLinked?: boolean;
   title: string;
   status: string;
   approvalNo: string;
@@ -279,13 +280,20 @@ export default function ApprovalCenterPage() {
                       </div>
                       <Space>
                         <Button onClick={() => void showDetail(p.approval)}>查看申请</Button>
-                        <Button onClick={() => void startTransfer(p.approval, p.nodeId)}>转审</Button>
-                        <Button type="primary" onClick={() => decide(p)}>
-                          通过
-                        </Button>
-                        <Button danger onClick={() => decide(p, true)}>
-                          驳回
-                        </Button>
+                        {p.approval.nativeLinked ? (
+                          <Tag color="blue">请在钉钉原生审批中处理</Tag>
+                        ) : (
+                          <>
+                            {' '}
+                            <Button onClick={() => void startTransfer(p.approval, p.nodeId)}>转审</Button>
+                            <Button type="primary" onClick={() => decide(p)}>
+                              通过
+                            </Button>
+                            <Button danger onClick={() => decide(p, true)}>
+                              驳回
+                            </Button>
+                          </>
+                        )}
                       </Space>
                     </Space>
                   </Card>
@@ -310,7 +318,12 @@ export default function ApprovalCenterPage() {
                           {statusNames[a.status] ?? a.status}
                         </Tag>
                       </Space>
-                      {a.status === 'pending' && <Button onClick={() => withdraw(a)}>撤回</Button>}
+                      {a.status === 'pending' &&
+                        (a.nativeLinked ? (
+                          <Tag>请先在钉钉撤销并同步</Tag>
+                        ) : (
+                          <Button onClick={() => withdraw(a)}>撤回</Button>
+                        ))}
                     </div>
                     {a.nodes && (
                       <Steps
@@ -450,6 +463,15 @@ export default function ApprovalCenterPage() {
         </Form>
       </Modal>
       <Drawer title={detail?.title} open={!!detail} onClose={() => setDetail(undefined)} width={640}>
+        {detail?.nativeLinked && (
+          <Alert
+            showIcon
+            type="info"
+            message="已连接钉钉原生审批"
+            description="请在钉钉处理。CRM主动核对实际人工决定并回写；转审、撤回或模板变化需先核对外部流程。"
+            style={{ marginBottom: 16 }}
+          />
+        )}
         {detail?.nodes?.some(
           (n) =>
             n.action !== 'transferred' &&

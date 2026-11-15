@@ -56,6 +56,8 @@
 
 新增[AI智能体读取预测与回款](docs/operations/AGENT_REPORT_READS.md)：独立限时/限预算委托、当前权限及跨公司隔离，HTTP/MCP共用业务报表，只有明确选择才能读取。
 
+新增[局域网钉钉原生审批说明](docs/operations/DINGTALK_NATIVE_APPROVAL.md)：逐单预演确认发送、手机原生审批及本机主动读取；真实手机人工闭环待验收。
+
 新增[日期筛选、渠道标记与通用或签操作说明](docs/operations/BUSINESS_WORKFLOW_DATES.md)。
 
 ## 本地安装与访问

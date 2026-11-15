@@ -3,6 +3,7 @@ import { ForbiddenException } from '@nestjs/common';
 // Reserved business policies plus the bounded, consent-based DingTalk outbox worker.
 const policies = Object.freeze({
   dingtalk: Object.freeze({ policyVersion: '1.0', capabilities: Object.freeze(['integration.activity.prepare', 'integration.activity.dispatch', 'integration.activity.result']) }),
+  dingtalk_approval: Object.freeze({policyVersion:'1.0',capabilities:Object.freeze(['approval.native.result'])}),
   renewal: Object.freeze({ policyVersion: '1.0', capabilities: Object.freeze(['renewal.generate']) }),
   forecast: Object.freeze({ policyVersion: '1.0', capabilities: Object.freeze(['forecast.lock']) }),
 });
