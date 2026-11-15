@@ -59,7 +59,7 @@ function BusinessTable<T extends object = Record<string, unknown>>({
 }: TableProps<T> & { serverSorted?: boolean }) {
   const [currentPage,setCurrentPage]=useState(1);
   const [sorting, setSorting] = useState<{ sortBy: string; sortOrder: 'asc' | 'desc' }>();
-  if (serverSorted) return <AntTable<T> {...props} />;
+  if (serverSorted) return <AntTable<T> {...props} scroll={{x:'max-content',...props.scroll}} />;
   const collect = (cols: ColumnsType<T>): { key: string; label: string }[] =>
     cols.flatMap((c) =>
       'children' in c
@@ -115,6 +115,7 @@ function BusinessTable<T extends object = Record<string, unknown>>({
       {fields.length > 0 && <BusinessSort value={effective} fields={fields} onChange={value=>{setSorting(value);setCurrentPage(1);}} />}
       <AntTable<T>
         {...props}
+        scroll={{x:'max-content',...props.scroll}}
         pagination={props.pagination===false?false:{...props.pagination,current:currentPage,onChange:(page,size)=>{setCurrentPage(page);if(props.pagination)props.pagination.onChange?.(page,size);}}}
         columns={stateful(sortedColumns(props.columns ?? []))}
         onChange={(pagination, filters, sorter, extra) => {
