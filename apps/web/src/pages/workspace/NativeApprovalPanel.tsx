@@ -272,9 +272,9 @@ export default function NativeApprovalPanel() {
             {
               title: '状态',
               dataIndex: 'status',
-              render: (v,r) => (
+              render: (v, r) => (
                 <Tag color={v === 'completed' ? 'green' : v === 'blocked' || v === 'uncertain' ? 'orange' : 'blue'}>
-                  {r.kind==='probe'&&v==='completed'?'验证通过':statusName[String(v)] ?? String(v)}
+                  {r.kind === 'probe' && v === 'completed' ? '验证通过' : (statusName[String(v)] ?? String(v))}
                 </Tag>
               ),
             },
@@ -300,7 +300,19 @@ export default function NativeApprovalPanel() {
             {
               title: '操作',
               render: (_, r) =>
-                ['sent', 'blocked'].includes(r.status) ? (
+                r.status === 'uncertain' || (r.status === 'blocked' && r.summary?.readbackVerified !== true) ? (
+                  <Button
+                    size="small"
+                    loading={busy === r.id}
+                    onClick={() =>
+                      void execute(r.id, () =>
+                        post(root + `/runs/${r.id}/recover`, { requestKey: key(), expectedUpdatedAt: r.updatedAt }),
+                      )
+                    }
+                  >
+                    只读查找并核回
+                  </Button>
+                ) : ['sent', 'blocked'].includes(r.status) ? (
                   <Button
                     size="small"
                     loading={busy === r.id}
@@ -315,7 +327,7 @@ export default function NativeApprovalPanel() {
           ]}
         />
         <Typography.Paragraph type="secondary" style={{ marginTop: 12 }}>
-          发送不确定时禁止重发；请核对钉钉单据与指纹。模板、审批人或单据变化会暂停回写；只有经核验的实际人工决定才进入CRM通用审批及业务回调。
+          发送不确定时禁止重发；可只读查询本人已发起记录，按认领时间与完整指纹唯一核回，不创建第二张单。模板、审批人或单据变化会暂停回写；只有经核验的实际人工决定才进入CRM通用审批及业务回调。
         </Typography.Paragraph>
       </Card>
     </Space>

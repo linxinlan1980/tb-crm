@@ -1,3 +1,4 @@
+import StatisticsPeople, { statisticsPeopleFromParams, statisticsQuery } from '../../components/StatisticsPeople';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { useState, useEffect, useRef } from 'react';
 import StatisticsPeriod, { defaultStatisticsRange } from '../../components/StatisticsPeriod';
@@ -5,7 +6,8 @@ import { Alert, Button, Card, Space, Tag, Typography, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { get, post, key, errorText, money, type RecordRow } from '../../services/workspace';
 export default function BoardPage() {
-  const [period,setPeriod]=useState(defaultStatisticsRange);
+  const [people, setPeople] = useState(() => statisticsPeopleFromParams(new URLSearchParams(window.location.search)));
+  const [period,setPeriod]=useState(() => { const p = new URLSearchParams(window.location.search); return { from: p.get('from') ?? defaultStatisticsRange().from, to: p.get('to') ?? defaultStatisticsRange().to }; });
   const revision=useRef(0);
   const canEdit = !useAuthStore((s) => s.user?.roles.includes('gm'));
   const [stages, setStages] = useState<string[][]>([]);
@@ -17,13 +19,13 @@ export default function BoardPage() {
     const requestRevision=++revision.current;setRows([]);setTotal(0);
     try {
       const [r, definitions] = await Promise.all([
-        get<{ items: RecordRow[]; meta: { total: number } }>('/workspace/opportunities', { pageSize: 100, ...period }),
+        get<{ items: RecordRow[]; meta: { total: number } }>('/workspace/opportunities', { pageSize: 100, ...period, ...people }),
         get<{ code: string; name: string }[]>('/commercial/opportunity-stages'),
       ]);
       if(r.meta.total>1000)throw new Error('所选区间超过1000条商机，请缩小日期范围后查看完整看板');
       const items=r.items.slice();
       for(let page=2;items.length<r.meta.total;page++){
-        const next=await get<{items:RecordRow[];meta:{total:number}}>('/workspace/opportunities',{page,pageSize:100,...period});
+        const next=await get<{items:RecordRow[];meta:{total:number}}>('/workspace/opportunities',{page,pageSize:100,...period, ...people});
         if(next.meta.total!==r.meta.total||!next.items.length)throw new Error('加载期间数据已变化，请刷新看板');
         items.push(...next.items);
       }
@@ -44,7 +46,7 @@ export default function BoardPage() {
   useEffect(() => {
     void load();
     return ()=>{revision.current++;};
-  }, [period.from,period.to]);
+  }, [period.from,period.to,people.personRange,people.ownerId,people.deptId]);
   const advance = async (r: RecordRow) => {
     try {
       await post(`/workspace/opportunities/${r.id}/advance`, { requestKey: key(), expectedUpdatedAt: r.updatedAt });
@@ -62,9 +64,10 @@ export default function BoardPage() {
           <h1>商机看板</h1>
           <Typography.Text type="secondary">按阶段掌握管道，推进结果同步到商机列表。</Typography.Text>
         </div>
-        <Button onClick={() => navigate(`/opportunities?from=${period.from}&to=${period.to}`)}>商机列表与报价</Button>
+        <Button onClick={() => navigate(`/opportunities?${statisticsQuery(period, people)}`)}>商机列表与报价</Button>
       </div>
       <StatisticsPeriod value={period} onChange={setPeriod} />
+      <StatisticsPeople value={people} onChange={setPeople} />
       <Typography.Paragraph type="secondary">按预计成交日期筛选，共{total}条；未填写预计成交日的商机请先在列表补齐。</Typography.Paragraph>
       {error && <Alert type="error" message={error} />}{' '}
       <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 20 }}>

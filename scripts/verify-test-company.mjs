@@ -116,9 +116,9 @@ export async function verifyTestCompany({
       );
     }
     const year = new Date(Date.now() + 8 * 3600000).getUTCFullYear();
-    const forecast = await call('/analytics/forecast?year=' + year),
-      cash = await call('/analytics/collections?year=' + year),
-      overview = await call('/workspace/overview');
+    const forecast = await call('/analytics/forecast?personRange=company&year=' + year),
+      cash = await call('/analytics/collections?personRange=company&year=' + year),
+      overview = await call('/workspace/overview?personRange=company');
     eq(forecast.summary.open, '871500.00', 'open pipeline');
     eq(forecast.summary.weighted, '284100.00', 'exact weighted forecast');
     eq(forecast.summary.won, '216000.00', 'signed won business');

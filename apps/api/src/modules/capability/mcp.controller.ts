@@ -97,6 +97,9 @@ export class McpController {
         inputSchema: z
           .object({
             kind: z.enum(kinds),
+            personRange: z.enum(['self','person','company','department']).optional(),
+            ownerId: z.number().int().positive().max(2147483647).optional(),
+            deptId: z.number().int().positive().max(2147483647).optional(),
             keyword: z.string().max(100).optional(),
             from: statisticsDate.optional(), to: statisticsDate.optional(),
             dateField: z.enum(['createdAt','signDate','startDate','endDate','expectedCloseDate','dueDate','receiptDate','invoiceDate']).optional(),
@@ -133,10 +136,10 @@ export class McpController {
       'workspace.overview',
       {
         description: '查询当前角色个人、团队或全公司的经营指标与漏斗。',
-        inputSchema: z.object({from:statisticsDate.optional(),to:statisticsDate.optional()}).strict(),
+        inputSchema: z.object({from:statisticsDate.optional(),to:statisticsDate.optional(),personRange:z.enum(['self','person','company','department']).optional(),ownerId:z.number().int().positive().max(2147483647).optional(),deptId:z.number().int().positive().max(2147483647).optional()}).strict(),
         annotations: { readOnlyHint: true },
       },
-      args => read(() => this.workspace.overview(actor,args)),
+      args => read(() => this.workspace.overview(actor,Object.fromEntries(Object.entries(args).filter(([,v])=>v!==undefined).map(([k,v])=>[k,String(v)])))),
     );
     server.registerTool(
       'workspace.schema',

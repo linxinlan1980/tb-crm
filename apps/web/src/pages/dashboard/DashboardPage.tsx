@@ -1,3 +1,4 @@
+import StatisticsPeople, { statisticsPeopleFromParams, statisticsQuery } from '../../components/StatisticsPeople';
 import { menuAccess } from '../../services/access';
 import { useEffect, useRef, useState } from 'react';
 import StatisticsPeriod, { defaultStatisticsRange } from '../../components/StatisticsPeriod';
@@ -24,7 +25,8 @@ interface Overview {
   users: RecordRow[];
 }
 export default function DashboardPage() {
-  const [period, setPeriod] = useState(defaultStatisticsRange);
+  const [people, setPeople] = useState(() => statisticsPeopleFromParams(new URLSearchParams(window.location.search)));
+  const [period, setPeriod] = useState(() => { const p = new URLSearchParams(window.location.search); return { from: p.get('from') ?? defaultStatisticsRange().from, to: p.get('to') ?? defaultStatisticsRange().to }; });
   const revision = useRef(0);
   const [data, setData] = useState<Overview>(),
     [error, setError] = useState(''),
@@ -36,7 +38,7 @@ export default function DashboardPage() {
     setLoading(true);
     setData(undefined);
     try {
-      const result = await get<Overview>('/workspace/overview', { ...period });
+      const result = await get<Overview>('/workspace/overview', { ...period, ...people });
       if (requestRevision !== revision.current) return;
       setData(result);
       setError('');
@@ -49,7 +51,7 @@ export default function DashboardPage() {
   useEffect(() => {
     void load();
     return () => { revision.current++; };
-  }, [period.from, period.to]);
+  }, [period.from, period.to, people.personRange, people.ownerId, people.deptId]);
   const role = (
     { admin: '系统管理工作台', manager: '团队经营工作台', sales: '我的销售工作台', boss: '经营驾驶舱' } as Record<
       string,
@@ -78,6 +80,7 @@ export default function DashboardPage() {
         </Button>
       </div>
       <StatisticsPeriod value={period} onChange={setPeriod} />
+      <StatisticsPeople value={people} onChange={setPeople} />
       <Alert type="info" showIcon style={{ marginBottom: 16 }} message="客户/项目按建档日，管道按预计成交日，合同按签约日，回款/开票按实际日期，未收和逾期限定所选到期计划。不是历史期末余额快照。" />
       {error && <Alert message={error} type="error" showIcon />}
       {!!data?.restrictedModules?.length && (
@@ -103,7 +106,7 @@ export default function DashboardPage() {
             .filter((k) => can(k.path))
             .map((k) => (
               <Col xs={24} sm={12} xl={8} key={k.title}>
-                <Card className="metric-card" onClick={() => navigate(`${k.path}?from=${period.from}&to=${period.to}`)} hoverable>
+                <Card className="metric-card" onClick={() => navigate(`${k.path}?${statisticsQuery(period, people)}`)} hoverable>
                   <Statistic title={k.title} value={k.value ?? '—'} prefix={k.prefix} />
                   <div style={{ marginTop: 16, color: '#64748b' }}>
                     查看明细 <ArrowRightOutlined />
@@ -118,7 +121,7 @@ export default function DashboardPage() {
               <Card
                 title="开放商机漏斗"
                 extra={
-                  <Button type="link" onClick={() => navigate('/opportunities/board')}>
+                  <Button type="link" onClick={() => navigate(`/opportunities/board?${statisticsQuery(period, people)}`)}>
                     查看商机
                   </Button>
                 }
@@ -145,9 +148,9 @@ export default function DashboardPage() {
             <Col xs={24} lg={10}>
               {can('/actions') && (
                 <Card
-                  title={data?.role === 'sales' ? '我的下一步' : data?.role === 'manager' ? '团队待办' : '公司待办'}
+                  title={people.personRange === 'self' ? '我的下一步' : '所选范围待办'}
                   extra={
-                    <Button type="link" onClick={() => navigate('/actions')}>
+                    <Button type="link" onClick={() => navigate(`/actions?${statisticsQuery(period, people)}`)}>
                       全部行动
                     </Button>
                   }

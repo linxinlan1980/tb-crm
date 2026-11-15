@@ -65,12 +65,16 @@ export function bindingFromEnvironment(): DwsBinding | null {
 export function dwsReader(binding: DwsBinding, executable = process.env.DWS_BINARY || 'dws'): DwsRead {
   return async (args) => {
     // Fixed executable/operator binding; no shell, arbitrary executable, profile or flags from HTTP.
-    const { stdout } = await exec(
-      executable,
-      [...args, '--profile', binding.profile, '--format', 'json'],
-      { timeout: 45000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
-    );
-    return JSON.parse(stdout) as unknown;
+    const { stdout } = await exec(executable, [...args, '--profile', binding.profile, '--format', 'json'], {
+      timeout: 45000,
+      maxBuffer: 4 * 1024 * 1024,
+      windowsHide: true,
+    });
+    try {
+      return JSON.parse(stdout) as unknown;
+    } catch {
+      throw Object.assign(new Error('钉钉响应不是单一JSON，须核查原始回执'), { stdout });
+    }
   };
 }
 export async function readDirectory(binding: DwsBinding, read: DwsRead): Promise<DirectorySnapshot> {
@@ -159,8 +163,8 @@ export async function readDirectory(binding: DwsBinding, read: DwsRead): Promise
         person.position = typeof employee.orgTitle === 'string' ? employee.orgTitle.slice(0, 50) || null : null;
         const visibleMobile = person.externalId === binding.userId ? self.orgUserMobile : employee.orgUserMobile;
         if (typeof visibleMobile === 'string') {
-          const phone=visibleMobile.replace(/[\s()-]/g,'').replace(/^\+?86(?=1\d{10}$)/,'');
-          if(/^1\d{10}$/.test(phone)) person.phone=phone;
+          const phone = visibleMobile.replace(/[\s()-]/g, '').replace(/^\+?86(?=1\d{10}$)/, '');
+          if (/^1\d{10}$/.test(phone)) person.phone = phone;
         }
         person.departmentIds = [...new Set(person.departmentIds)];
         snapshot.people.push(person);

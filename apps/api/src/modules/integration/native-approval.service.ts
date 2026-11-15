@@ -77,14 +77,37 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
   }
   private client(binding: DwsBinding) {
     const raw = dwsReader(binding, process.env.DWS_OA_BINARY || process.env.DWS_BINARY || 'dws');
+    const trace: { response: unknown; error: unknown } = { response: null, error: null };
     const read: DwsRead = async (args) => {
+      const creating = args[0] === 'oa' && args[1] === 'approval' && args[2] === 'create-instance';
       try {
-        return await raw(args);
-      } catch {
+        const result = await raw(args);
+        if (creating) trace.response = result;
+        return result;
+      } catch (error) {
+        if (creating && error && typeof error === 'object') {
+          const e = error as Record<string, unknown>;
+          trace.error = {
+            code: typeof e.code === 'number' || typeof e.code === 'string' ? e.code : null,
+            signal: typeof e.signal === 'string' ? e.signal : null,
+          };
+          if (typeof e.stdout === 'string') {
+            try {
+              trace.response = JSON.parse(e.stdout) as unknown;
+            } catch {
+              trace.response = {
+                unparsed: true,
+                text: e.stdout.slice(0, 100000),
+                hash: nativeHash(e.stdout),
+                truncated: e.stdout.length > 100000,
+              };
+            }
+          }
+        }
         throw new BadRequestException('钉钉原生审批接口未通过，请核查本机工具版本、授权及参数；系统不会自动重发');
       }
     };
-    return { api: new DwsNativeApprovals(binding, read), read };
+    return { api: new DwsNativeApprovals(binding, read), read, trace };
   }
   private async policy(tx: Tx, tenantId: number) {
     const row = await tx.systemSetting.findUnique({
@@ -410,7 +433,7 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException('预演已过期或指纹不一致，请重新预演');
     const ctx = await this.context(a);
     if (!ctx.config.policy.enabled) throw new BadRequestException('连接未启用');
-    const { api } = this.client(ctx.binding);
+    const { api, trace } = this.client(ctx.binding);
     await api.verify();
     const freshTemplate = await api.template(expected.processCode);
     if (freshTemplate.templateHash !== expected.templateHash) throw new ConflictException('钉钉模板已变化，请重新预演');
@@ -484,6 +507,7 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
           where: { id: runId },
           data: {
             status: 'sent',
+            snapshot: json({ ...snapshot, providerWriteReceipt: trace }),
             summary: json({
               ...record(run.summary),
               externalId,
@@ -500,6 +524,7 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
         where: { id: runId, tenantId: a.tenantId, status: { in: ['sending', 'sent'] } },
         data: {
           status: externalId ? 'blocked' : 'uncertain',
+          snapshot: json({ ...snapshot, providerWriteReceipt: trace }),
           summary: json({
             ...record(run.summary),
             externalId,
@@ -507,6 +532,17 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
           }),
         },
       });
+      if (!externalId) {
+        try {
+          const fresh = await this.prisma.system.integrationRun.findUniqueOrThrow({ where: { id: runId } });
+          return await this.recover(a, runId, {
+            requestKey: 'auto-recover:' + runId,
+            expectedUpdatedAt: fresh.updatedAt.toISOString(),
+          });
+        } catch {
+          /* Read-only recovery failure never retries create. */
+        }
+      }
       throw new ConflictException('本次发送结果未完整核定，系统禁止重发；请在连接记录中核查');
     }
   }
@@ -589,6 +625,99 @@ export class NativeApprovalService implements OnModuleInit, OnModuleDestroy {
     if (template.templateHash !== expected.templateHash)
       throw new ConflictException('钉钉模板已变化，请先核对实例与预演');
     return this.humanResult(a, runId, await api.evidence(externalId, expected));
+  }
+  async recover(a: Actor, runId: string, body: Record<string, unknown>) {
+    input(body, ['requestKey', 'expectedUpdatedAt']);
+    const r = await this.run(a, runId);
+    checkVersion(r, body.expectedUpdatedAt);
+    if (
+      r.status !== 'uncertain' &&
+      !(r.status === 'blocked' && record(r.summary).readbackVerified !== true) &&
+      !(r.status === 'sending' && r.updatedAt.getTime() < Date.now() - 600000)
+    )
+      throw new BadRequestException('仅核查发送不明或未核定回读的记录；发送中须等待执行结束');
+    const snapshot = nativeSnapshot(r.snapshot),
+      expected = snapshot.expected,
+      ctx = await this.context(a);
+    if (!ctx.config.policy.enabled) throw new BadRequestException('连接未启用');
+    const audit = await this.prisma.system.auditLog.findMany({
+      where: {
+        tenantId: a.tenantId,
+        action: 'integration.native.dispatch.claim',
+        objectType: 'approval',
+        objectId: expected.approvalId,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const claim = audit.find((v) => record(v.afterData).runId === r.id);
+    if (!claim || Date.now() - claim.createdAt.getTime() > 119 * 86400000)
+      throw new BadRequestException('缺少有效发送认领记录，或超出120天查询范围，须人工核查');
+    const { api } = this.client(ctx.binding);
+    await api.verify();
+    if ((await api.template(expected.processCode)).templateHash !== expected.templateHash)
+      throw new ConflictException('模板已变化，须先核对原实例');
+    const from = new Date(claim.createdAt.getTime() - 120000).toISOString(),
+      until = new Date(Math.min(Date.now() + 60000, claim.createdAt.getTime() + 600000)).toISOString(),
+      found = await api.recoverOwn(expected, from, until);
+    await runCommand(
+      this.prisma,
+      a,
+      'integration.native.recover@1.0',
+      { ...body, runId, externalId: found.evidence.instanceId, proofHash: found.evidence.digest },
+      async (tx) => {
+        const current = await tx.integrationRun.findFirstOrThrow({
+          where: { id: runId, tenantId: a.tenantId, actorId: a.userId, provider },
+        });
+        checkVersion(current, body.expectedUpdatedAt);
+        if (!['uncertain', 'blocked', 'sending'].includes(current.status))
+          throw new ConflictException('核回状态已变化');
+        const policy = await this.policy(tx, a.tenantId),
+          binding = await activityBinding(tx, a.tenantId, a.userId);
+        if (
+          !policy?.policy.enabled ||
+          !binding ||
+          bindingHash(binding) !== expected.bindingHash ||
+          policy.policy.processCode !== expected.processCode ||
+          policy.policy.departmentId !== expected.departmentId
+        )
+          throw new ConflictException('连接或授权已改变');
+        const document = await this.document(tx, a.tenantId, a.userId, expected.approvalId, policy.policy);
+        checkVersion(document.approval, expected.approvalVersion);
+        checkVersion(document.contract, expected.contractVersion);
+        const map = await tx.integrationMapping.findFirstOrThrow({
+          where: {
+            tenantId: a.tenantId,
+            provider,
+            kind: 'approval',
+            localId: expected.approvalId,
+            externalName: runId,
+          },
+        });
+        await tx.integrationMapping.update({ where: { id: map.id }, data: { externalId: found.evidence.instanceId } });
+        await tx.integrationRun.update({
+          where: { id: runId },
+          data: {
+            status: 'sent',
+            snapshot: json({
+              ...record(current.snapshot),
+              providerEvidence: found.evidence.observed,
+              recoverySource: found.sources,
+            }),
+            summary: json({
+              ...record(current.summary),
+              externalId: found.evidence.instanceId,
+              readbackVerified: true,
+              remoteStatus: found.evidence.status,
+              recoveredAt: new Date().toISOString(),
+              error: null,
+            }),
+          },
+        });
+        return { runId, externalId: found.evidence.instanceId, verified: true, externalCreates: 0 };
+      },
+    );
+    return this.humanResult(a, runId, found.evidence);
   }
   private async tick() {
     if (this.ticking) return;

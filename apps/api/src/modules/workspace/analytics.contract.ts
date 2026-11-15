@@ -1,4 +1,5 @@
 import type { Actor } from '../../common/types/actor';
+import { statisticsProperties } from './statistics-scope';
 import { hasPermission } from './access';
 const inputSchema = {
   type: 'object',
@@ -8,8 +9,7 @@ const inputSchema = {
     from: { type: 'string', format: 'date', description: 'Inclusive first business day,2010-01-01..2060-12-31; provide to together' },
     to: { type: 'string', format: 'date', description: 'Inclusive last business day,2010-01-01..2060-12-31' },
     month: { type: 'integer', minimum: 0, maximum: 12 },
-    ownerId: { type: 'integer', minimum: 1, maximum: 2147483647 },
-    deptId: { type: 'integer', minimum: 1, maximum: 2147483647 },
+    ...statisticsProperties,
     contractId: { type: 'integer', minimum: 1, maximum: 2147483647 },
     page: { type: 'integer', minimum: 1, maximum: 1000000 },
     pageSize: { type: 'integer', minimum: 1, maximum: 100 },
@@ -43,6 +43,7 @@ export const analyticsCapabilities = [
   outputSchema: { type: 'object', required: ['version', 'generatedAt', 'summary', 'monthly', 'notices'] },
   guards: [
     'authenticated tenant/actor',
+    'default self; explicit person/company/department checked against current data scope',
     'object and record visibility',
     'RepeatableRead snapshot',
     'read-only; no state effect',

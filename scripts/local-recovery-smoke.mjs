@@ -69,6 +69,8 @@ try {
     await db.calendarEntry.create({ data: { tenantId: owner.tenantId, ownerId: owner.id, title: '【测试】恢复日程', description: '', location: '', startsAt: new Date(), endsAt: new Date(Date.now() + 3600000) } });
     await db.activitySyncSetting.create({ data: { id: randomUUID(), tenantId: owner.tenantId, ownerId: owner.id, bindingHash: 'b'.repeat(64), calendarEnabled: true, todoEnabled: true, autoEnabled: true } });
     for (const status of ['prepared', 'dispatching']) await db.activitySyncJob.create({ data: { id: randomUUID(), tenantId: owner.tenantId, ownerId: owner.id, kind: 'calendar', sourceId: 1, sourceVersion: hash(status), bindingHash: 'b'.repeat(64), settingsVersion: new Date(), operation: 'create', payload: {}, status } });
+    await db.systemSetting.create({data:{tenantId:owner.tenantId,settingKey:'crm.dingtalk-native-approval.v1',settingGroup:'integration',valueType:'json',settingValue:JSON.stringify({enabled:true,autoPoll:true,processCode:'PROC-SYNTHETIC',departmentId:1,flowId:1,fromDate:'2026-11-15'})}});
+    for(const status of ['prepared','sending','sent']) await db.integrationRun.create({data:{id:randomUUID(),tenantId:owner.tenantId,actorId:owner.id,provider:'dws-oa',kind:'approval',bindingHash:'b'.repeat(64),status,snapshot:{synthetic:true},summary:{synthetic:true}}});
     await db.agentGrant.create({ data: { id: randomUUID(), tenantId: owner.tenantId, ownerId: owner.id, ownerSessionId: randomUUID(), name: '【测试】恢复后撤销', purpose: '【测试】', tokenHash: hash('synthetic'), contextHash: hash('context'), capabilities: [], maxCalls: 1, expiresAt: new Date(Date.now() + 600000) } });
   } finally { await db.$disconnect(); }
   const originalRegistry = readFileSync(join(sourceDir, 'registry.json'), 'utf8');
@@ -112,6 +114,9 @@ try {
     eq(await targetDb.activitySyncSetting.count({ where: { OR: [{ calendarEnabled: true }, { todoEnabled: true }, { autoEnabled: true }] } }), 0);
     eq(await targetDb.activitySyncJob.count({ where: { status: 'cancelled' } }), 1);
     eq(await targetDb.activitySyncJob.count({ where: { status: 'uncertain' } }), 1);
+    const nativePolicy=JSON.parse((await targetDb.systemSetting.findFirstOrThrow({where:{settingKey:'crm.dingtalk-native-approval.v1'}})).settingValue);
+    eq(nativePolicy.enabled,false);eq(nativePolicy.autoPoll,false);eq(nativePolicy.processCode,'PROC-SYNTHETIC','original native evidence configuration retained disabled');
+    for(const status of ['cancelled','uncertain','sent']) eq(await targetDb.integrationRun.count({where:{provider:'dws-oa',status}}),1);
     const attachment = await targetDb.evidenceAttachment.findFirstOrThrow(); eq(hash(attachment.contentBytes), attachment.sha256);
     const sourceDbName = new URL(sourceConfig.DATABASE_URL).pathname.slice(1);
     await reject(targetDb.$queryRawUnsafe('SELECT COUNT(*) FROM `' + sourceDbName + '`.customers'));

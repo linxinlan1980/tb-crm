@@ -21,12 +21,17 @@ export async function verifyAgentReports({ db, url, actors, owner, outsider, pas
     const cash=await invoke(g,'report.cash.collections',{year:2059,ownerId:owner.id});eq(cash.result.result.summary.received,'50.00','four role cash read matches human filters');
     eq(cash.executor,'agent');eq(cash.result.capabilityId,'report.cash.collections');
   }
+  for (let i=0;i<grants.length;i++) {
+    eq((await invoke(grants[i],'report.sales.forecast',{year:2059})).result.result.summary.open,i===0?'100.01':'0.00','delegated default self');
+    if(i<2)await invoke(grants[i],'report.sales.forecast',{year:2059,personRange:'company'},403);
+    else eq((await invoke(grants[i],'report.sales.forecast',{year:2059,personRange:'company'})).result.result.summary.open,'1000099.01','authorized delegated company');
+  }
   const g=grants[0], userToken=actors[0].token;
   const foreignGrant=await grant(alienToken,['report.sales.forecast']);
-  eq((await invoke(foreignGrant)).result.result.summary.open,'0.00','foreign company cannot read main company owner');
+  await invoke(foreignGrant,undefined,undefined,403);
   eq((await invoke(foreignGrant,'report.sales.forecast',{year:2059})).result.result.summary.open,'777777.00','foreign grant sees only its own company');
-  eq((await invoke(g,'report.sales.forecast',{year:2059,ownerId:outsider.id})).result.result.summary.open,'0.00');
-  eq((await invoke(grants[1],'report.sales.forecast',{year:2059,deptId:outsider.deptId})).result.result.summary.open,'0.00');
+  await invoke(g,'report.sales.forecast',{year:2059,ownerId:outsider.id},403);
+  await invoke(grants[1],'report.sales.forecast',{year:2059,deptId:outsider.deptId},403);
   await invoke(g,'report.sales.forecast',{year:2059,tenantId:999},400);
   await invoke(g,'report.cash.collections',{year:2059,sql:'SELECT 1'},400);
   await invoke(g,'report.sales.forecast',{year:'2059'},400);
@@ -43,7 +48,7 @@ export async function verifyAgentReports({ db, url, actors, owner, outsider, pas
   const limited=await db.user.create({data:{tenantId,username:'report_'+randomUUID().slice(0,8),name:'【测试】受限报表人员',deptId,passwordHash:hash,roles:{create:{tenantId,roleId:role.id}}}});
   const limitedToken=(await call('/auth/login',undefined,{tenantCode:'ANALYTICSTEST',username:limited.username,password})).accessToken;
   await call('/agent-control/grants',limitedToken,{requestKey:randomUUID(),name:'【测试】拒绝财务',purpose:'【测试】',minutes:5,maxCalls:2,capabilities:['report.cash.collections']},403);
-  const limitedGrant=await grant(limitedToken,['report.sales.forecast']);eq((await invoke(limitedGrant)).result.result.summary.open,'0.00');
+  const limitedGrant=await grant(limitedToken,['report.sales.forecast']);await invoke(limitedGrant,undefined,undefined,403);
   const apiRequire=createRequire(new URL('../apps/api/package.json',import.meta.url));
   const {Client}=await import(apiRequire.resolve('@modelcontextprotocol/sdk/client/index.js'));
   const {StreamableHTTPClientTransport}=await import(apiRequire.resolve('@modelcontextprotocol/sdk/client/streamableHttp.js'));

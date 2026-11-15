@@ -3,7 +3,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import type { Actor } from '../../common/types/actor';
 import { WorkspaceService } from './workspace.service';
-import { companyWide, hasPermission, teamIds } from './access';
+import { hasPermission } from './access';
+import { statisticsOptions, statisticsScope } from './statistics-scope';
 import { validateActor } from './command-runner';
 import { reportQuery, forecastReport, collectionReport } from './analytics-policy';
 const LIMIT = 10000;
@@ -22,21 +23,9 @@ export class AnalyticsService {
     if (!hasPermission(a, 'opportunity:read') && !hasPermission(a, 'finance:read'))
       throw new ForbiddenException('没有报表权限');
     const tx = this.prisma.system;
-    const owners = await tx.user.findMany({
-      where: {
-        tenantId: a.tenantId,
-        deletedAt: null,
-        ...(!companyWide(a) ? { id: { in: await teamIds(tx, a) } } : {}),
-      },
-      select: { id: true, name: true, deptId: true },
-      orderBy: { id: 'asc' },
-    });
+    await validateActor(tx, a);
     return {
-      owners,
-      departments: await tx.department.findMany({
-        where: { tenantId: a.tenantId, id: { in: owners.flatMap((u) => (u.deptId ? [u.deptId] : [])) } },
-        select: { id: true, name: true },
-      }),
+      ...await statisticsOptions(tx, a),
       canForecast: hasPermission(a, 'opportunity:read'),
       canCollections: hasPermission(a, 'finance:read') && hasPermission(a, 'contract:read'),
     };
@@ -47,16 +36,13 @@ export class AnalyticsService {
       async (tx) => {
         await validateActor(tx, a);
         const scope = await this.workspace.scope(tx, a, 'opportunities');
-        const departmentOwners = q.deptId
-          ? await tx.user.findMany({ where: { tenantId: a.tenantId, deptId: q.deptId }, select: { id: true } })
-          : [];
+        const audience = await statisticsScope(tx, a, query);
         const rows = bounded(
           await tx.opportunity.findMany({
             where: {
               AND: [
                 scope,
-                ...(q.ownerId ? [{ ownerId: q.ownerId }] : []),
-                ...(q.deptId ? [{ ownerId: { in: departmentOwners.map((u) => u.id) } }] : []),
+                ...(audience.ownerIds ? [{ ownerId: { in: audience.ownerIds } }] : []),
                 {
                   OR: [
                     { expectedCloseDate: { gte: q.start, lt: q.end } },
@@ -100,6 +86,7 @@ export class AnalyticsService {
         const names = new Map(owners.map((u) => [u.id, u.name]));
         return {
           version: '1.0',
+          audience,
           generatedAt: new Date().toISOString(),
           period: { year: q.year, month: q.month, from: q.start.toISOString().slice(0,10), to: new Date(q.end.getTime()-1).toISOString().slice(0,10), explicitRange: q.explicitRange },
           currency: 'CNY',
@@ -128,14 +115,11 @@ export class AnalyticsService {
         const contractScope = await this.workspace.scope(tx, a, 'contracts');
         const receiptScope = await this.workspace.scope(tx, a, 'receipts');
         const planScope = await this.workspace.scope(tx, a, 'payment-plans');
-        const departmentOwners = q.deptId
-          ? await tx.user.findMany({ where: { tenantId: a.tenantId, deptId: q.deptId }, select: { id: true } })
-          : [];
+        const audience = await statisticsScope(tx, a, query);
         const base: Prisma.ContractWhereInput = {
           AND: [
             contractScope,
-            ...(q.ownerId ? [{ ownerId: q.ownerId }] : []),
-            ...(q.deptId ? [{ ownerId: { in: departmentOwners.map((u) => u.id) } }] : []),
+            ...(audience.ownerIds ? [{ ownerId: { in: audience.ownerIds } }] : []),
             ...(q.contractId ? [{ id: q.contractId }] : []),
           ],
         };
@@ -187,7 +171,7 @@ export class AnalyticsService {
                   status: 'confirmed',
                   receiptDate: { gte: q.start, lt: q.end },
                 },
-                q.ownerId || q.contractId || q.deptId
+                audience.ownerIds !== null || q.contractId
                   ? { contractId: { in: ids } }
                   : { OR: [{ contractId: { in: ids } }, { contractId: null }] },
               ],
@@ -216,6 +200,7 @@ export class AnalyticsService {
         const contractNames = new Map(contracts.map((c) => [c.id, c.name]));
         return {
           version: '1.0',
+          audience,
           generatedAt: new Date().toISOString(),
           period: { year: q.year, month: q.month, from: q.start.toISOString().slice(0,10), to: new Date(q.end.getTime()-1).toISOString().slice(0,10), explicitRange: q.explicitRange },
           source: q.source,

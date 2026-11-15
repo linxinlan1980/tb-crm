@@ -34,6 +34,13 @@ export class NativeApprovalController {
   ) {
     return this.safe(this.service.dispatch(a, id, b));
   }
+  @Post('runs/:id/recover') recover(
+    @CurrentUser() a: Actor,
+    @Param('id') id: string,
+    @Body() b: Record<string, unknown>,
+  ) {
+    return this.safe(this.service.recover(a, id, b));
+  }
   @Post('runs/:id/reconcile') reconcile(
     @CurrentUser() a: Actor,
     @Param('id') id: string,

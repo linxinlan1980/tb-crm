@@ -74,6 +74,18 @@ export const nativeApprovalCapabilities = [
     outputSchema: { type: 'object', required: ['runId', 'status', 'summary'] },
   },
   {
+    id: 'integration.native.recover',
+    route: 'POST /integrations/dingtalk-native-approval/runs/:id/recover',
+    effect: 'external-read-and-local-write',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['requestKey', 'expectedUpdatedAt'],
+      properties: { requestKey, expectedUpdatedAt: version },
+    },
+    outputSchema: { type: 'object', required: ['runId', 'status', 'summary'] },
+  },
+  {
     id: 'integration.native.reconcile',
     route: 'POST /integrations/dingtalk-native-approval/runs/:id/reconcile',
     effect: 'external-read-and-local-write',
@@ -97,6 +109,7 @@ export const nativeApprovalCapabilities = [
     'immutable10-minute preview and explicit per-document send confirmation',
     'atomic claim before external create; uncertain write never automatically resent',
     'provider-issued evidence; no fake human session or todo-as-approval',
+    'uncertain acknowledgement only queries own initiated instances in persisted claim window; exactly one full fingerprint match, never another create',
     'current role, source version, atomic callback, receipt and audit',
   ],
 }));

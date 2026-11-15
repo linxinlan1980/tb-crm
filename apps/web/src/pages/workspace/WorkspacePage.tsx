@@ -1,3 +1,4 @@
+import StatisticsPeople, { statisticsPeopleFromParams } from '../../components/StatisticsPeople';
 import type { SpreadsheetCell } from '../../utils/xlsx';
 import { csvCell } from '../../utils/csv';
 import { useSearchParams } from 'react-router-dom';
@@ -165,6 +166,8 @@ const display = (name: string, v: unknown) =>
   );
 export default function WorkspacePage({ kind, poolType }: { kind: string; poolType?: string }) {
   const [params]=useSearchParams();
+  const [people, setPeople] = useState(() => statisticsPeopleFromParams(params));
+  const [personActive, setPersonActive] = useState(() => params.has('personRange'));
   const [dateActive,setDateActive]=useState(()=>!!params.get('from'));
   const [period,setPeriod]=useState(()=>({from:params.get('from')??defaultStatisticsRange().from,to:params.get('to')??defaultStatisticsRange().to}));
   const defaultDateFields:Record<string,string>={contracts:'signDate',opportunities:'expectedCloseDate','payment-plans':'dueDate',invoices:'invoiceDate',receipts:'receiptDate',actions:'dueDate',tasks:'dueDate'};
@@ -209,7 +212,10 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
       current = false;
     };
   }, [kind, selectedProject]);
+  const listRevision = useRef(0);
   const load = async () => {
+    const revision = ++listRevision.current;
+    setRows([]); setTotal(0);
     setLoading(true);
     setError('');
     try {
@@ -221,16 +227,18 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           keyword: query,
           ...(poolType ? { poolType } : {}),
           ...(kind === 'customers' ? { customerCategory, channelBrand } : {}),
+          ...(personActive ? people : {}),
           ...(dateActive?{...period,dateField}:{}),
         }),
       ]);
+      if (revision !== listRevision.current) return;
       setSpec(specs.find((s) => s.key === kind));
       setRows(res.items);
       setTotal(res.meta.total);
     } catch (e) {
-      setError(errorText(e));
+      if (revision === listRevision.current) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (revision === listRevision.current) setLoading(false);
     }
   };
   useEffect(() => {
@@ -241,7 +249,8 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
   }, [kind, poolType]);
   useEffect(() => {
     void load();
-  }, [kind, poolType, page, query, customerCategory, channelBrand,dateActive,dateField,period.from,period.to]);
+    return () => {listRevision.current++;};
+  }, [kind, poolType, page, query, customerCategory, channelBrand,personActive,people.personRange,people.ownerId,people.deptId,dateActive,dateField,period.from,period.to]);
   const openDetail = async (row: RecordRow) => {
     try {
       setDetail(await get<RecordRow>(`/workspace/${kind}/${row.id}`));
@@ -577,9 +586,11 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
       )}
       <Card>
         <Space wrap style={{marginBottom:12}}>
+          <Button onClick={() => {setPersonActive(v=>!v);setPage(1);}}>{personActive ? '人员筛选已启用' : '启用人员筛选'}</Button>
           <Button type={dateActive?'primary':'default'} onClick={()=>{setDateActive(v=>!v);setPage(1);}}>{dateActive?'日期筛选已启用':'启用日期筛选'}</Button>
           {dateActive&&<Select aria-label="日期筛选依据" style={{width:180}} value={dateField} options={[...new Set(kind==='contracts'?['signDate','createdAt','startDate','endDate']:[defaultDateFields[kind]??'createdAt','createdAt'])].map(v=>({value:v,label:({signDate:'签约日期',createdAt:'建档日期',startDate:'服务开始日期',endDate:'服务结束日期',expectedCloseDate:'预计成交日期',dueDate:'到期日期',invoiceDate:'开票日期',receiptDate:'到账日期'}as Record<string,string>)[v]}))} onChange={v=>{setDateField(v);setPage(1);}}/>}
         </Space>
+        {personActive && <StatisticsPeople value={people} onChange={v => {setPeople(v);setPage(1);}}/>}
         {dateActive&&<StatisticsPeriod value={period} onChange={v=>{setPeriod(v);setPage(1);}}/>}
         {kind === 'customers' && <Space wrap style={{ marginBottom: 16 }}>
           <Select aria-label="客户标记筛选" allowClear placeholder="全部客户标记" style={{ width: 180 }} value={customerCategory}

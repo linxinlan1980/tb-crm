@@ -28,6 +28,39 @@ export const nativeHash = (value: unknown) =>
   createHash('sha256')
     .update(JSON.stringify(canonical(value)))
     .digest('hex');
+/** A returned identifier is only a candidate; the complete provider readback is authoritative. */
+export function nativeCreationCandidate(value: unknown): string {
+  const root = typeof value === 'string' ? {} : record(value);
+  if (
+    root.success === false ||
+    root.ok === false ||
+    ['errcode', 'errorCode', 'dingOpenErrcode'].some((k) => root[k] !== undefined && String(root[k]) !== '0')
+  )
+    throw Error('钉钉创建回执未确认成功，须只读核查原实例');
+  const decode = (v: unknown): unknown => {
+    if (typeof v === 'string' && v.trim().startsWith('{')) {
+      try {
+        return JSON.parse(v) as unknown;
+      } catch {
+        return v;
+      }
+    }
+    return v;
+  };
+  const pieces = [value, decode(root.result), decode(root.data)];
+  const candidates = pieces
+    .flatMap((v) =>
+      typeof v === 'string'
+        ? [v]
+        : v && typeof v === 'object' && !Array.isArray(v)
+          ? [record(v).processInstanceId, record(v).process_instance_id]
+          : [],
+    )
+    .filter((v): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{16,100}$/.test(v));
+  const ids = [...new Set(candidates)];
+  if (ids.length !== 1) throw Error('创建回执缺少唯一审批编号，须只读核查原实例');
+  return ids[0];
+}
 export interface NativeExpectation {
   tenantId: number;
   approvalId: number;
@@ -188,15 +221,86 @@ export class DwsNativeApprovals {
       formComponentValues: Object.entries(expected.formValues).map(([name, value]) => ({ name, value })),
     };
     // The application calls this only after the user confirms this immutable preview.
-    const result = record(
-      await this.read(['oa', 'approval', 'create-instance', '--request', JSON.stringify(request), '--yes']),
-    );
-    if (result.success !== true) throw Error('钉钉审批创建未核定成功，不可直接重发');
-    const value = record(result.result),
-      id = value.processInstanceId;
-    if (typeof id !== 'string' || !id || id.length > 100) throw Error('钉钉未返回确定的审批编号，不可直接重发');
-    return id;
+    const result = await this.read([
+      'oa',
+      'approval',
+      'create-instance',
+      '--request',
+      JSON.stringify(request),
+      '--yes',
+    ]);
+    return nativeCreationCandidate(result);
   }
+  async recoverOwn(expected: NativeExpectation, from: string, until: string) {
+    this.identity(expected);
+    const deadline = Date.now() + 120000;
+    const candidates: string[] = [],
+      sources: unknown[] = [];
+    let cursor = '0';
+    let complete = false;
+    for (let page = 0; page < 5; page++) {
+      if (Date.now() > deadline) throw Error('只读核查超时，本次未重发或核回');
+      const response = record(
+        await this.read([
+          'oa',
+          'approval',
+          'list-initiated',
+          '--process-code',
+          expected.processCode,
+          '--start',
+          from,
+          '--end',
+          until,
+          '--cursor',
+          cursor,
+          '--limit',
+          '20',
+        ]),
+      );
+      if (response.success !== true) throw Error('本人已发起列表读取失败，未重发');
+      const data = record(response.result);
+      sources.push(response);
+      for (const row of array(data.processInstanceList)) {
+        if (
+          typeof row.processInstanceId !== 'string' ||
+          !row.processInstanceId ||
+          row.originatorUserid !== expected.originatorId
+        )
+          throw Error('已发起来源身份或编号不完整');
+        candidates.push(row.processInstanceId);
+      }
+      if (data.hasMore === false) {
+        complete = true;
+        break;
+      }
+      const next = data.nextCursor;
+      if (data.hasMore !== true || !['string', 'number'].includes(typeof next) || String(next) === cursor)
+        throw Error('已发起分页未读取完整，本次不核回');
+      cursor = String(next);
+    }
+    if (!complete || new Set(candidates).size !== candidates.length) throw Error('已发起结果超限或重复，本次不核回');
+    const matches: NativeEvidence[] = [];
+    for (const id of candidates) {
+      if (Date.now() > deadline) throw Error('只读核查超时，本次未重发或核回');
+      const response = record(await this.read(['oa', 'approval', 'detail', '--instance-id', id]));
+      if (response.errcode !== 0) throw Error('候选实例详情读取失败，本次不核回');
+      const d = record(response.result);
+      if (d.processCode !== expected.processCode || d.originatorUserid !== expected.originatorId)
+        throw Error('候选实例来源不一致');
+      const fields = array(d.formValueVOS),
+        fingerprints = fields.filter((f) => f.name === '审核指纹');
+      if (fingerprints.length === 1 && fingerprints[0].value === expected.formValues['审核指纹'])
+        matches.push(await this.evidence(id, expected));
+    }
+    if (matches.length !== 1)
+      throw Error(
+        matches.length
+          ? '发现多个相同指纹实例，须人工核对，禁止重发'
+          : '范围内未找到唯一匹配实例，请稍后只读核查，禁止重发',
+      );
+    return { evidence: matches[0], sources };
+  }
+
   async evidence(instanceId: string, expected: NativeExpectation): Promise<NativeEvidence> {
     this.identity(expected);
     const detailResponse = record(await this.read(['oa', 'approval', 'detail', '--instance-id', instanceId]));

@@ -1,3 +1,4 @@
+import StatisticsPeople, { ownStatistics } from '../../components/StatisticsPeople';
 import type { SpreadsheetCell } from '../../utils/xlsx';
 import { csvCell } from '../../utils/csv';
 import { useEffect, useRef, useState } from 'react';
@@ -171,10 +172,9 @@ export default function AnalyticsPage() {
   const [kind, setKind] = useState(new URLSearchParams(window.location.search).get('tab') === 'collections' ? 'collections' : 'forecast'),
     [section, setSection] = useState('contracts');
   const [period, setPeriod] = useState(defaultStatisticsRange);
-  const [ownerId, setOwnerId] = useState<number>(),
-    [source, setSource] = useState('managed');
+  const [people, setPeople] = useState(ownStatistics);
+  const [source, setSource] = useState('managed');
   const [bucket, setBucket] = useState('open');
-  const [deptId, setDeptId] = useState<number>();
   const [page, setPage] = useState(1),
     [data, setData] = useState<Report>(),
     [error, setError] = useState(''),
@@ -198,8 +198,7 @@ export default function AnalyticsPage() {
     try {
       const r = await get<Report>('/analytics/' + kind, {
         ...period,
-        ownerId,
-        deptId,
+        ...people,
         source,
         page,
         pageSize: 20,
@@ -218,7 +217,7 @@ export default function AnalyticsPage() {
     return () => {
       seq.current++;
     };
-  }, [options, kind, period.from, period.to, ownerId, deptId, source, page, section, bucket]);
+  }, [options, kind, period.from, period.to, people.personRange, people.ownerId, people.deptId, source, page, section, bucket]);
   const reset = (fn: () => void) => {
     fn();
     setPage(1);
@@ -352,31 +351,7 @@ export default function AnalyticsPage() {
       <Card size="small" style={{ marginBottom: 18 }}>
         <StatisticsPeriod value={period} onChange={v => reset(() => setPeriod(v))} />
         <Space wrap>
-          <Select
-            aria-label="负责人"
-            showSearch
-            optionFilterProp="label"
-            style={{ width: 190 }}
-            value={ownerId}
-            allowClear
-            placeholder="全部可见负责人"
-            onChange={(v) => reset(() => setOwnerId(v))}
-            options={options?.owners.map((u) => ({ value: u.id, label: u.name }))}
-          />
-          <Select
-            aria-label="部门团队"
-            style={{ width: 180 }}
-            value={deptId}
-            allowClear
-            placeholder="全部可见部门"
-            onChange={(v) =>
-              reset(() => {
-                setDeptId(v);
-                setOwnerId(undefined);
-              })
-            }
-            options={options?.departments.map((d) => ({ value: d.id, label: d.name }))}
-          />
+          <StatisticsPeople value={people} onChange={v => reset(() => setPeople(v))} />
           {!forecast && (
             <Select
               aria-label="收款来源"
@@ -486,7 +461,7 @@ export default function AnalyticsPage() {
                           title: '负责人',
                           dataIndex: 'name',
                           render: (v: string, r: { ownerId: number }) => (
-                            <Button type="link" onClick={() => reset(() => setOwnerId(r.ownerId))}>
+                            <Button type="link" onClick={() => reset(() => setPeople({personRange:'person',ownerId:r.ownerId}))}>
                               {v}
                             </Button>
                           ),
@@ -531,7 +506,7 @@ export default function AnalyticsPage() {
                       title: '负责人',
                       dataIndex: 'name',
                       render: (v: string, r: { ownerId: number }) => (
-                        <Button type="link" onClick={() => reset(() => setOwnerId(r.ownerId))}>
+                        <Button type="link" onClick={() => reset(() => setPeople({personRange:'person',ownerId:r.ownerId}))}>
                           {v}
                         </Button>
                       ),

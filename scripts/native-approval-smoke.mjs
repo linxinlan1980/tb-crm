@@ -37,7 +37,8 @@ else if(args[0]==='contact'&&args[2]==='get')out={success:true,result:val('--ids
 else if(args[2]==='template')out={ok:true,data:{templates:[template]}};
 else if(args[2]==='form-schema')out={success:true,result:{content:JSON.stringify(schema)}};
 else if(args[2]==='forecast-process')out={success:true,result:{forecastSuccess:true,processCode:'PROC-SYNTHETIC',userId:'synthetic-self',workflowActivityRuleVOs:[{targetSelect:false,workflowActor:{agreeAll:false,actorActivateType:'ALL',approvalType:'MANUAL'},activityActioners:[{emplId:'synthetic-a'},{emplId:'synthetic-b'}]}]}};
-else if(args[2]==='create-instance'){if(!args.includes('--yes'))process.exit(2);const request=JSON.parse(val('--request')),id='synthetic-instance-'+(++s.creates);s.instances[id]={request,status:'pending'};out=s.mode==='uncertain'?{success:false}:{success:true,result:{processInstanceId:id}};}
+else if(args[2]==='create-instance'){if(!args.includes('--yes'))process.exit(2);const request=JSON.parse(val('--request')),id='synthetic-instance-'+(++s.creates);s.instances[id]={request,status:'pending'};out=s.mode.startsWith('uncertain')?{success:false}:{success:true,result:{processInstanceId:id}};}
+else if(args[2]==='list-initiated'){out=s.mode==='uncertain-unreadable'?{success:false}:{success:true,result:{hasMore:false,processInstanceList:Object.keys(s.instances).map(processInstanceId=>({processInstanceId,originatorUserid:'synthetic-self'}))}};}
 else if(args[2]==='detail'||args[2]==='records'){const id=val('--instance-id'),i=s.instances[id];if(!i)process.exit(2);const approved=i.status==='approved',rejected=i.status==='rejected',resolved=approved||rejected,result=approved?'AGREE':rejected?'REFUSE':'NONE';const records=resolved?[{operationType:'EXECUTE_TASK_NORMAL',operationResult:result,userId:'synthetic-a',operationTime:Date.now()}]:[];if(args[2]==='records')out={success:true,result:{processInstanceId:id,operationRecords:records}};else{out={errcode:0,result:{processInstanceId:id,processCode:'PROC-SYNTHETIC',originatorUserid:'synthetic-self',originatorDeptId:'1',status:resolved?'COMPLETED':'RUNNING',processInstanceResult:approved?'agree':rejected?'refuse':'',formValueVOS:structuredClone(i.request.formComponentValues),tasks:[{userId:'synthetic-a',taskStatus:resolved?'COMPLETED':'RUNNING',taskResult:result},{userId:'synthetic-b',taskStatus:resolved?'CANCELED':'RUNNING',taskResult:'NONE'}],operationRecords:resolved?[{type:'EXECUTE_TASK_NORMAL',result,userId:'synthetic-a',remark:'Synthetic decision'}]:[]}};if(s.mode==='tamper')out.result.formValueVOS[0].value='tampered';}}
 else process.exit(2);fs.writeFileSync(file,JSON.stringify(s));console.log(JSON.stringify(out));
 `,
@@ -281,7 +282,7 @@ try {
   eq(await db.receipt.count(), 0, 'approval does not invent receipts');
   const b = await document(),
     bp = await preview(b);
-  mutate((s) => (s.mode = 'uncertain'));
+  mutate((s) => (s.mode = 'uncertain-unreadable'));
   await send(bp, 409);
   eq(remote().creates, 2, 'uncertain write attempted only once');
   await send(bp, 409);
@@ -292,11 +293,24 @@ try {
     'uncertain state durable',
   );
   mutate((s) => (s.mode = 'normal'));
+  const recoverRow = await db.integrationRun.findUniqueOrThrow({where:{id:bp.runId}});
+  await call(root+'/runs/'+bp.runId+'/recover',other,{requestKey:randomUUID(),expectedUpdatedAt:recoverRow.updatedAt},400);
+  await call(root+'/runs/'+bp.runId+'/recover',token,{requestKey:randomUUID(),expectedUpdatedAt:recoverRow.updatedAt},201);
+  eq(remote().creates,2,'manual read-only recovery never creates another instance');
+  const recovered = await db.integrationRun.findUniqueOrThrow({where:{id:bp.runId}});
+  eq(recovered.status,'sent');eq(recovered.summary.externalId,'synthetic-instance-2');
+  eq(recovered.snapshot.providerWriteReceipt.response.success,false,'private failed write receipt retained');
+  const recoverable = await document(), recoverablePreview = await preview(recoverable);
+  mutate(s=>s.mode='uncertain');
+  await send(recoverablePreview);
+  eq(remote().creates,3,'automatic recovery after ambiguous receipt creates only once');
+  eq((await db.integrationRun.findUniqueOrThrow({where:{id:recoverablePreview.runId}})).summary.readbackVerified,true);
+  mutate(s=>s.mode='normal');
   const stale = await document(),
     sp = await preview(stale);
   await db.contract.update({ where: { id: stale.bizId }, data: { remark: 'Concurrent change' } });
   await send(sp, 409);
-  eq(remote().creates, 2, 'changed source cannot be sent');
+  eq(remote().creates, 3, 'changed source cannot be sent');
   const reject = await document(),
     rp = await preview(reject);
   await send(rp);

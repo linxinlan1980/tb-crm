@@ -762,7 +762,7 @@ try {
     'Visible owner receives all immutable change outcomes',
   );
   await call('/commercial/contracts/' + c.id + '/changes', 'GET', undefined, foreignToken, 404);
-  const overview = (await call('/workspace/overview', 'GET', undefined, admin)).data;
+  const overview = (await call('/workspace/overview?personRange=company', 'GET', undefined, admin)).data;
   ok(overview.signedAmount === '113.1', 'Overview agrees with effective signed contracts after termination');
   ok(
     (await db.auditLog.count({ where: { action: 'customer.sales.handover' } })) === 2,

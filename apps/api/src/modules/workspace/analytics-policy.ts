@@ -52,6 +52,7 @@ export function reportQuery(q: Record<string, string>, now = new Date()) {
   const allowed = [
     'year',
     'month',
+    'personRange',
     'ownerId',
     'deptId',
     'page',

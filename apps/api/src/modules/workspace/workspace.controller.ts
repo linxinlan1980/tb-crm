@@ -8,6 +8,9 @@ export class WorkspaceController {
   @Get('schema') schema(@CurrentUser() a: Actor) {
     return this.service.schema(a);
   }
+  @Get('statistics-options') statisticsOptions(@CurrentUser() a: Actor) {
+    return this.service.statisticsOptions(a);
+  }
   @Get('overview') overview(@CurrentUser() a: Actor, @Query() q: Record<string, string>) {
     return this.service.overview(a, q);
   }

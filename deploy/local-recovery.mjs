@@ -179,6 +179,13 @@ export async function restoreInstallation({ dir, file, keyFile, rootUrl, webPort
         await db.$executeRawUnsafe('UPDATE activity_sync_settings SET calendar_enabled=0,todo_enabled=0,auto_enabled=0,updated_at=NOW(3)');
         await db.$executeRawUnsafe("UPDATE activity_sync_jobs SET status='uncertain',error='Installation restored; reconcile interrupted delivery',updated_at=NOW(3) WHERE status='dispatching'");
         await db.$executeRawUnsafe("UPDATE activity_sync_jobs SET status='cancelled',error='Installation restored; fresh consent required',updated_at=NOW(3) WHERE status='prepared'");
+        const nativePolicy = await db.systemSetting.findMany({ where: { settingKey: 'crm.dingtalk-native-approval.v1' } });
+        for (const row of nativePolicy) {
+          const policy = JSON.parse(row.settingValue);
+          await db.systemSetting.update({ where: { id: row.id }, data: { settingValue: JSON.stringify({ ...policy, enabled: false, autoPoll: false }) } });
+        }
+        await db.integrationRun.updateMany({ where: { provider: 'dws-oa', status: 'prepared' }, data: { status: 'cancelled' } });
+        await db.integrationRun.updateMany({ where: { provider: 'dws-oa', status: 'sending' }, data: { status: 'uncertain' } });
         item.counts = actual.counts; item.attachmentsSha256 = actual.attachmentsSha256;
       } finally { await db.$disconnect(); }
       const configFile = join(dir, source.code + '.json');

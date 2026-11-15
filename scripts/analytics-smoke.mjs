@@ -21,7 +21,7 @@ const eq = (a, b, label) => { assert.deepEqual(a, b, label); checks++; };
 const url = 'http://127.0.0.1:' + (process.env.ANALYTICS_SMOKE_PORT || '4137') + '/api/v1';
 async function call(path, token, expected = 200, body) {
   const r = await fetch(url + path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(30000) });
-  const j = await r.json(); eq(r.status, expected, path); return j.data;
+  const j = await r.json(); if(r.status !== expected)console.error(log); eq(r.status, expected, path); return j.data;
 }
 try {
   if (!(await db.tenant.count())) await initializeProduction(db, env);
@@ -74,23 +74,45 @@ try {
   const f = await call('/analytics/forecast?year=2059', at);
   eq(f.summary.open, '100.01', 'own open only'); eq(f.summary.weighted, '50.01', 'exact projection'); eq(f.summary.won, '200.00', 'won not double counted'); eq(f.summary.winRate, '50.0', 'won / closed');
   eq((await call('/analytics/forecast?year=2059&bucket=won', at)).details.items.length, 1, 'won drill');
-  eq((await call('/analytics/forecast?year=2059&ownerId=' + b.id, at)).summary.open, '0.00', 'foreign owner cannot widen self scope');
-  eq((await call('/analytics/forecast?year=2059&deptId=' + deptB.id, mt)).summary.open, '0.00', 'foreign department cannot widen team');
+  await call('/analytics/forecast?year=2059&ownerId=' + b.id, at, 403);
+  await call('/analytics/forecast?year=2059&deptId=' + deptB.id, mt, 403);
   eq((await call('/analytics/forecast?year=2059&deptId=' + deptA.id, mt)).summary.open, '100.01', 'manager team');
-  eq((await call('/analytics/forecast?year=2059&ownerId=' + a.id, bt)).summary.open, '0.00', 'other sales denied');
-  eq((await call('/analytics/forecast?year=2059&ownerId=' + a.id, xt)).summary.open, '0.00', 'other tenant denied');
+  await call('/analytics/forecast?year=2059&ownerId=' + a.id, bt, 403);
+  await call('/analytics/forecast?year=2059&ownerId=' + a.id, xt, 403);
   await call('/analytics/forecast?year=2059&tenantId=' + otherTenant.id, at, 400);
   await call('/analytics/forecast?year=2059&pageSize=101', at, 400);
   const cash = await call('/analytics/collections?year=2059', at);
-  eq(cash.summary.received, '61.00', 'managed confirmed cash only including unbound'); eq(cash.summary.currentAllocatedOfReceipts, '40.00', 'allocation separate'); eq(cash.summary.currentUnallocatedOfReceipts, '21.00', 'unallocated separate');
-  eq(cash.summary.currentOutstanding, '60.00', 'balance not duplicate receipt'); eq(cash.summary.unboundReceived, '11.00', 'unbound not assigned'); eq(cash.excludedCurrencyContracts, 1, 'currency separation');
-  eq(cash.matrix.items[0].months[6].received, '50.00', 'contract month cash'); eq(cash.monthly[6].received, '61.00', 'total includes unbound');
+  eq(cash.summary.received, '50.00', 'personal cash excludes unbound'); eq(cash.summary.currentAllocatedOfReceipts, '40.00', 'allocation separate'); eq(cash.summary.currentUnallocatedOfReceipts, '10.00', 'unallocated separate');
+  eq(cash.summary.currentOutstanding, '60.00', 'balance not duplicate receipt'); eq(cash.summary.unboundReceived, '0.00', 'unbound excluded from personal reports'); eq(cash.excludedCurrencyContracts, 1, 'currency separation');
+  eq(cash.matrix.items[0].months[6].received, '50.00', 'contract month cash'); eq(cash.monthly[6].received, '50.00', 'personal month excludes unbound');
   eq(cash.owners.find((u) => u.ownerId === a.id).received, '50.00', 'sales attribution excludes unbound');
   for (const token of [at, mt, adt, gt]) eq((await call('/analytics/collections?year=2059&ownerId=' + a.id, token)).summary.received, '50.00', 'four role scoped totals');
   eq((await call('/analytics/collections?year=2059&source=legacy', at)).summary.received, '900.00', 'legacy separate');
-  eq((await call('/analytics/collections?year=2059&ownerId=' + a.id, xt)).summary.received, '0.00', 'cash tenant isolation');
+  await call('/analytics/collections?year=2059&ownerId=' + a.id, xt, 403);
   const schemas = await call('/analytics/schema', at); eq(schemas.length, 2, 'versioned report catalog');
   const options = await call('/analytics/options', mt); ok(!options.owners.some((u) => u.id === b.id), 'no other-team options');
+  for (const token of [mt, adt, gt]) {
+    const own = await call('/analytics/forecast?year=2059', token);
+    eq(own.summary.open, '0.00', 'even managers and admins default self');
+    eq(own.audience.personRange, 'self');
+    eq((await call('/workspace/overview?from=2059-01-01&to=2059-12-31', token)).openOpportunities, 0, 'dashboard default self');
+  }
+  for (const token of [adt, gt]) {
+    eq((await call('/analytics/forecast?year=2059&personRange=company', token)).summary.open, '1000099.01', 'company explicitly authorized');
+    eq((await call('/analytics/collections?year=2059&personRange=company', token)).summary.received, '61.00', 'company includes unbound once');
+  }
+  for (const path of ['/analytics/forecast?year=2059&personRange=company', '/analytics/collections?year=2059&personRange=company', '/workspace/overview?personRange=company', '/workspace/opportunities?personRange=company']) await call(path, at, 403);
+  await call('/analytics/forecast?year=2059&personRange=person', adt, 400);
+  await call('/analytics/forecast?year=2059&personRange=self&ownerId='+b.id, adt, 400);
+  await call('/workspace/opportunities?personRange=person&ownerId='+b.id, at, 403);
+  const list = await call('/workspace/opportunities?personRange=person&ownerId='+a.id+'&from=2059-01-01&to=2059-12-31', adt);
+  eq(list.meta.total, 3, 'drilldown preserves selected owner/date');
+  eq(list.items.every(r=>r.ownerId===a.id), true);
+  eq((await call('/workspace/overview?personRange=person&ownerId='+a.id+'&from=2059-01-01&to=2059-12-31', adt)).pipeline, '100.01', 'dashboard person matches report');
+  const selfOptions = await call('/workspace/statistics-options', at);
+  eq(selfOptions.owners.map(u=>u.id), [a.id]);eq(selfOptions.canCompany,false);eq(selfOptions.departments,[]);
+  const adminOptions = await call('/workspace/statistics-options', adt);
+  eq(adminOptions.defaultRange,'self');eq(adminOptions.canCompany,true);
   const delegatedReports = await verifyAgentReports({db,url,actors:[{token:at,userId:a.id},{token:mt,userId:manager.id},{token:adt,userId:admin.id},{token:gt,userId:boss.id}],owner:a,outsider:b,password,hash,tenantId:tid,deptId:deptA.id,alienToken:xt});
   await db.opportunity.createMany({ data: Array.from({ length: 10001 }, (_, i) => ({ tenantId: tid, code: 'B' + suffix + i, name: 'Synthetic bounded query', ownerId: b.id, customerId: customerB.id, stage: stage.code, amount: '0.01', expectedCloseDate: future })) });
   await call('/analytics/forecast?year=2059', bt, 400);
