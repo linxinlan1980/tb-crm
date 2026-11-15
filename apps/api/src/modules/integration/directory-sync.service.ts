@@ -61,6 +61,9 @@ export class DirectorySyncService implements OnModuleInit {
     private users: UserService,
   ) {}
   async onModuleInit() {
+    // An unbound optional bridge must not break the legacy agent pre-migration compatibility probe.
+    // Bound installations still require the migration; never swallow a missing table in that case.
+    if (!bindingFromEnvironment()) return;
     // A process cannot resume in-flight remote reads after restart. Never auto-apply an old preview.
     await this.prisma.system.integrationRun.updateMany({
       where: { provider, kind: 'directory', status: 'reading' },
@@ -217,6 +220,15 @@ export class DirectorySyncService implements OnModuleInit {
         peopleChoices.length !== snapshot.people.length
       )
         throw new BadRequestException('必须逐项核对全部部门和人员，可明确选择跳过');
+      const [departmentCount, peopleCount] = await Promise.all([
+        tx.department.count({ where: { tenantId: actor.tenantId, deletedAt: null } }),
+        tx.user.count({ where: { tenantId: actor.tenantId, deletedAt: null } }),
+      ]);
+      if (
+        departmentCount + departmentChoices.filter((row) => row.localId === null).length > 2000 ||
+        peopleCount + peopleChoices.filter((row) => row.localId === null).length > 500
+      )
+        throw new ConflictException('导入后组织将超出当前对照表预算，请缩小本次新增范围');
       const old = await tx.integrationMapping.findMany({ where: { tenantId: actor.tenantId, provider } });
       if (old.some((row) => row.bindingHash !== hash))
         throw new ConflictException('存在其他授权企业的旧映射，请由安装管理员核对');

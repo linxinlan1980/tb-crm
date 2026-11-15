@@ -102,6 +102,12 @@ try {
   await call(base + '/directory/apply', token, 201, { requestKey: randomUUID(), runId: unassignedRun.id, departments: body.departments.map((d) => ({ ...d, localId: mapped('department', d.externalId) })), people: [...body.people.map((p) => ({ ...p, localId: mapped('user', p.externalId) })), { externalId: 'unassigned-person', localId: null, departmentExternalId: null }] });
   const unassigned = await db.user.findFirstOrThrow({ where: { dingtalkUserid: 'unassigned-person' } });
   eq(unassigned.deptId, null, 'explicit unassigned choice does not invent primary department'); eq(unassigned.status, 'inactive', 'unassigned account remains inactive');
+  const currentCount = await db.user.count({ where: { tenantId: tenant.id, deletedAt: null } });
+  await db.user.createMany({ data: Array.from({ length: 500 - currentCount }, (_, i) => ({ tenantId: tenant.id, username: 'budget_' + i, name: 'Synthetic budget ' + i, status: 'inactive', passwordHash: imported.passwordHash })) });
+  const overBudget = { ...pendingSnapshot, people: pendingSnapshot.people.map((p) => p.externalId === 'unassigned-person' ? { ...p, externalId: 'budget-person', name: 'Over budget colleague' } : p) };
+  const budgetRun = await db.integrationRun.create({ data: { id: randomUUID(), tenantId: tenant.id, provider: 'dws-dingtalk', kind: 'directory', actorId: admin.id, bindingHash: initial.bindingHash, status: 'ready', snapshot: overBudget } });
+  await call(base + '/directory/apply', token, 409, { requestKey: randomUUID(), runId: budgetRun.id, departments: body.departments.map((d) => ({ ...d, localId: mapped('department', d.externalId) })), people: [...body.people.map((p) => ({ ...p, localId: mapped('user', p.externalId) })), { externalId: 'budget-person', localId: null, departmentExternalId: null }] });
+  eq(await db.user.count({ where: { tenantId: tenant.id, deletedAt: null } }), 500, 'import cannot make the configured crosswalk unreadable');
   const c = (await call(base, token)).connection;
   await call(base + '/settings', token, 201, { requestKey: randomUUID(), enabled: false, expectedUpdatedAt: c.updatedAt });
   await call(base + '/directory/preview', token, 409, { requestKey: randomUUID() });

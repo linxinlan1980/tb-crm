@@ -101,7 +101,7 @@ export default function DingTalkBridge() {
       ),
     );
     // Reset choices only for a different completed preview, not on each status poll.
-  }, [run?.id, !!snapshot]);
+  }, [run?.id, run?.status, !!snapshot]);
   const act = async (name: string, path: string, body: object) => {
     setBusy(name);
     try {
