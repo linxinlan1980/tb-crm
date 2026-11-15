@@ -272,9 +272,9 @@ export default function NativeApprovalPanel() {
             {
               title: '状态',
               dataIndex: 'status',
-              render: (v) => (
+              render: (v,r) => (
                 <Tag color={v === 'completed' ? 'green' : v === 'blocked' || v === 'uncertain' ? 'orange' : 'blue'}>
-                  {statusName[String(v)] ?? String(v)}
+                  {r.kind==='probe'&&v==='completed'?'验证通过':statusName[String(v)] ?? String(v)}
                 </Tag>
               ),
             },
