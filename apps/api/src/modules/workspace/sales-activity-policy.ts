@@ -1,6 +1,7 @@
 import { z } from 'zod';
 const day = z.string().regex(/^20\d{2}-\d{2}-\d{2}$/).refine(v => v >= '2010-01-01' && v <= '2060-12-31' && Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0,10) === v);
 export const contractPlanBody = z.object({requestKey:z.string().min(1).max(80),contracts:z.array(z.object({id:z.number().int().positive(),expectedUpdatedAt:z.string().datetime(),dueDate:day,nextAction:z.string().min(1).max(5000).optional(),sourceIds:z.array(z.string().min(1).max(1000)).min(1).max(100).optional()}).strict().refine(x=>!!x.nextAction===!!x.sourceIds,'具体行动须附来源')).min(1).max(100)}).strict().refine(b=>new Set(b.contracts.map(c=>c.id)).size===b.contracts.length,'合同不可重复');
+export const actionCalendarBody=z.object({requestKey:z.string().min(1).max(80),items:z.array(z.object({id:z.number().int().positive(),expectedUpdatedAt:z.string().datetime(),startsAt:z.string().datetime({offset:true})}).strict()).min(1).max(100)}).strict().refine(b=>new Set(b.items.map(i=>i.id)).size===b.items.length,'行动不可重复');
 export const salesActivityBody = z.object({
   requestKey: z.string().min(1).max(80),
   items: z.array(z.object({

@@ -17,14 +17,15 @@ export const statisticsProperties = {
 export async function statisticsOptions(tx: Tx, a: Actor) {
   const owners = await tx.user.findMany({
     where: { tenantId: a.tenantId, deletedAt: null, ...(!companyWide(a) ? { id: { in: await teamIds(tx, a) } } : {}) },
-    select: { id: true, name: true, deptId: true, employeeNo: true, status: true }, orderBy: { id: 'asc' },
+    select: { id: true, name: true, deptId: true, employeeNo: true, status: true, roles:{select:{role:{select:{code:true}}}} }, orderBy: { id: 'asc' },
+  });
+  const departments = !companyWide(a) && !['dept','team'].includes(a.dataScope) ? [] : await tx.department.findMany({
+    where:{tenantId:a.tenantId,deletedAt:null,...(!companyWide(a)?{id:{in:await teamDepartments(tx,a)}}:{})},select:{id:true,name:true,parentId:true,leaderId:true},
   });
   return {
-    defaultRange: defaultStatisticsScope(a).personRange, defaultDeptId: defaultStatisticsScope(a).deptId ?? null, selfId: a.userId, canCompany: companyWide(a), owners,
-    departments: !companyWide(a) && !['dept','team'].includes(a.dataScope) ? [] : await tx.department.findMany({
-      where: { tenantId: a.tenantId, deletedAt: null, ...(!companyWide(a) ? { id: { in: await teamDepartments(tx, a) } } : {}) },
-      select: { id: true, name: true, parentId: true },
-    }),
+    defaultRange: defaultStatisticsScope(a).personRange, defaultDeptId: defaultStatisticsScope(a).deptId ?? null, selfId: a.userId, canCompany: companyWide(a),
+    owners:owners.map(({roles,...u})=>({...u,managedDepartmentIds:[...new Set([...departments.filter(d=>d.leaderId===u.id).map(d=>d.id),...(roles?.some(r=>r.role.code==='sales_manager') && u.deptId!==null && departments.some(d=>d.id===u.deptId)?[u.deptId]:[])])]})),
+    departments,
   };
 }
 export interface StatisticsScope {
@@ -55,8 +56,12 @@ export async function statisticsScope(tx: Tx, a: Actor, q: Record<string, string
     throw new ForbiddenException('没有该部门统计数据权限');
   const options = await statisticsOptions(tx, a);
   if (range === 'person') {
-    if (!options.owners.some(u => u.id === ownerId)) throw new ForbiddenException('没有该人员统计数据权限');
-    return { personRange: 'person', ownerIds: [ownerId!] };
+    const selected=options.owners.find(u=>u.id===ownerId);
+    if (!selected) throw new ForbiddenException('没有该人员统计数据权限');
+    // Responsibility filtering is separate from record ownership. A manager selection
+    // includes managed departments; selecting authenticated self remains strictly personal.
+    const managed=new Set(selected.managedDepartmentIds.flatMap(root=>departmentSubtree(options.departments,root)));
+    return { personRange:'person',ownerIds:options.owners.filter(u=>u.id===ownerId || u.deptId!==null && managed.has(u.deptId)).map(u=>u.id) };
   }
   if (!options.departments.some(d => d.id === deptId)) throw new ForbiddenException('没有该部门统计数据权限');
   const departments = new Set(departmentSubtree(options.departments, deptId!));

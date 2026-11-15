@@ -499,7 +499,7 @@ export class WorkspaceService {
       if (!['public', 'private', 'dept'].includes(query.poolType)) throw new BadRequestException('客户池无效');
       where.poolType = query.poolType;
     }
-    if (kind === 'customers' && query.ownerId) where.ownerId = id(Number(query.ownerId));
+    if (kind === 'customers' && query.ownerId && query.personRange===undefined) where.ownerId = id(Number(query.ownerId));
     if (kind === 'customers' && query.customerCategory) {
       if (!['direct','sales_channel'].includes(query.customerCategory)) throw new BadRequestException('客户标记无效');
       where.customerCategory = query.customerCategory;
@@ -1627,6 +1627,7 @@ export class WorkspaceService {
             if (!['pending', 'in_progress', 'overdue'].includes(String(row.status)))
               throw new ConflictException('行动已完成或取消');
             await this.db(tx, kind).update({ where, data: { status: 'completed', completedAt: new Date() } });
+            await tx.calendarEntry.updateMany({where:{tenantId:a.tenantId,origin:'crm_plan',externalId:'crm-action-plan:'+recordId,status:'scheduled'},data:{status:'completed',revision:{increment:1}}});
           }
           return {
             id: recordId,

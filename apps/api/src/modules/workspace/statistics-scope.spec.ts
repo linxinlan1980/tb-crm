@@ -4,7 +4,7 @@ import { statisticsFilter, statisticsScope } from './statistics-scope';
 import { departmentSubtree, teamIds } from './access';
 const self: Actor = { tenantId: 1, userId: 2, deptId: 3, roles: ['sales'], permissions: ['opportunity:read'], dataScope: 'self' };
 const tx = {
-  user: { findMany: jest.fn().mockResolvedValue([{ id: 2, name: 'Synthetic A', deptId: 3 }, { id: 4, name: 'Synthetic B', deptId: 4 }]) },
+  user: { findMany: jest.fn().mockResolvedValue([{ id: 2, name: 'Synthetic A', deptId: 3, roles:[{role:{code:'sales_manager'}}] }, { id: 4, name: 'Synthetic B', deptId: 4 }]) },
   department: { findMany: jest.fn().mockResolvedValue([{ id: 3, name: 'Root', parentId: null },{id:4,name:'Child',parentId:3}]) },
 } as unknown as Tx;
 describe('statistics role and relationship scope', () => {
@@ -26,6 +26,7 @@ describe('statistics role and relationship scope', () => {
     expect(departmentSubtree([{id:3,parentId:4},{id:4,parentId:3}],3)).toEqual([3,4]);
     expect(departmentSubtree([{id:3,parentId:null}],99)).toEqual([]);
     expect(await teamIds(tx,manager)).toEqual([2,4]);
+    expect((await statisticsScope(tx,{...self,roles:['super_admin'],dataScope:'all'},{personRange:'person',ownerId:'2'})).ownerIds).toEqual([2,4]);
   });
   it('uses the parent customer for followups and the contract for finance', () => {
     const scope={personRange:'self' as const,ownerIds:[2]};

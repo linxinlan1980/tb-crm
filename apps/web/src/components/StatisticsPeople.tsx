@@ -11,7 +11,7 @@ export interface StatisticsPeopleRange {
 interface PeopleOptions {
   selfId: number;
   canCompany: boolean;
-  owners: { id: number; name: string; employeeNo: string | null; status: string }[];
+  owners: { id: number; name: string; employeeNo: string | null; status: string; managedDepartmentIds?:number[] }[];
   departments: { id: number; name: string }[];
 }
 export const ownStatistics = (): StatisticsPeopleRange => ({ personRange: 'self' });
@@ -47,7 +47,7 @@ export default function StatisticsPeople({ value, onChange }: { value: Statistic
       options={[
         { value: 'self', label: '本人' },
         ...(options?.canCompany ? [{ value: 'company', label: '全公司（当前帐套）' }] : []),
-        ...(options?.owners.filter(u => u.id !== options.selfId).map(u => ({ value: 'person:' + u.id, label: `${u.name} · ${u.employeeNo || '#' + u.id}${u.status !== 'active' ? '（已停用）' : ''}` })) ?? []),
+        ...(options?.owners.filter(u => u.id !== options.selfId).map(u => ({ value: 'person:' + u.id, label: `${u.name} · ${u.employeeNo || '#' + u.id}${u.managedDepartmentIds?.length?'（含下属团队）':''}${u.status !== 'active' ? '（已停用）' : ''}` })) ?? []),
         ...(options?.departments.map(d => ({ value: 'department:' + d.id, label: '部门：' + d.name })) ?? []),
       ]}
       onChange={(v: string) => onChange(v === 'self' || v === 'company' ? { personRange: v } : v.startsWith('person:') ? { personRange: 'person', ownerId: Number(v.slice(7)) } : { personRange: 'department', deptId: Number(v.slice(11)) })} />

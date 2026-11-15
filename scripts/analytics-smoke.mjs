@@ -142,6 +142,14 @@ try {
   await call('/approvals/'+review.id,bt,404);
   const reviewDetail=await call('/approvals/'+review.id,adt);
   await call('/approvals/'+review.id+'/nodes/'+reviewDetail.currentNodeId+'/approve',freshBoss,403,{requestKey:randomUUID(),comment:'Must not decide for assigned manager'});
+
+  for(const token of [adt,freshBoss]){
+    eq((await call('/analytics/forecast?year=2059&personRange=person&ownerId='+manager.id,token)).summary.open,'122.23','Selecting manager includes the managed sales team');
+    eq((await call('/workspace/opportunities?from=2059-01-01&to=2059-12-31&personRange=person&ownerId='+manager.id,token)).items.some(o=>o.id===co.id),true,'Board manager filter includes subordinate opportunity');
+    eq((await call('/workspace/customers?personRange=person&ownerId='+manager.id,token)).items.some(c=>c.id===cc.id),true,'Customer owner legacy filter cannot erase managed selection');
+    const team=(await call('/workspace/statistics-options',token)).owners.find(u=>u.id===manager.id);eq(team.managedDepartmentIds.includes(deptA.id),true,'Manager selection clearly declares team responsibility');
+  }
+  eq((await call('/analytics/forecast?year=2059&personRange=self',mt)).summary.open,'0.00','Explicit self is own records, separate from managed team');
   const smallRole=await db.role.create({data:{tenantId:tid,code:'customerOnly'+suffix,name:'Synthetic customer only',dataScope:'self',permissions:['customer:read']}});
   await db.userRole.deleteMany({where:{tenantId:tid,userId:child.id}});await db.userRole.create({data:{tenantId:tid,userId:child.id,roleId:smallRole.id}});
   const limited=await login(child),limitedDetail=await call('/workspace/customers/'+cc.id,limited);

@@ -18,7 +18,7 @@ import {
 import { salesIntakeMeta, salesForecastEligible } from './sales-intake-policy';
 import { reportQuery } from './analytics-policy';
 import { statisticsScope } from './statistics-scope';
-import { salesActivityBody, contractPlanBody, followupTime } from './sales-activity-policy';
+import { salesActivityBody, contractPlanBody, actionCalendarBody, followupTime } from './sales-activity-policy';
 const provider = 'crm-sales-intake';
 const identifier = z.string().uuid();
 const requestKey = z.string().min(1).max(80);
@@ -60,6 +60,11 @@ export class SalesIntakeService {
   ) {}
   schema() {
     return [
+      {
+        id:'sales.action.calendar',version:'1.0',route:'POST /sales-intake/action-calendar',permission:'super_admin',effect:'local-business-calendar-write',agentWritesEnabled:false,
+        inputSchema:z.toJSONSchema(actionCalendarBody),outputSchema:{type:'object',required:['entries','externalEffects']},
+        guards:['current company administrator','active action owner and current action version','future work slot without overlap','one local proposal per action','business calendar origin excluded from external sync'],evidence:['action/customer links','planned work slot','idempotent receipt and audit'],
+      },
       {
         id:'sales.contract.plan',version:'1.0',route:'POST /sales-intake/contract-plans',permission:'super_admin',effect:'local-action-write',agentWritesEnabled:false,
         inputSchema:z.toJSONSchema(contractPlanBody),outputSchema:{type:'object',required:['actions','externalEffects']},
@@ -142,6 +147,28 @@ export class SalesIntakeService {
       },
     ];
   }
+  async actionCalendar(a:Actor,body:unknown){
+    admin(a);const b=parse(actionCalendarBody,body);
+    return runCommand(this.prisma,a,'sales.action.calendar@1.0',b,async tx=>{
+      const entries:{actionId:number;id:number;reused:boolean}[]=[];
+      for(const x of b.items){
+        const action=await tx.actionPlan.findFirst({where:{...(await this.workspace.scope(tx,a,'actions')),id:x.id}});
+        if(!action||!['pending','in_progress','overdue'].includes(action.status))throw new ConflictException('行动不可排期');
+        checkVersion(action,x.expectedUpdatedAt);
+        const owner=await tx.user.findFirst({where:{tenantId:a.tenantId,id:action.assigneeId,deletedAt:null,status:'active'}});
+        if(!owner)throw new ConflictException('行动负责人不可用');
+        const externalId='crm-action-plan:'+action.id;
+        const old=await tx.calendarEntry.findUnique({where:{tenantId_ownerId_externalId:{tenantId:a.tenantId,ownerId:owner.id,externalId}}});
+        if(old){entries.push({actionId:action.id,id:old.id,reused:true});continue;}
+        const startsAt=new Date(x.startsAt),endsAt=new Date(startsAt.getTime()+30*60000);
+        if(startsAt<=new Date()||startsAt.getUTCFullYear()>2060)throw new BadRequestException('日程须为今后至2060年的拟定工作时段');
+        if(await tx.calendarEntry.count({where:{tenantId:a.tenantId,ownerId:owner.id,status:'scheduled',freeBusy:'busy',startsAt:{lt:endsAt},endsAt:{gt:startsAt}}}))throw new ConflictException('工作时段冲突，请重新排期');
+        const row=await tx.calendarEntry.create({data:{tenantId:a.tenantId,ownerId:owner.id,title:action.title,description:('【拟定业务推进时段】\n行动#'+action.id+'；本时段不是客户确认的会议或付款承诺。\n'+(action.content??'')).slice(0,2000),location:'业务推进安排',startsAt,endsAt,freeBusy:'busy',status:'scheduled',origin:'crm_plan',externalId,externalSnapshot:json({actionId:action.id,customerId:action.targetType==='customer'?action.targetId:null,proposed:true,source:'sales.action.calendar@1.0'})}});
+        entries.push({actionId:action.id,id:row.id,reused:false});
+      }
+      return {entries,externalEffects:0};
+    });
+  }
   async contractPlans(a: Actor, body: unknown) {
     admin(a);
     const b=parse(contractPlanBody,body);
@@ -217,9 +244,13 @@ export class SalesIntakeService {
         if (history.length>1000) throw new BadRequestException('单事项跟进超过整理预算');
         const times=history.flatMap(f=>{const t=followupTime(f);return t?[t]:[];});
         const lastFollowAt=times.length?new Date(Math.max(...times.map(t=>t.getTime()))):null;
+        // A signed source contract establishes a won business day, never an invented event time.
+        const signedSource='status' in row && row.status==='won' && 'contractId' in row && row.contractId
+          ? await tx.contract.findFirst({where:{tenantId:a.tenantId,id:row.contractId,status:{in:['signed','executing','completed']},deletedAt:null},select:{signDate:true}}) : null;
+        const wonDay=signedSource?.signDate??null;
         const plan={dateBasis:x.dateBasis,expectedCloseDate:x.expectedCloseDate??null,closeDateEstimated:x.closeDateEstimated??null,nextActionDate:x.nextActionDate,plannedBy:a.userId,plannedAt:new Date().toISOString()};
         const remark=(row.remark??'')+'\n[日期'+(x.closeDateEstimated?'估算':'计划')+'] '+x.dateBasis+'；下一步拟定 '+x.nextActionDate;
-        if(x.kind==='opportunities') await tx.opportunity.update({where:{id:x.id},data:{...(x.expectedCloseDate?{expectedCloseDate:date(x.expectedCloseDate)}:{}),nextAction:x.nextAction,nextActionDate:date(x.nextActionDate),lastFollowAt,followCount:history.length,healthFactors:json({...('healthFactors' in row && row.healthFactors && typeof row.healthFactors==='object'?row.healthFactors:{}),activityPlan:plan}),remark,updatedBy:a.userId}});
+        if(x.kind==='opportunities') await tx.opportunity.update({where:{id:x.id},data:{...(x.expectedCloseDate?{expectedCloseDate:date(x.expectedCloseDate)}:{}),...('closedAt' in row && !row.closedAt && wonDay?{closedAt:wonDay,winDate:wonDay}:{}),nextAction:x.nextAction,nextActionDate:date(x.nextActionDate),lastFollowAt,followCount:history.length,healthFactors:json({...('healthFactors' in row && row.healthFactors && typeof row.healthFactors==='object'?row.healthFactors:{}),activityPlan:{...plan,...(wonDay?{wonBusinessDayBasis:'source_contract_sign_date',wonBusinessDay:wonDay.toISOString().slice(0,10),eventTimeKnown:false}:{})}}),remark,updatedBy:a.userId}});
         else await tx.lead.update({where:{id:x.id},data:{lastFollowAt,followCount:history.length,aiEnrichment:json({...('aiEnrichment' in row && row.aiEnrichment && typeof row.aiEnrichment==='object'?row.aiEnrichment:{}),activityPlan:plan}),remark,updatedBy:a.userId}});
         if (!action.dueDate) await tx.actionPlan.update({where:{id:action.id},data:{dueDate:date(x.nextActionDate),content:(action.content??'')+'\n[拟定计划日期] '+x.nextActionDate+'；'+x.dateBasis}});
         updated.push({kind:x.kind,id:x.id,actionId:action.id,followCount:history.length});

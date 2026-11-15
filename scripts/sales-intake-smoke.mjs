@@ -32,7 +32,7 @@ try{
  let ready=false;for(let i=0;i<120;i++){try{ready=(await fetch(base+'/health/ready')).ok;}catch{}if(ready)break;if(api.exitCode!==null)throw Error(log);await delay(150);}eq(ready,true,'API ready');
  const login=async u=>(await call('/auth/login',null,200,{tenantCode:tenant.code,username:u.username,password})).accessToken;
  const [at,st,ot]=await Promise.all([login(admin),login(sales),login(outsider)]);
- const schema=await call('/sales-intake/schema',at);eq(schema.length,6,'Capability contracts');
+ const schema=await call('/sales-intake/schema',at);eq(schema.length,7,'Capability contracts');
  const source={requestKey:'archive-'+suffix,filename:'synthetic-source.txt',description:'Synthetic source',contentBase64:Buffer.from('Synthetic bytes '+suffix).toString('base64')};
  const archive=await call('/sales-intake/archives',at,201,source);
  eq((await call('/sales-intake/archives',at,201,{...source,requestKey:'archive2-'+suffix})).id,archive.id,'SHA source dedup');
@@ -103,6 +103,22 @@ try{
  eq((await call('/workspace/contracts/'+contract.id,at)).related.actions.some(a=>a.id===form.id),true,'Contract form linked from contract detail');
  eq((await call('/sales-intake/contract-plans',at,201,{...planBody,requestKey:'contract-plan-repeat-'+suffix})).actions[0].reused,true,'One lifecycle form per contract');
  eq(await counts(),beforeRepair,'Lifecycle forms never alter finance approvals or send messages');
+
+ const calBody={requestKey:'action-calendar-'+suffix,items:[{id:form.id,expectedUpdatedAt:form.updatedAt.toISOString(),startsAt:'2059-07-01T10:00:00+08:00'}]};
+ await call('/sales-intake/action-calendar',st,403,calBody);
+ const planned=await call('/sales-intake/action-calendar',at,201,calBody);
+ eq(await call('/sales-intake/action-calendar',at,201,calBody),planned,'Calendar creation idempotency');
+ const calendarEntry=await db.calendarEntry.findUniqueOrThrow({where:{id:planned.entries[0].id}});
+ eq([calendarEntry.ownerId,calendarEntry.origin,calendarEntry.externalSnapshot.actionId],[sales.id,'crm_plan',form.id],'Calendar follows actual action executor and explicit link');
+ const calendarPath='/calendar?from=2059-07-01T00:00:00Z&until=2059-07-03T00:00:00Z';
+ eq((await call(calendarPath,at)).items.some(e=>e.id===calendarEntry.id),true,'Admin sees business calendar');
+ eq((await call(calendarPath,st)).items.some(e=>e.id===calendarEntry.id),true,'Executor sees own business calendar');
+ eq((await call(calendarPath,ot)).items.some(e=>e.id===calendarEntry.id),false,'Other salesperson cannot see calendar');
+ await db.calendarEntry.create({data:{tenantId:tid,ownerId:sales.id,title:'Synthetic private diary',description:'private',location:'',startsAt:new Date('2059-07-01T04:00:00Z'),endsAt:new Date('2059-07-01T05:00:00Z'),origin:'dingtalk'}});
+ eq((await call(calendarPath,at)).items.some(e=>e.title==='Synthetic private diary'),false,'Company calendar does not expose personal imported diary');
+ await call('/workspace/actions/'+form.id+'/complete',at,201,{requestKey:'complete-plan-'+suffix,expectedUpdatedAt:form.updatedAt.toISOString()});
+ eq((await db.calendarEntry.findUniqueOrThrow({where:{id:calendarEntry.id}})).status,'completed','Completing action closes linked calendar without external effects');
+ eq(await counts(),beforeRepair,'Calendar and completion never alter finance approvals or external outbox');
  // Changed source after preview must roll back the whole import, including proposed customer.
  const stale={...manifest,batchKey:'stale-batch-'+suffix,customers:[{...customer,expectedUpdatedAt:existing.updatedAt.toISOString()},{...manifest.customers[1],name:'Synthetic rollback '+suffix}],cases:[c('stale-case',{customerKey:'existing'})],followups:[],actions:[]};
  const p2=await call('/sales-intake/preview',at,201,{requestKey:'stale-preview-'+suffix,manifest:stale});

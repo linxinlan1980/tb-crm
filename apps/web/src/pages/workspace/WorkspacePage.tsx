@@ -185,7 +185,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     [rows, setRows] = useState<RecordRow[]>([]),
     [total, setTotal] = useState(0),
     [page, setPage] = useState(1),
-    [query, setQuery] = useState(''),
+    [query, setQuery] = useState(params.get('keyword')??''),
     [loading, setLoading] = useState(false),
     [error, setError] = useState('');
   const [detail, setDetail] = useState<RecordRow>(),
@@ -252,7 +252,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     setDetail(undefined);
     setEditing(undefined);
     setPage(1);
-    setQuery('');
+    setQuery(params.get('keyword')??'');
   }, [kind, poolType]);
   useEffect(()=>{const selected=params.get('id');if(selected&&/^[1-9]\d*$/.test(selected))void get<RecordRow>(`/workspace/${kind}/${selected}`).then(setDetail).catch(e=>message.error(errorText(e)));},[kind,params.get('id')]);
   useEffect(() => {
