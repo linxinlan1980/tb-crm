@@ -217,7 +217,7 @@ export default function BusinessAnalytics({
               pagination={false}
               dataSource={data.cashProjection.buckets}
               columns={[
-                { title: '预计时间', dataIndex: 'name' },
+                { title: '预计时间', dataIndex: 'name', sorter: (a, b) => ['未来30天', '第31—60天', '第61—90天', '90天以后'].indexOf(a.name) - ['未来30天', '第31—60天', '第61—90天', '90天以后'].indexOf(b.name) },
                 { title: '笔数', dataIndex: 'count' },
                 { title: '待收款', dataIndex: 'amount', render: amount },
                 { title: '谨慎预计收款', dataIndex: 'weighted', render: amount },

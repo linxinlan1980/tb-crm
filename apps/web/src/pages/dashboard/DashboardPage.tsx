@@ -203,7 +203,7 @@ export default function DashboardPage() {
               )}
               {can('/finance/payment-plans') && (
                 <Card title="需要跟催的收款" style={{ marginTop: 20 }}>
-                  <Statistic title="所选计划已过计划日期未收到的款未收" prefix="¥" value={money(data?.overdue)} />
+                  <Statistic title="已过预计收款日，仍未收到的钱" prefix="¥" value={money(data?.overdue)} />
                   <Alert
                     type="info"
                     message="收款与核销使用本地业务台账"
