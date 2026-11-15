@@ -161,6 +161,18 @@ describe('cash, allocation and planned receipts', () => {
     expect(r.summary.currentOverdue).toBe('60.00');
     expect(r.overdue.meta.total).toBe(1);
   });
+  it('retains undated historical balances without inventing monthly plans or overdue age', () => {
+    const r = collectionReport([contract], [plan({ dueDate: null })], [receipt()], q());
+    expect(r.summary.currentOutstanding).toBe('60.00');
+    expect(r.summary.currentOverdue).toBe('0.00');
+    expect(r.summary.planned).toBe('0.00');
+    expect(r.summary.received).toBe('50.00');
+    expect(r.summary.undatedPlanCount).toBe(1);
+    expect(r.summary.undatedOutstanding).toBe('60.00');
+    expect(r.balances.items[0].dueDate).toBeNull();
+    expect(r.aging.find(b => b.name === '日期待补')?.amount).toBe('60.00');
+    expect(r.overdue.meta.total).toBe(0);
+  });
   it.each([
     [0, 0],
     [1, 1],

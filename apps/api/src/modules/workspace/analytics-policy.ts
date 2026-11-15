@@ -222,10 +222,11 @@ export function collectionReport(contracts: ContractRow[], plans: PlanRow[], rec
   const confirmed = receipts.filter((r) => r.status === 'confirmed' && inPeriod(r.receiptDate, q));
   const due = validPlans.filter((p) => inPeriod(p.dueDate, q));
   const balancePlans = validPlans.filter((p) => decimal(p.outstandingAmount).gt(0));
-  const overdue = balancePlans.filter((p) => p.dueDate < q.today);
+  const overdue = balancePlans.filter((p) => p.dueDate && p.dueDate < q.today);
+  const undated = validPlans.filter((p) => !p.dueDate);
   const monthly = Array.from({ length: 12 }, (_, i) => ({
     month: i + 1,
-    planned: sumMoney(due.filter((p) => p.dueDate.getUTCMonth() === i).map((p) => p.amount)),
+    planned: sumMoney(due.filter((p) => p.dueDate?.getUTCMonth() === i).map((p) => p.amount)),
     received: sumMoney(confirmed.filter((r) => r.receiptDate.getUTCMonth() === i).map((r) => r.amount)),
   }));
   const aging = [
@@ -235,13 +236,16 @@ export function collectionReport(contracts: ContractRow[], plans: PlanRow[], rec
     [61, 90, '61—90天'],
     [91, Infinity, '90天以上'],
   ] as const;
-  const buckets = aging.map(([min, max, name]) => {
+  const buckets: { name: string; count: number; amount: string }[] = aging.map(([min, max, name]) => {
     const items = balancePlans.filter((p) => {
+      if (!p.dueDate) return false;
       const days = Math.max(0, Math.floor((q.today.getTime() - p.dueDate.getTime()) / 86400000));
       return days >= min && days <= max;
     });
     return { name, count: items.length, amount: sumMoney(items.map((p) => p.outstandingAmount)) };
   });
+  if (undated.length) buckets.push({ name: '日期待补', count: undated.filter(p => decimal(p.outstandingAmount).gt(0)).length,
+    amount: sumMoney(undated.map(p => p.outstandingAmount)) });
   const contractPlans = grouped(validPlans, (p) => p.contractId);
   const contractReceipts = grouped(confirmed, (r) => r.contractId ?? 0);
   const matrix = contracts.map((c) => {
@@ -257,11 +261,11 @@ export function collectionReport(contracts: ContractRow[], plans: PlanRow[], rec
       planned: sumMoney(cp.filter((p) => inPeriod(p.dueDate, q)).map((p) => p.amount)),
       received: sumMoney(cr.map((r) => r.amount)),
       currentOutstanding: sumMoney(cp.map((p) => p.outstandingAmount)),
-      currentOverdue: sumMoney(cp.filter((p) => p.dueDate < q.today).map((p) => p.outstandingAmount)),
+      currentOverdue: sumMoney(cp.filter((p) => p.dueDate && p.dueDate < q.today).map((p) => p.outstandingAmount)),
       months: monthly.map((m) => ({
         month: m.month,
         planned: sumMoney(
-          cp.filter((p) => inPeriod(p.dueDate, q) && p.dueDate.getUTCMonth() + 1 === m.month).map((p) => p.amount),
+          cp.filter((p) => inPeriod(p.dueDate, q) && p.dueDate!.getUTCMonth() + 1 === m.month).map((p) => p.amount),
         ),
         received: sumMoney(cr.filter((r) => r.receiptDate.getUTCMonth() + 1 === m.month).map((r) => r.amount)),
       })),
@@ -277,6 +281,9 @@ export function collectionReport(contracts: ContractRow[], plans: PlanRow[], rec
       unboundReceived: sumMoney(confirmed.filter((r) => !r.contractId).map((r) => r.amount)),
       currentOutstanding: sumMoney(balancePlans.map((p) => p.outstandingAmount)),
       currentOverdue: sumMoney(overdue.map((p) => p.outstandingAmount)),
+      undatedPlanCount: undated.length,
+      undatedPlanned: sumMoney(undated.map(p => p.amount)),
+      undatedOutstanding: sumMoney(undated.map(p => p.outstandingAmount)),
     },
     monthly,
     owners: [...new Set(matrix.map((r) => r.ownerId))].map((ownerId) => {

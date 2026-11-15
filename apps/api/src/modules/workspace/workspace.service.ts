@@ -592,6 +592,10 @@ export class WorkspaceService {
       related['payment-plans'] = await tx.paymentPlan.findMany({
         where: { tenantId: a.tenantId, contractId: recordId },
       });
+      if (hasPermission(a, 'finance:read')) {
+        related.invoices = await tx.invoice.findMany({ where: { ...(await this.scope(tx, a, 'invoices')), contractId: recordId }, orderBy: { invoiceDate: 'asc' } });
+        related.receipts = await tx.receipt.findMany({ where: { ...(await this.scope(tx, a, 'receipts')), contractId: recordId }, orderBy: { receiptDate: 'asc' } });
+      }
     }
     if (kind === 'projects') {
       const tasks = await this.db(tx, 'tasks').findMany({
@@ -1705,7 +1709,7 @@ export class WorkspaceService {
       ),
       received: sum(plans.map((p) => p.receivedAmount)),
       outstanding: sum(plans.map((p) => p.outstandingAmount)),
-      overdue: sum(plans.filter((p) => p.dueDate < today && p.status !== 'cancelled').map((p) => p.outstandingAmount)),
+      overdue: sum(plans.filter((p) => p.dueDate && p.dueDate < today && p.status !== 'cancelled').map((p) => p.outstandingAmount)),
       projects: projects.length,
       funnel: stages.map((s) => ({
         name: s.name,

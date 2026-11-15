@@ -36,6 +36,7 @@ export const statusNames: Record<string, string> = {
   ai_fde: 'AI场景交付',
   saas_sub: 'SaaS订阅',
   channel: '渠道合同',
+  other: '其他 / 待分类',
   website: '官网',
   referral: '转介绍',
   exhibition: '展会',

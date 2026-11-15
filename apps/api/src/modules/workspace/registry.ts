@@ -85,10 +85,11 @@ export const resources: Record<string, Resource> = {
     name: 'name',
     fields: [
       f('name', '合同名称', 'text', true),
+      f('signingCompany', '我方签约主体'),
       customer,
       f('opportunityId', '关联商机', 'reference', false, { reference: 'opportunities' }),
       f('contractType', '合同类型', 'select', true, {
-        options: ['software_sale', 'implementation', 'maintenance', 'outsource', 'ai_fde', 'saas_sub', 'channel'],
+        options: ['software_sale', 'implementation', 'maintenance', 'outsource', 'ai_fde', 'saas_sub', 'channel', 'other'],
       }),
       f('amount', '含税合同金额', 'money', true),
       f('taxRate', '税率%', 'number'),

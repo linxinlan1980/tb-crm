@@ -111,7 +111,7 @@ export class MilestoneService {
     if (milestone.paymentTrigger !== 'none' && milestone.amount) {
       const paymentPlan = await db.paymentPlan.findFirst({ where: { milestoneId, status: { in: ['pending', 'partial'] } } });
       if (paymentPlan) {
-        let dueDate: Date;
+        let dueDate: Date | null;
         if (milestone.paymentTrigger === 'on_complete') {
           dueDate = actualDate; // 完成即到期
         } else if (milestone.paymentTrigger === 'after_days') {

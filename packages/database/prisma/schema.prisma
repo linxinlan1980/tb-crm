@@ -993,6 +993,7 @@ enum ContractType {
   ai_fde
   saas_sub
   channel
+  other
 }
 
 model Contract {
@@ -1000,6 +1001,7 @@ model Contract {
   tenantId          Int            @map("tenant_id")
   contractNo        String         @map("contract_no") @db.VarChar(30)
   name              String         @db.VarChar(200)
+  signingCompany    String?        @map("signing_company") @db.VarChar(200)
   customerId        Int            @map("customer_id")
   opportunityId     Int?           @map("opportunity_id")
   quoteSnapshot     Json?          @map("quote_snapshot")
@@ -1389,14 +1391,14 @@ model Invoice {
   orderId           Int?           @map("order_id")
   milestoneId       Int?           @map("milestone_id")
   customerId        Int            @map("customer_id")
-  invoiceType       InvoiceType    @default(special) @map("invoice_type")
+  invoiceType       InvoiceType?   @default(special) @map("invoice_type")
   direction         InvoiceDirection @default(output)
   amount            Decimal        @db.Decimal(15, 2)
-  amountExclTax     Decimal        @map("amount_excl_tax") @db.Decimal(15, 2)
-  taxRate           Decimal        @default(13) @map("tax_rate") @db.Decimal(5, 2)
-  taxAmount         Decimal        @map("tax_amount") @db.Decimal(15, 2)
+  amountExclTax     Decimal?       @map("amount_excl_tax") @db.Decimal(15, 2)
+  taxRate           Decimal?       @default(13) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount         Decimal?       @map("tax_amount") @db.Decimal(15, 2)
   invoiceTitle      String         @map("invoice_title") @db.VarChar(200)
-  taxNo             String         @map("tax_no") @db.VarChar(20)
+  taxNo             String?        @map("tax_no") @db.VarChar(20)
   bankName          String?        @map("bank_name") @db.VarChar(100)
   bankAccount       String?        @map("bank_account") @db.VarChar(200)
   address           String?        @db.VarChar(200)
@@ -1471,7 +1473,7 @@ model PaymentPlan {
   planNo           String             @map("plan_no") @db.VarChar(20)
   amount           Decimal            @db.Decimal(15, 2)
   ratio            Decimal?           @db.Decimal(5, 2)
-  dueDate          DateTime           @map("due_date") @db.Date
+  dueDate          DateTime?          @map("due_date") @db.Date
   triggerCondition String?            @map("trigger_condition") @db.VarChar(200)
   status           PaymentPlanStatus  @default(pending)
   receivedAmount   Decimal            @default(0) @map("received_amount") @db.Decimal(15, 2)
@@ -1517,7 +1519,7 @@ model Receipt {
   allocatedAmount   Decimal        @default(0) @map("allocated_amount") @db.Decimal(15, 2)
   unallocatedAmount Decimal        @default(0) @map("unallocated_amount") @db.Decimal(15, 2)
   receiptDate       DateTime       @map("receipt_date") @db.Date
-  method            ReceiptMethod  @default(bank_transfer)
+  method            ReceiptMethod? @default(bank_transfer)
   bankAccount       String?        @map("bank_account") @db.VarChar(200)
   serialNo          String?        @map("serial_no") @db.VarChar(50)
   payerName         String?        @map("payer_name") @db.VarChar(200)
@@ -2306,6 +2308,25 @@ model NotificationTemplate {
 
   @@unique([tenantId, code, channel])
   @@map("notification_templates")
+}
+
+// Immutable source workbooks and decoded rows; operator imports only, human-admin reads.
+model SourceArchive {
+  id           String   @id @db.Char(36)
+  tenantId     Int      @map("tenant_id")
+  filename     String   @db.VarChar(200)
+  sha256       String   @db.Char(64)
+  size         Int
+  contentBytes Bytes    @map("content_bytes") @db.MediumBlob
+  sheets       Json
+  rowCount     Int      @map("row_count")
+  summary      Json?
+  createdBy    Int      @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, sha256])
+  @@index([tenantId, createdAt])
+  @@map("source_archives")
 }
 
 model File {

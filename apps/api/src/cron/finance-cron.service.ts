@@ -27,7 +27,7 @@ export class FinanceCronService {
         const now = new Date();
         const plans = await db.paymentPlan.findMany({ where: { status: { in: ['pending', 'partial', 'overdue'] } } });
         for (const plan of plans) {
-          const overdueDays = plan.dueDate < now ? Math.floor((now.getTime() - plan.dueDate.getTime()) / 86400000) : 0;
+          const overdueDays = plan.dueDate && plan.dueDate < now ? Math.floor((now.getTime() - plan.dueDate.getTime()) / 86400000) : 0;
           let status = plan.status;
           if (Number(plan.receivedAmount) >= Number(plan.amount)) status = 'completed';
           else if (overdueDays > 0) status = 'overdue';

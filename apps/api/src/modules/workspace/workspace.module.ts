@@ -13,6 +13,8 @@ import { ServiceTicketController } from './service-ticket.controller';
 import { ServiceTicketService } from './service-ticket.service';
 import { AttachmentController } from './attachment.controller';
 import { AttachmentService } from './attachment.service';
+import { SourceArchiveController } from './source-archive.controller';
+import { SourceArchiveService } from './source-archive.service';
 @Module({
   imports: [ApprovalModule],
   controllers: [
@@ -23,6 +25,7 @@ import { AttachmentService } from './attachment.service';
     FinanceController,
     ServiceTicketController,
     AttachmentController,
+    SourceArchiveController,
   ],
   providers: [
     AnalyticsService,
@@ -31,6 +34,7 @@ import { AttachmentService } from './attachment.service';
     FinanceService,
     ServiceTicketService,
     AttachmentService,
+    SourceArchiveService,
   ],
   exports: [WorkspaceService, AnalyticsService],
 })
