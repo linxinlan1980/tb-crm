@@ -74,16 +74,28 @@ export async function verifyAgentReports({ db, url, actors, owner, outsider, pas
     await invoke(guarded,undefined,undefined,500);
     eq((await db.agentExecution.findFirstOrThrow({where:{grantId:guarded.id},orderBy:{createdAt:'desc'}})).status,'failed');
     sql(`DROP TRIGGER ${trigger}`);
-    sql(`CREATE TRIGGER ${trigger} BEFORE INSERT ON audit_logs FOR EACH ROW BEGIN IF NEW.action='capability.succeeded' AND JSON_UNQUOTE(JSON_EXTRACT(NEW.after_data,'$.capabilityId'))='report.sales.forecast' THEN SET @crm_report_pause=SLEEP(1.2); END IF; END`);
+    sql(`CREATE TRIGGER ${trigger} BEFORE INSERT ON audit_logs FOR EACH ROW BEGIN IF NEW.action='capability.succeeded' AND JSON_UNQUOTE(JSON_EXTRACT(NEW.after_data,'$.capabilityId'))='report.sales.forecast' THEN SET @crm_report_lock=GET_LOCK('${trigger}',0); SET @crm_report_pause=SLEEP(2); SET @crm_report_unlock=RELEASE_LOCK('${trigger}'); END IF; END`);
     const pending=invoke(guarded,undefined,undefined,401);
     for(let i=0;i<100;i++){if(await db.agentExecution.count({where:{grantId:guarded.id,status:'running'}}))break;await delay(10);}
     await call('/agent-control/grants/'+guarded.id+'/revoke',userToken,{requestKey:randomUUID(),reason:'【测试】读取期间撤销'},201);
     await pending;eq((await db.agentExecution.findFirstOrThrow({where:{grantId:guarded.id},orderBy:{createdAt:'desc'}})).status,'failed');
+    const human=new Client({name:'synthetic-report-human-revocation',version:'1.0.0'});
+    try {
+      await human.connect(new StreamableHTTPClientTransport(new URL(url+'/mcp'),{requestInit:{headers:{Authorization:'Bearer '+actors[3].token}}}));
+      const read=human.callTool({name:'report.sales.forecast',arguments:{year:2099,ownerId:owner.id}});
+      let inAudit=false;
+      for(let i=0;i<150;i++) {const state=await db.$queryRawUnsafe(`SELECT IS_USED_LOCK('${trigger}') AS holder`);if(state[0].holder!==null){inAudit=true;break;}await delay(10);}
+      eq(inAudit,true,'human read paused inside success audit');
+      await db.authSession.updateMany({where:{tenantId,userId:actors[3].userId,revokedAt:null},data:{revokedAt:new Date()}});
+      const result=await read;eq(result.isError,true,'human read denied after logout during audit');
+      eq(JSON.parse(result.content[0].text).statusCode,403);
+    } finally {await human.close();}
+
   } finally {sql(`DROP TRIGGER IF EXISTS ${trigger}`);}
   const visible=await db.opportunity.findFirstOrThrow({where:{tenantId,ownerId:owner.id,status:'open',expectedCloseDate:{not:null}}});
   try{await db.opportunity.update({where:{id:visible.id},data:{amount:'110.02'}});eq((await invoke(g)).result.result.summary.open,'110.02','reports are freshly read, never cached');}
   finally{await db.opportunity.update({where:{id:visible.id},data:{amount:visible.amount}});}
   await db.role.update({where:{id:role.id},data:{permissions:[]}});await call('/agent-runtime/capabilities',limitedGrant.token,undefined,401);
   await call('/analytics/forecast',g.token,undefined,401);
-  return {result:'PASS',checks,officialMcpClients:2,reportReadsOnly:true,auditFailureDeniesResult:true,revocationDuringRead:true,concurrentBudget:true};
+  return {result:'PASS',checks,officialMcpClientKinds:2,reportReadsOnly:true,auditFailureDeniesResult:true,revocationDuringRead:true,concurrentBudget:true};
 }

@@ -86,7 +86,7 @@ export class McpController {
     server.registerTool(
       'workspace.list',
       {
-        description: '分页查询当前身份可见的客户、联系人、线索、商机、合同、订单、项目、任务与演示财务数据。',
+        description: '分页查询当前身份可见的客户、联系人、线索、商机、合同、订单、项目、任务与本地财务台账（只读）。',
         inputSchema: z
           .object({
             kind: z.enum(kinds),

@@ -91,7 +91,7 @@ try {
   eq((await call('/analytics/collections?year=2099&ownerId=' + a.id, xt)).summary.received, '0.00', 'cash tenant isolation');
   const schemas = await call('/analytics/schema', at); eq(schemas.length, 2, 'versioned report catalog');
   const options = await call('/analytics/options', mt); ok(!options.owners.some((u) => u.id === b.id), 'no other-team options');
-  const delegatedReports = await verifyAgentReports({db,url,actors:[{token:at},{token:mt},{token:adt},{token:gt}],owner:a,outsider:b,password,hash,tenantId:tid,deptId:deptA.id,alienToken:xt});
+  const delegatedReports = await verifyAgentReports({db,url,actors:[{token:at,userId:a.id},{token:mt,userId:manager.id},{token:adt,userId:admin.id},{token:gt,userId:boss.id}],owner:a,outsider:b,password,hash,tenantId:tid,deptId:deptA.id,alienToken:xt});
   await db.opportunity.createMany({ data: Array.from({ length: 10001 }, (_, i) => ({ tenantId: tid, code: 'B' + suffix + i, name: 'Synthetic bounded query', ownerId: b.id, customerId: customerB.id, stage: stage.code, amount: '0.01', expectedCloseDate: future })) });
   await call('/analytics/forecast?year=2099', bt, 400);
   await db.user.update({ where: { id: a.id }, data: { status: 'inactive' } });

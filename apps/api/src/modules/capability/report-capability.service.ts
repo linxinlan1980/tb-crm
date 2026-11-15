@@ -38,11 +38,11 @@ export class ReportCapabilityService {
     try {
       const query = reportInput(input);
       const result = id === 'report.sales.forecast' ? await this.analytics.forecast(actor, query) : await this.analytics.collections(actor, query);
-      await validateActor(this.prisma.system, actor);
       await this.prisma.system.auditLog.create({ data: {
         tenantId: actor.tenantId, userId: actor.userId, action: 'capability.succeeded', objectType: 'capability', objectNo: executionId,
         afterData: json({ ...evidence, inputHash: createHash('sha256').update(JSON.stringify(query)).digest('hex'), generatedAt: result.generatedAt }),
       } });
+      await validateActor(this.prisma.system, actor);
       return { executionId, capabilityId: id, version: definition.version, result };
     } catch (error) {
       await this.prisma.system.auditLog.create({ data: { tenantId: actor.tenantId, userId: actor.userId, action: 'capability.failed', objectType: 'capability', objectNo: executionId, afterData: json(evidence) } });

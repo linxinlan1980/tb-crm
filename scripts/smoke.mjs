@@ -757,7 +757,8 @@ try {
   );
   eq(init.result.serverInfo.name, 'tb-crm');
   const tools = await mcp('tools/list', {}, 2);
-  eq(tools.result.tools.length, 7);
+  eq(tools.result.tools.map(t => t.name).sort(), ['approval.pending','customer.get','customer.search','report.cash.collections','report.sales.forecast','workspace.get','workspace.list','workspace.overview','workspace.schema']);
+  eq(tools.result.tools.every(t=>t.annotations?.readOnlyHint === true), true, 'All human MCP tools remain read-only');
   const tool = await mcp('tools/call', { name: 'customer.get', arguments: { customerId: customer.id } }, 3);
   eq(JSON.parse(tool.result.content[0].text).result.name, name);
   const workspaceTool = await mcp(
