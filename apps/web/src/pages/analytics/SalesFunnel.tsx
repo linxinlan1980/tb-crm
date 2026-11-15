@@ -93,7 +93,7 @@ export default function SalesFunnel({
     const cents = rows
       .filter((r) => r.amount !== null && r.forecastEligible && r.lossGroup !== 'identity_pending')
       .reduce((n, r) => n + BigInt(r.amount!.replace('.', '')), 0n);
-    return (cents / 100n).toLocaleString('zh-CN')+'.'+String(cents%100n).padStart(2,'0');
+    return (cents / 100n).toLocaleString('zh-CN') + '.' + String(cents % 100n).padStart(2, '0');
   };
   const rows =
     current?.rows.filter(
@@ -171,7 +171,7 @@ export default function SalesFunnel({
             type="info"
             showIcon
             message="掉单报价是未成交机会，不是应收款"
-            description={`用友具名商务掉单 ${data?.summary.confirmedLostCount ?? 0} 项，¥${money(data?.summary.confirmedLostAmount)}；主体待核候选 ${data?.summary.pendingIdentityLostCount ?? 0} 项，¥${money(data?.summary.pendingIdentityLostAmount)}，单列待核。历史实际掉单日期未核实，不使用导入日代替。`}
+            description={`具名商务掉单 ${data?.summary.confirmedLostCount ?? 0} 项，¥${money(data?.summary.confirmedLostAmount)}；主体待核候选 ${data?.summary.pendingIdentityLostCount ?? 0} 项，¥${money(data?.summary.pendingIdentityLostAmount)}，单列待核。历史实际掉单日期未核实，不使用导入日代替。`}
           />
         )}
         <Input.Search

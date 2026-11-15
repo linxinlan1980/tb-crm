@@ -347,7 +347,7 @@ export class SalesIntakeService {
             ownerId: a.userId,
             ownerDeptId: a.deptId,
             poolType: 'private',
-            protectUntil:new Date(Date.now()+30*86400000),
+            protectUntil: new Date(Date.now() + 30 * 86400000),
             createdBy: a.userId,
             remark: c.notes,
             tags: json({ salesIntake: { identityStatus: c.identityStatus, batchKey: m.batchKey } }),
@@ -746,12 +746,8 @@ export class SalesIntakeService {
               .toLocaleLowerCase()
               .includes(keyword.toLocaleLowerCase()),
         );
-        const lost = filtered.filter(
-            (i) => i.channel === '用友' && i.outcome === 'lost' && i.lossGroup === 'confirmed',
-          ),
-          pending = filtered.filter(
-            (i) => i.channel === '用友' && i.outcome === 'lost' && i.lossGroup === 'identity_pending',
-          );
+        const lost = filtered.filter((i) => i.outcome === 'lost' && i.lossGroup === 'confirmed'),
+          pending = filtered.filter((i) => i.outcome === 'lost' && i.lossGroup === 'identity_pending');
         const total = (rows: Item[]) =>
           rows.reduce((s, r) => (r.amount === null ? s : s.add(r.amount)), new Prisma.Decimal(0)).toFixed(2);
         return {
