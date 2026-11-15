@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Col, Row, Space, Spin, Statistic, Tabs, Typography } from 'antd';
+import { Alert, Button, Card, Col, Collapse, Row, Space, Spin, Statistic, Tabs, Typography } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import Table from '../../components/BusinessTable';
 import BusinessSort, { type BusinessSortValue } from '../../components/BusinessSort';
@@ -163,10 +163,11 @@ export default function BusinessAnalytics({
                 ['开票金额', 'invoiced', 'invoiced'],
                 ['开票未回款', 'invoiceUnpaid', 'invoiceUnpaid'],
                 ['建设中项目金额', 'construction', 'construction'],
+                ['软件返佣（另列）','commission','commission'],
               ] as const
             ).map(([title, key, filter]) => (
-              <Col xs={24} sm={12} xl={key === 'construction' ? 8 : 4} key={key}>
-                <Card hoverable onClick={() => choose(filter)}>
+              <Col xs={24} sm={12} xl={8} key={key}>
+                <Card className="business-metric" hoverable onClick={() => choose(filter)}>
                   <Statistic
                     title={title}
                     value={
@@ -186,8 +187,9 @@ export default function BusinessAnalytics({
             showIcon
             style={{ margin: '16px 0' }}
             message="我方业务与软件返佣分别统计"
-            description={data.notices.join(' ')}
+            description="按所选签约日期汇总这批合同当前累计值。渠道作为甲方支付的实施、开发及外包费用计入业务；软件返佣单列。点击金额查看合同明细。"
           />
+          <Collapse ghost size="small" style={{marginBottom:16}} items={[{key:'basis',label:'统计口径与回款规则说明',children:data.notices.map((n,i)=><Typography.Paragraph key={i} style={{lineHeight:1.8,marginBottom:10}}>{n}</Typography.Paragraph>)}]}/>
           {data.summary.unmatchedInvoiceCount > 0 && (
             <Alert
               type="warning"

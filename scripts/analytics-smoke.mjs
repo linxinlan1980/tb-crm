@@ -177,6 +177,7 @@ try {
   const ti=await db.invoice.create({data:{tenantId:tid,invoiceNo:'TI'+suffix,contractId:tc.id,customerId:customer.id,invoiceTitle:'Synthetic',amount:'600',status:'invoiced'}});
   await db.paymentPlan.createMany({data:[{tenantId:tid,contractId:tc.id,planNo:'T1'+suffix,amount:'600',receivedAmount:'200',outstandingAmount:'400',invoiceId:ti.id,dueDate:new Date('2058-07-01'),status:'partial'},{tenantId:tid,contractId:tc.id,planNo:'T2'+suffix,amount:'200',receivedAmount:'0',outstandingAmount:'200',dueDate:null},{tenantId:tid,contractId:tc.id,planNo:'T3'+suffix,amount:'200',receivedAmount:'200',outstandingAmount:'0',status:'completed'}]});
   const to=await makeOpp('TRADEO',a.id,customer.id,{amount:'1000',expectedCloseDate:new Date('2058-07-01')});
+  eq((await call('/trade/opportunities/'+to.id,at)).classification,null,'Unclassified quote is not an empty known-zero classification');
   const classify={requestKey:randomUUID(),items:[{kind:'contracts',id:ccTrade.id,expectedUpdatedAt:ccTrade.updatedAt.toISOString(),category:'software_commission',reason:'Synthetic documented software commission',sourceIds:['synthetic:commission']},{kind:'opportunities',id:to.id,expectedUpdatedAt:to.updatedAt.toISOString(),category:'business',ownAmount:'400',vendorProductAmount:'600',reason:'Synthetic service 400, vendor software 600',sourceIds:['synthetic:quote']}]};
   await call('/trade/classify',at,403,classify);
   const classified=await call('/trade/classify',adt,201,classify);eq(classified.items.length,2,'Atomic trade classifications');

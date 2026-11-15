@@ -116,3 +116,12 @@ node scripts/tianyu-opportunity-actions.mjs \
 ```
 
 仅允许已初始化的本机TIANYU测试库、固定天雨编号及虚构客户；核对账号和企业标记后整批事务追加，已有同类行动及日程复用，保留审计，不修改财务、审批或发出消息。已在本机为6640条进行中机会各追加一项行动和日程，重放不重复；已成交的800份合同由前一命令提供路径表单。日程按负责人避开占用时段，原有其他类别记录保留。
+
+
+合同经营统计可在补充流程后确认虚构业务分类（先启动网站）：
+
+```sh
+node scripts/tianyu-trade-classification.mjs --company-config .local/accounts/TIANYU.json --confirm-fictional-tianyu
+```
+
+该脚本只读取本机天雨测试帐套并调用管理员应用服务，确认800份已签阀门供货为我方业务；原合同金额、开票、回款不改变，不发外部通知。重复运行跳过已有分类。配置文件只在接收方本机产生，不随源码分发。日期/人员统计、排序和回款新口径详见 `docs/operations/BUSINESS_CASH_METRICS.md`。

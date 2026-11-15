@@ -738,10 +738,10 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                         ]}
                       />
                     ) : name==='followups' ? (
-                      <Table<RecordRow> rowKey="id" size="small" pagination={{pageSize:5}} dataSource={values as RecordRow[]} scroll={{x:650}} columns={[
-                        {title:'跟进时间',width:145,render:(_,r)=>{const source=(r.aiStructured&&typeof r.aiStructured==='object'?(r.aiStructured as Record<string,unknown>).salesIntake:undefined) as Record<string,unknown>|undefined;const time=source?source.occurredAt:r.createdAt;return <>{time?String(time).slice(0,10):'原始日期待核'}{source?.dateEstimated===true&&<Tag>估算日期</Tag>}</>;}},
-                        {title:'内容与结果',render:(_,r)=><><div style={{whiteSpace:'pre-wrap'}}>{String(r.content??'')}</div>{r.result?<Tag>{String(r.result)}</Tag>:null}</>},
-                        {title:'下一步',width:220,render:(_,r)=><>{String(r.nextAction??'—')}<div>{r.nextFollowAt?String(r.nextFollowAt).slice(0,10):''}</div></>},
+                      <Table<RecordRow> rowKey="id" size="small" title={()=>'最多显示最近30条关联记录；完整历史见跟进记录列表'} pagination={{pageSize:5}} dataSource={(values as RecordRow[]).map(r=>{const source=(r.aiStructured&&typeof r.aiStructured==='object'?(r.aiStructured as Record<string,unknown>).salesIntake:undefined) as Record<string,unknown>|undefined;return {...r,activityAt:source?source.occurredAt:r.createdAt};})} scroll={{x:650}} columns={[
+                        {title:'跟进时间',dataIndex:'activityAt',defaultSortOrder:'descend',width:145,render:(_,r)=>{const source=(r.aiStructured&&typeof r.aiStructured==='object'?(r.aiStructured as Record<string,unknown>).salesIntake:undefined) as Record<string,unknown>|undefined;const time=source?source.occurredAt:r.createdAt;return <>{time?String(time).slice(0,10):'原始日期待核'}{source?.dateEstimated===true&&<Tag>估算日期</Tag>}</>;}},
+                        {title:'内容与结果',dataIndex:'content',render:(_,r)=><><div style={{whiteSpace:'pre-wrap'}}>{String(r.content??'')}</div>{r.result?<Tag>{String(r.result)}</Tag>:null}</>},
+                        {title:'下一步',dataIndex:'nextAction',width:220,render:(_,r)=><>{String(r.nextAction??'—')}<div>{r.nextFollowAt?String(r.nextFollowAt).slice(0,10):''}</div></>},
                       ]}/>
                     ) : name === 'quoteVersions' ? (
                       <QuoteHistory versions={values as RecordRow[]} />

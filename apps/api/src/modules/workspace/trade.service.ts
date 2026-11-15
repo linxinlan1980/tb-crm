@@ -75,7 +75,7 @@ export class TradeService {
           id,
           originalAmount: row.amount.toFixed(2),
           updatedAt: row.updatedAt,
-          classification: classification ?? null,
+          classification: classification?.category ? classification : null,
           canClassify: a.roles.includes('super_admin'),
         };
       },
