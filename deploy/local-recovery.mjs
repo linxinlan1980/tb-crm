@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { connect } from 'node:net';
 import { encodeBackup, decodeBackup, MAX_SQL_BYTES } from './backup-format.mjs';
-import { accountInput } from './local-accounts.mjs';
+import { accountInput, acquireInstallationLock } from './local-accounts.mjs';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(new URL('../packages/database/package.json', import.meta.url));
@@ -61,7 +61,13 @@ async function inventory(db) {
   if (evidence.some(row => row.sha256 !== row.actual)) throw new Error('Attachment checksum mismatch');
   return { counts, attachmentsSha256: hash(JSON.stringify(evidence)) };
 }
-export async function backupInstallation({ dir, file, keyFile, mysqlBin }) {
+export async function backupInstallation(options) {
+  const directory = resolve(options.dir);
+  if (!existsSync(join(directory, 'registry.json'))) throw new Error('Company registry does not exist');
+  const release = acquireInstallationLock(directory);
+  try { return await backupContents(options); } finally { release(); }
+}
+async function backupContents({ dir, file, keyFile, mysqlBin }) {
   dir = resolve(dir); file = resolve(file);
   if (existsSync(file)) throw new Error('Backup output already exists');
   const registryFile = join(dir, 'registry.json');
@@ -78,6 +84,8 @@ export async function backupInstallation({ dir, file, keyFile, mysqlBin }) {
     const configRaw = readFileSync(entry.configFile, 'utf8');
     const config = JSON.parse(configRaw);
     if (config.TENANT_CODE !== entry.code || config.DEMO_MODE !== 'false') throw new Error('Company configuration mismatch');
+    const gatewayPort = Number(config.WEB_PORT || 3000);
+    if (!Number.isInteger(gatewayPort) || gatewayPort < 1024 || gatewayPort > 65535 || await listening(gatewayPort)) throw new Error('Stop the installation gateway before backup');
     const db = new PrismaClient({ datasourceUrl: config.DATABASE_URL });
     try {
       const tenant = await db.tenant.findMany({ select: { code: true } });
