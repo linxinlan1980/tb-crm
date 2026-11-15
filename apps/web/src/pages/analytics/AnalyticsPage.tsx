@@ -372,6 +372,7 @@ export default function AnalyticsPage() {
       <Spin spinning={busy}>
         {data ? (
           <>
+            {forecast && <SalesFunnel period={period} people={people}/>}
             <Row gutter={[16, 16]}>
               {cards.map(([title, key]) => (
                 <Col xs={24} sm={12} xl={6} key={key}>
@@ -521,7 +522,6 @@ export default function AnalyticsPage() {
                 />
               </Card>
             )}
-            {forecast && <SalesFunnel period={period} people={people}/>}
             <Card
               style={{ marginTop: 18 }}
               title={forecast ? '商机明细 · 所选口径' : '项目 / 计划 / 到账明细'}
