@@ -37,7 +37,7 @@ node scripts/tianyu-approval-scenarios.mjs --company-config .local/accounts/TIAN
 
 ## 展示路径
 
-1. [产品介绍](index.html)：AI输入、历史过程、未来计划、经营闭环。
+1. 产品介绍（历史资料已归档）：AI输入、历史过程、未来计划、经营闭环。
 2. [AI场景与资料](ai-workflow/README.md)：12个完整故事及来源证据。
 3. [审批操作说明](APPROVAL_GUIDE.md)：36类流程、246张申请、16项表单。
 4. 看板进入客户与商机，查看历史报价、跟进和下一步；未知金额不填零，不进入确定收入。
