@@ -1,5 +1,9 @@
+import Table from '../../components/BusinessTable';
+import NativeApprovalPanel from './NativeApprovalPanel';
+import ActivitySyncPanel from './ActivitySyncPanel';
+import DingTalkBridge from './DingTalkBridge';
 import { useState, useEffect } from 'react';
-import { Alert, Button, Card, Input, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Input, Space, Tag, Tabs, Typography, message } from 'antd';
 import { get, post, errorText, type RecordRow } from '../../services/workspace';
 interface Platform {
   code: string;
@@ -8,7 +12,7 @@ interface Platform {
   message: string;
   connected: boolean | null;
 }
-export default function IntegrationPage() {
+function AppIntegrations() {
   const [platforms, setPlatforms] = useState<Platform[]>([]),
     [rows, setRows] = useState<RecordRow[]>([]),
     [dept, setDept] = useState(''),
@@ -104,6 +108,27 @@ export default function IntegrationPage() {
           ]}
         />
       </Card>
+    </div>
+  );
+}
+
+export default function IntegrationPage() {
+  return (
+    <div>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">CONNECTED WORKSPACE</div>
+          <h1>集成与同步</h1>
+        </div>
+      </div>
+      <Tabs
+        items={[
+          { key: 'bridge', label: '钉钉组织同步', children: <DingTalkBridge /> },
+          {key:'native-approval',label:'钉钉原生审批（局域网）',children:<NativeApprovalPanel/>},
+          { key: 'activities', label: '本人日程与审批提醒', children: <ActivitySyncPanel /> },
+          { key: 'apps', label: '企业应用接口（高级）', children: <AppIntegrations /> },
+        ]}
+      />
     </div>
   );
 }

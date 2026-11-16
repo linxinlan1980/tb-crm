@@ -32,6 +32,12 @@ export const resources: Record<string, Resource> = {
     name: 'name',
     fields: [
       f('name', '客户名称', 'text', true),
+      f('shortName', '客户简称'),
+      f('customerCategory', '客户标记', 'select', false, { options: ['direct', 'sales_channel'] }),
+      f('channelBrand', '销售渠道', 'select', false, { options: ['钉钉', '用友', '阿里', '其他'] }),
+      f('creditCode', '统一社会信用代码'),
+      f('companyPhone', '企业联系电话'),
+      f('legalPerson', '法定代表人'),
       f('industry', '行业'),
       f('level', '级别', 'select', false, { options: ['重点客户', '普通客户', '潜在客户'] }),
       f('region', '地区'),
@@ -73,7 +79,7 @@ export const resources: Record<string, Resource> = {
       f('demandSummary', '需求摘要', 'textarea'),
       f('nextAction', '下一步行动'),
     ],
-    actions: ['advance', 'quote', 'lose'],
+    actions: ['advance', 'quote', 'lose', 'follow'],
   },
   contracts: {
     model: 'contract',
@@ -81,10 +87,11 @@ export const resources: Record<string, Resource> = {
     name: 'name',
     fields: [
       f('name', '合同名称', 'text', true),
+      f('signingCompany', '我方签约主体'),
       customer,
       f('opportunityId', '关联商机', 'reference', false, { reference: 'opportunities' }),
       f('contractType', '合同类型', 'select', true, {
-        options: ['software_sale', 'implementation', 'maintenance', 'outsource', 'ai_fde', 'saas_sub', 'channel'],
+        options: ['software_sale', 'implementation', 'maintenance', 'outsource', 'ai_fde', 'saas_sub', 'channel', 'other'],
       }),
       f('amount', '含税合同金额', 'money', true),
       f('taxRate', '税率%', 'number'),
@@ -123,7 +130,7 @@ export const resources: Record<string, Resource> = {
       f('title', '任务名称', 'text', true),
       f('projectId', '项目', 'reference', true, { reference: 'projects' }),
       f('milestoneId', '关联里程碑（可选）', 'number'),
-      f('dueDate', '截止日期', 'date'),
+      f('dueDate', '计划完成日', 'date'),
       f('description', '任务说明', 'textarea'),
     ],
     actions: ['start_task', 'complete', 'reopen_task', 'assign_task'],
@@ -135,7 +142,7 @@ export const resources: Record<string, Resource> = {
     fields: [
       f('title', '行动名称', 'text', true),
       f('targetId', '客户', 'reference', true, { reference: 'customers' }),
-      f('dueDate', '计划日期', 'date'),
+      f('dueDate', '计划完成日', 'date'),
       f('content', '内容', 'textarea'),
     ],
     actions: ['complete'],
@@ -162,11 +169,14 @@ export const resources: Record<string, Resource> = {
       f('category', '分类'),
       f('unit', '单位'),
       f('listPrice', '目录单价', 'money'),
+      f('pricingStatus','定价状态','select',false,{options:['fixed','quote_required']}),
+      f('description','产品说明','textarea'),
+      f('specification','规格与报价依据'),
       f('taxRate', '税率%', 'number'),
     ],
     actions: [],
   },
-  'payment-plans': { model: 'paymentPlan', title: '回款计划', name: 'planNo', fields: [], actions: [], readonly: true },
+  'payment-plans': { model: 'paymentPlan', title: '收款计划', name: 'planNo', fields: [], actions: [], readonly: true },
   invoices: { model: 'invoice', title: '发票', name: 'invoiceNo', fields: [], actions: [], readonly: true },
   receipts: { model: 'receipt', title: '收款记录', name: 'receiptNo', fields: [], actions: [], readonly: true },
 };
@@ -203,7 +213,7 @@ export function cleanInput(kind: string, value: unknown, partial = false): Recor
         field.label,
         (
           {
-            customers: { name: 200, industry: 50, level: 20, region: 50, address: 500, website: 200, remark: 3000 },
+            customers: { name: 200, shortName: 100, creditCode: 40, companyPhone: 50, legalPerson: 50, industry: 50, level: 20, region: 50, address: 500, website: 200, remark: 3000 },
             leads: { companyName: 200, contactName: 50, industry: 50, demand: 3000 },
           } as Record<string, Record<string, number>>
         )[kind]?.[field.key] ?? (field.type === 'textarea' ? 3000 : field.key === 'code' ? 30 : 200),

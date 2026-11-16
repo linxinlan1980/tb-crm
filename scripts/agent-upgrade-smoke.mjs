@@ -1,3 +1,5 @@
+import { readUpgradeFixture } from './upgrade-fixture.mjs';
+const prior = '769588a10f73582061ff7ec6a7058cb75f9d5766';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
@@ -13,7 +15,6 @@ const require = createRequire(new URL('../packages/database/package.json', impor
 const { PrismaClient } = require('@prisma/client');
 const db = new PrismaClient(),
   scratch = await mkdtemp(join(tmpdir(), 'crm-agent-upgrade-'));
-const prior = '769588a10f73582061ff7ec6a7058cb75f9d5766';
 let api,
   log = '',
   checks = 0;
@@ -78,16 +79,26 @@ async function call(path, method = 'GET', input, token, expected = 200) {
   ok(r.status === expected, path + ': ' + r.status + ' ' + out.message);
   return out.data;
 }
-// The current client and API write AuditLog.source/principal_label, which the prior release predates.
+// The current client needs audit metadata and employee_no, which the prior release predates.
 // Add them only while seeding through current code, then restore the exact prior shape before migrating.
-const auditColumns = (add) =>
-  db.$executeRawUnsafe(
+const auditColumns = async (add) => {
+  await db.$executeRawUnsafe(
     add
       ? "ALTER TABLE audit_logs ADD COLUMN source ENUM('human','agent','system','import') NOT NULL DEFAULT 'human', ADD COLUMN principal_label VARCHAR(100) NULL"
       : 'ALTER TABLE audit_logs DROP COLUMN source, DROP COLUMN principal_label',
   );
+  await db.$executeRawUnsafe(add
+    ? 'ALTER TABLE users ADD COLUMN employee_no VARCHAR(40) NULL'
+    : 'ALTER TABLE users DROP COLUMN employee_no');
+  await db.$executeRawUnsafe(add
+    ? 'ALTER TABLE contracts ADD COLUMN signing_company VARCHAR(200) NULL'
+    : 'ALTER TABLE contracts DROP COLUMN signing_company');
+  await db.$executeRawUnsafe(add
+    ? "ALTER TABLE customers ADD COLUMN customer_category VARCHAR(20) NOT NULL DEFAULT 'direct', ADD COLUMN channel_brand VARCHAR(50) NULL"
+    : 'ALTER TABLE customers DROP COLUMN customer_category, DROP COLUMN channel_brand');
+};
 try {
-  const archive = run('git', ['archive', prior, 'packages/database/prisma'], { encoding: null }).stdout;
+  const archive = readUpgradeFixture('agent');
   run('tar', ['-xf', '-', '-C', scratch], { input: archive });
   run('pnpm', [
     '--filter',
@@ -116,6 +127,8 @@ try {
       ownerId: owner.id,
       poolType: 'private',
     },
+    // This fixture is intentionally created before the identity migration.
+    select: { id: true, name: true, updatedAt: true },
   });
   await start();
   const human = (
@@ -173,6 +186,8 @@ try {
     commandCount = await db.commandExecution.count();
   await auditColumns(false);
   run('pnpm', ['--filter', '@partneros/database', 'migrate:deploy']);
+  const upgradedCustomer = await db.customer.findUniqueOrThrow({ where: { id: customer.id } });
+  ok(upgradedCustomer.companyPhone === null && upgradedCustomer.creditFingerprint === null && upgradedCustomer.name === customer.name && upgradedCustomer.updatedAt.getTime() === customer.updatedAt.getTime(), 'Identity migration preserves historical customer with nullable new fields');
   assert.deepEqual(
     await db.$queryRaw`SELECT id,tenant_id,grant_id,owner_id,capability_id,request_key,input_hash,status,result,error_code,duration_ms,created_at,completed_at FROM agent_executions ORDER BY id`,
     oldRows,

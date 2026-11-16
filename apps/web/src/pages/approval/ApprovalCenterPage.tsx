@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import dayjs from 'dayjs';
 import {
   Alert,
   Button,
@@ -43,6 +44,7 @@ function BusinessChangeEvidence({ value }: { value: unknown }) {
   );
 }
 interface Approval extends RecordRow {
+  nativeLinked?: boolean;
   title: string;
   status: string;
   approvalNo: string;
@@ -56,6 +58,7 @@ interface Approval extends RecordRow {
     comment: string;
     approverName: string;
     canTransfer: boolean;
+    actedAt?: string | null;
   }[];
 }
 interface AuditEvent {
@@ -279,13 +282,20 @@ export default function ApprovalCenterPage() {
                       </div>
                       <Space>
                         <Button onClick={() => void showDetail(p.approval)}>查看申请</Button>
-                        <Button onClick={() => void startTransfer(p.approval, p.nodeId)}>转审</Button>
-                        <Button type="primary" onClick={() => decide(p)}>
-                          通过
-                        </Button>
-                        <Button danger onClick={() => decide(p, true)}>
-                          驳回
-                        </Button>
+                        {p.approval.nativeLinked ? (
+                          <Tag color="blue">请在钉钉原生审批中处理</Tag>
+                        ) : (
+                          <>
+                            {' '}
+                            <Button onClick={() => void startTransfer(p.approval, p.nodeId)}>转审</Button>
+                            <Button type="primary" onClick={() => decide(p)}>
+                              通过
+                            </Button>
+                            <Button danger onClick={() => decide(p, true)}>
+                              驳回
+                            </Button>
+                          </>
+                        )}
                       </Space>
                     </Space>
                   </Card>
@@ -310,7 +320,12 @@ export default function ApprovalCenterPage() {
                           {statusNames[a.status] ?? a.status}
                         </Tag>
                       </Space>
-                      {a.status === 'pending' && <Button onClick={() => withdraw(a)}>撤回</Button>}
+                      {a.status === 'pending' &&
+                        (a.nativeLinked ? (
+                          <Tag>请先在钉钉撤销并同步</Tag>
+                        ) : (
+                          <Button onClick={() => withdraw(a)}>撤回</Button>
+                        ))}
                     </div>
                     {a.nodes && (
                       <Steps
@@ -450,6 +465,15 @@ export default function ApprovalCenterPage() {
         </Form>
       </Modal>
       <Drawer title={detail?.title} open={!!detail} onClose={() => setDetail(undefined)} width={640}>
+        {detail?.nativeLinked && (
+          <Alert
+            showIcon
+            type="info"
+            message="已连接钉钉原生审批"
+            description="请在钉钉处理。CRM主动核对实际人工决定并回写；转审、撤回或模板变化需先核对外部流程。"
+            style={{ marginBottom: 16 }}
+          />
+        )}
         {detail?.nodes?.some(
           (n) =>
             n.action !== 'transferred' &&
@@ -458,7 +482,7 @@ export default function ApprovalCenterPage() {
           <Alert
             type="info"
             showIcon
-            message="会签：同一步内全部人员同意后才能流转；任一驳回会结束申请。转审不会代替审批意见。"
+            message="会签须同一步全员同意；或签由同一步任一有权人员同意即可通过，其余节点记为无需处理。任一驳回会结束申请。"
             style={{ marginBottom: 16 }}
           />
         )}
@@ -479,7 +503,16 @@ export default function ApprovalCenterPage() {
               >
                 <List.Item.Meta
                   title={`第${n.nodeOrder}步 · ${n.nodeName} · ${n.approverName}`}
-                  description={`${({ transferred: '已转交', pending: '待处理', approved: '已通过', rejected: '已驳回' } as Record<string, string>)[n.action] ?? n.action}${n.comment ? ' · ' + n.comment : ''}`}
+                  description={
+                    <>
+                      {`${({ skipped: '未审核（或签已结束，无需处理）', transferred: '已转交', pending: '待处理', approved: '已通过', rejected: '已驳回' } as Record<string, string>)[n.action] ?? n.action}${n.comment ? ' · ' + n.comment : ''}`}
+                      {n.actedAt ? (
+                        <div>审批时间：{dayjs(n.actedAt).format('YYYY-MM-DD HH:mm:ss')}</div>
+                      ) : n.action === 'skipped' ? (
+                        <div>未产生审批操作</div>
+                      ) : null}
+                    </>
+                  }
                 />
               </List.Item>
             )}
@@ -539,7 +572,12 @@ export default function ApprovalCenterPage() {
             .filter(
               ([k]) => k !== 'flowSnapshot' && !(detail?.bizType === 'contract_change' && k === 'businessSnapshot'),
             )
-            .map(([k, v]) => ({ key: k, label: k, children: typeof v === 'object' ? JSON.stringify(v) : String(v) }))}
+            .map(([k, v]) => {
+              const snapshot=detail?.formData.flowSnapshot;
+              const fields=snapshot && typeof snapshot==='object' && !Array.isArray(snapshot) ? (snapshot as Record<string,unknown>).fields : undefined;
+              const field=Array.isArray(fields) ? fields.find((f:unknown)=>f && typeof f==='object' && !Array.isArray(f) && (f as Record<string,unknown>).key===k) as Record<string,unknown>|undefined : undefined;
+              return { key:k,label:typeof field?.label==='string'?field.label:k,children:typeof v==='object'?JSON.stringify(v):String(v) };
+            })}
         />
         <Card title="流程版本快照" style={{ marginTop: 20 }}>
           <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(detail?.formData?.flowSnapshot, null, 2)}</pre>

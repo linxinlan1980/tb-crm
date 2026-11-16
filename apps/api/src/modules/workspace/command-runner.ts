@@ -1,3 +1,4 @@
+import { roleAuthority } from '../../common/types/role-authority';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
@@ -64,15 +65,9 @@ export async function validateActor(tx: Tx, actor: Actor) {
     : null;
   if (!principal) throw new ForbiddenException('当前执行身份已撤销或变更，请重新登录');
   const roleDefinitions = principal.roles.map((r) => r.role);
-  const permissions = [
-    ...new Set(
-      roleDefinitions.flatMap((r) =>
-        Array.isArray(r.permissions) ? r.permissions.filter((p): p is string => typeof p === 'string') : [],
-      ),
-    ),
-  ];
-  const scope =
-    ['all', 'dept', 'team', 'custom', 'self'].find((s) => roleDefinitions.some((r) => r.dataScope === s)) ?? 'self';
+  const authority = roleAuthority(roleDefinitions);
+  const permissions = authority.permissions,
+    scope = authority.dataScope;
   const same = (a: string[], b: string[]) => JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort());
   if (
     principal.deptId !== actor.deptId ||

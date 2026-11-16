@@ -63,7 +63,22 @@ const command = async (kind, row, action, extra = {}, t = sales, expected = 201)
     await call(
       `/workspace/${kind}/${row.id}/${action}`,
       'POST',
-      { requestKey: randomUUID(), expectedUpdatedAt: row.updatedAt, ...extra },
+      {
+        requestKey: randomUUID(),
+        expectedUpdatedAt: row.updatedAt,
+        ...(kind === 'contracts' && action === 'sign'
+          ? {
+              paymentSchedule: [
+                {
+                  amount: String(row.amount),
+                  dueDate: '2026-12-31',
+                  condition: 'Synthetic fixture agreed payment terms',
+                },
+              ],
+            }
+          : {}),
+        ...extra,
+      },
       t,
       expected,
     )
@@ -198,15 +213,22 @@ try {
   await commit(p, admin2, randomUUID(), 404);
   const k = randomUUID(),
     receipt = (await commit(p, admin, k)).data;
-  ok(receipt.imported === 2 && receipt.skippedDuplicates === 2, 'Explicit valid rows imported to public pool');
+  ok(receipt.imported === 2 && receipt.skippedDuplicates === 2, 'Valid rows belong to creator private pool');
   ok(
     (await commit(p, admin, k)).data.customerIds.join() === receipt.customerIds.join(),
     'Commit replay returns same receipt',
   );
   await commit(p, admin, randomUUID(), 409);
   ok(
-    (await db.customer.count({ where: { tenantId: tid, name: '首次导入甲', poolType: 'public' } })) === 1,
-    'Single public customer persisted',
+    (await db.customer.count({
+      where: {
+        tenantId: tid,
+        name: '首次导入甲',
+        poolType: 'private',
+        ownerId: (await db.user.findFirstOrThrow({ where: { tenantId: tid, username: 'admin' } })).id,
+      },
+    })) === 1,
+    'Single creator-owned customer persisted',
   );
   const bad = await preview('客户名称,级别\n可用但不提交,普通客户\n错误记录,不存在级别');
   await commit(bad, admin, randomUUID(), 400);
@@ -701,7 +723,10 @@ try {
     admin,
   );
   const handedOverUser = (await call('/system/users/' + users.sales.id, 'GET', undefined, admin)).data;
-  await call('/system/users/' + users.sales.id, 'PUT', req({ status: 'inactive' }, handedOverUser), admin);
+  await call('/system/users/' + users.sales.id, 'PUT', req({ status: 'inactive' }, handedOverUser), admin, 409);
+  // Historical installations can already contain inactive owners. Construct that legacy fixture
+  // directly; new personnel commands must refuse offboarding before the sales-asset handover.
+  await db.user.update({ where: { id: users.sales.id }, data: { status: 'inactive' } });
   const opts = (await call('/commercial/customers/handover/options', 'GET', undefined, manager)).data;
   ok(
     opts.customers.some((r) => r.id === dormant.id),
@@ -737,7 +762,7 @@ try {
     'Visible owner receives all immutable change outcomes',
   );
   await call('/commercial/contracts/' + c.id + '/changes', 'GET', undefined, foreignToken, 404);
-  const overview = (await call('/workspace/overview', 'GET', undefined, admin)).data;
+  const overview = (await call('/workspace/overview?personRange=company', 'GET', undefined, admin)).data;
   ok(overview.signedAmount === '113.1', 'Overview agrees with effective signed contracts after termination');
   ok(
     (await db.auditLog.count({ where: { action: 'customer.sales.handover' } })) === 2,
@@ -842,6 +867,150 @@ try {
     (await detail('opportunities', wonOpp)).contractId === wonContract.id,
     'Second sign cannot replace winning contract',
   );
+  const installments = await create('contracts', {
+    name: 'Explicit installments synthetic test',
+    customerId: closureCustomer.id,
+    contractType: 'implementation',
+    amount: '0.30',
+  });
+  await command('contracts', await detail('contracts', installments), 'submit');
+  await approve((await detail('contracts', installments)).approvalId);
+  const approvedSchedule = await detail('contracts', installments);
+  const signPath = `/workspace/contracts/${installments.id}/sign`;
+  const signBody = { requestKey: randomUUID(), expectedUpdatedAt: approvedSchedule.updatedAt };
+  await call(signPath, 'POST', signBody, sales, 400);
+  await call(
+    signPath,
+    'POST',
+    {
+      ...signBody,
+      requestKey: randomUUID(),
+      paymentSchedule: [{ amount: '0.29', dueDate: '2026-12-01', condition: 'Wrong total' }],
+    },
+    sales,
+    400,
+  );
+  ok((await detail('contracts', installments)).status === 'approved', 'Invalid terms leave contract approved');
+  ok((await db.paymentPlan.count({ where: { contractId: installments.id } })) === 0, 'Invalid terms create no plans');
+  const explicit = {
+    ...signBody,
+    requestKey: randomUUID(),
+    paymentSchedule: [
+      { amount: '0.10', dueDate: '2026-12-01', condition: 'First actual term' },
+      { amount: '0.20', dueDate: '2027-01-31', condition: 'Acceptance balance' },
+    ],
+  };
+  await Promise.all([call(signPath, 'POST', explicit, sales, 201), call(signPath, 'POST', explicit, sales, 201)]);
+  const generated = await db.paymentPlan.findMany({
+    where: { contractId: installments.id },
+    orderBy: { dueDate: 'asc' },
+  });
+  ok(
+    generated.length === 2 &&
+      generated[0].amount.toFixed(2) === '0.10' &&
+      generated[1].outstandingAmount.toFixed(2) === '0.20',
+    'Explicit installments generated exactly once',
+  );
+  ok(
+    generated[1].dueDate.toISOString().slice(0, 10) === '2027-01-31' &&
+      generated[1].triggerCondition === 'Acceptance balance',
+    'Actual dates and conditions preserved across years',
+  );
+  const identity = await create('customers', {
+    name: 'Identity synthetic parent',
+    creditCode: '91999999000000111A',
+    companyPhone: '021-0000-1111',
+    website: 'https://identity.example.invalid',
+  });
+  ok((await detail('customers', identity)).ownerId === users.peer.id, 'Creator owns manually created customer');
+  await call(
+    '/workspace/customers',
+    'POST',
+    req({ name: 'No license duplicate allowed', creditCode: '91999999000000111A' }),
+    other,
+    409,
+  );
+  const protectedMatch = (
+    await call('/workspace/customers/duplicate-check', 'POST', { creditCode: '91999999000000111A' }, other, 201)
+  ).data;
+  ok(
+    protectedMatch.hardDuplicate && protectedMatch.restrictedMatch && protectedMatch.matches.length === 0,
+    'Protected duplicate reveals no customer details',
+  );
+  ok(
+    !JSON.stringify(protectedMatch).includes('Identity synthetic parent') &&
+      !JSON.stringify(protectedMatch).includes('ownerId'),
+    'No protected name or owner leak',
+  );
+  const warning = (
+    await call(
+      '/workspace/customers/duplicate-check',
+      'POST',
+      {
+        name: 'Different legal entity',
+        companyPhone: '+86 21 0000 1111',
+        website: 'http://www.identity.example.invalid/other',
+      },
+      sales,
+      201,
+    )
+  ).data;
+  ok(
+    !warning.hardDuplicate && warning.matches[0].reasons.length === 2,
+    'Shared domain and switchboard warn without blocking another legal entity',
+  );
+  const sameLicense = await Promise.all([
+    call(
+      '/workspace/customers',
+      'POST',
+      req({ name: 'License race one', creditCode: '91999999000000112A' }),
+      sales,
+      null,
+    ),
+    call(
+      '/workspace/customers',
+      'POST',
+      req({ name: 'License race two', creditCode: '91999999000000112A' }),
+      other,
+      null,
+    ),
+  ]);
+  ok(
+    sameLicense
+      .map((r) => r.status)
+      .sort()
+      .join() === '201,409',
+    'Concurrent license writes create only one customer',
+  );
+  await call(
+    '/workspace/customers/' + identity.id,
+    'PUT',
+    req({ creditCode: '91999999000000112A' }, await detail('customers', identity)),
+    sales,
+    409,
+  );
+  const licenseCsv = await preview(
+    '客户名称,统一社会信用代码\nDifferent label same license,91999999000000111A\nNew licensed customer,91999999000000113A\nBatch duplicate license,91999999000000113A',
+  );
+  ok(licenseCsv.ready === 1 && licenseCsv.duplicates === 2, 'CSV checks known and within-batch license duplicates');
+  await commit(licenseCsv);
+  const adminId = (await db.user.findFirstOrThrow({ where: { tenantId: tid, username: 'admin' } })).id;
+  ok(
+    (await db.customer.count({
+      where: { tenantId: tid, creditCode: '91999999000000113A', ownerId: adminId, poolType: 'private' },
+    })) === 1,
+    'Imported licensed customer belongs to importing administrator',
+  );
+  const recipients = (
+    await call('/workspace/customers/' + identity.id + '/assignment-people', 'GET', undefined, manager)
+  ).data;
+  ok(
+    recipients.some((u) => u.id === users.peer.id) &&
+      !recipients.some((u) => u.id === users.other.id) &&
+      !recipients.some((u) => u.id === users.boss.id),
+    'Manager assignment picker shows only eligible team sales',
+  );
+  await call('/workspace/customers/' + identity.id + '/assignment-people', 'GET', undefined, sales, 403);
   console.log(
     JSON.stringify({
       checks,

@@ -1,3 +1,4 @@
+import Table from '../../components/BusinessTable';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -10,7 +11,6 @@ import {
   Select,
   Space,
   Steps,
-  Table,
   Tag,
   Typography,
   message,
@@ -111,6 +111,22 @@ export default function FlowDesignerPage() {
         }
       },
     });
+  const deactivate = (f: Flow) =>
+    Modal.confirm({
+      title: `停用 ${f.name} v${f.version}？`,
+      content: '停用后不能发起新申请；已经提交的审批继续按原节点快照处理。',
+      okText: '确认停用',
+      onOk: async () => {
+        try {
+          await post(`/approvals/flows/${f.id}/deactivate`, { requestKey: key(), expectedUpdatedAt: f.updatedAt });
+          await load();
+          message.success('已停用；在途审批保留');
+        } catch (e) {
+          message.error(errorText(e));
+          throw e;
+        }
+      },
+    });
   const test = (f: Flow) => {
     let amount = 100000;
     Modal.confirm({
@@ -202,6 +218,11 @@ export default function FlowDesignerPage() {
                   <Button type="link" onClick={() => test(f)}>
                     预演
                   </Button>
+                  {f.isActive && (
+                    <Button type="link" onClick={() => deactivate(f)}>
+                      停用
+                    </Button>
+                  )}
                   {!f.isActive && (
                     <Button type="link" onClick={() => publish(f)}>
                       发布
@@ -350,6 +371,7 @@ export default function FlowDesignerPage() {
                           options={[
                             { value: 'user', label: '指定审批人' },
                             { value: 'users_all', label: '多人会签（全同意）' },
+                            { value: 'users_any', label: '多人或签（任一同意）' },
                             { value: 'role', label: '按角色' },
                             { value: 'dept_leader', label: '部门负责人' },
                           ]}
@@ -365,7 +387,7 @@ export default function FlowDesignerPage() {
                                 rules={[{ required: true }]}
                                 getValueProps={(value: unknown) => ({
                                   value:
-                                    type === 'users_all'
+                                    ['users_all', 'users_any'].includes(type)
                                       ? typeof value === 'string'
                                         ? value.split(',').filter(Boolean)
                                         : []
@@ -376,10 +398,10 @@ export default function FlowDesignerPage() {
                                 }
                               >
                                 <Select
-                                  style={{ width: type === 'users_all' ? 300 : 180 }}
-                                  mode={type === 'users_all' ? 'multiple' : undefined}
-                                  maxCount={type === 'users_all' ? 8 : undefined}
-                                  placeholder={type === 'users_all' ? '指定2—8位会签人，全员同意后流转' : '选择审批人'}
+                                  style={{ width: ['users_all', 'users_any'].includes(type) ? 300 : 180 }}
+                                  mode={['users_all', 'users_any'].includes(type) ? 'multiple' : undefined}
+                                  maxCount={['users_all', 'users_any'].includes(type) ? 8 : undefined}
+                                  placeholder={type === 'users_any' ? '指定2—8位或签人，任一同意后流转' : type === 'users_all' ? '指定2—8位会签人，全员同意后流转' : '选择审批人'}
                                   options={(type === 'role' ? people.roles : people.users).map((p) => ({
                                     value: String(type === 'role' ? p.code : p.id),
                                     label: String(p.name),

@@ -3,7 +3,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { LoginResult } from './auth.api';
 let refreshing: Promise<string> | null = null;
-type AuthRequest = InternalAxiosRequestConfig & { _retry?: boolean; _actorId?: number };
+type AuthRequest = InternalAxiosRequestConfig & { _retry?: boolean; _actorId?: number; _companyCode?: string | null };
 
 /**
  * 统一HTTP请求封装
@@ -21,10 +21,13 @@ const request = axios.create({
 request.interceptors.request.use((config) => {
   const authConfig = config as AuthRequest;
   if (!('_actorId' in authConfig)) authConfig._actorId = useAuthStore.getState().user?.id;
+  if (!('_companyCode' in authConfig)) authConfig._companyCode = sessionStorage.getItem('companyCode');
   const token = useAuthStore.getState().accessToken;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  const companyCode = sessionStorage.getItem('companyCode');
+  if (companyCode && !config.headers['X-Company-Code']) config.headers['X-Company-Code'] = companyCode;
   return config;
 });
 
@@ -45,7 +48,11 @@ request.interceptors.response.use(
     if (status === 401 && !['/auth/login', '/auth/refresh', '/auth/dingtalk/login'].includes(error.config?.url || '')) {
       const config = error.config as AuthRequest | undefined;
       const current = useAuthStore.getState();
-      if (config && config._actorId !== current.user?.id) return Promise.reject(error);
+      if (
+        config &&
+        (config._actorId !== current.user?.id || config._companyCode !== sessionStorage.getItem('companyCode'))
+      )
+        return Promise.reject(error);
       // A delayed 401 from an older token must not rotate the just-refreshed token again.
       if (
         config &&
@@ -64,7 +71,7 @@ request.interceptors.response.use(
             .post<{ code: number; data: LoginResult }>(
               '/api/v1/auth/refresh',
               { refreshToken: oldRefresh },
-              { timeout: 15000 },
+              { timeout: 15000, headers: { 'X-Company-Code': sessionStorage.getItem('companyCode') ?? '' } },
             )
             .then(({ data }) => {
               if (data.code !== 0 || useAuthStore.getState().refreshToken !== oldRefresh) throw new Error('会话已更改');
@@ -80,7 +87,12 @@ request.interceptors.response.use(
           config.headers.Authorization = `Bearer ${next}`;
           return request(config);
         } catch (refreshError) {
-          if (config._actorId !== useAuthStore.getState().user?.id) return Promise.reject(error);
+          if (
+            config._actorId !== useAuthStore.getState().user?.id ||
+            config._companyCode !== sessionStorage.getItem('companyCode') ||
+            useAuthStore.getState().refreshToken !== oldRefresh
+          )
+            return Promise.reject(error);
           if (axios.isAxiosError(refreshError) && ![401, 403].includes(refreshError.response?.status || 0))
             return Promise.reject(refreshError);
         }

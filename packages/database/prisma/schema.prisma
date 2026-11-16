@@ -11,6 +11,128 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// DingTalk bridge: each company database owns its settings, previews and crosswalks.
+model IntegrationConnection {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  provider String @db.VarChar(30)
+  enabled Boolean @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, provider])
+  @@map("integration_connections")
+}
+
+model IntegrationRun {
+  id String @id @db.VarChar(36)
+  tenantId Int @map("tenant_id")
+  provider String @db.VarChar(30)
+  kind String @db.VarChar(30)
+  status String @db.VarChar(30)
+  actorId Int @map("actor_id")
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  snapshot Json?
+  summary Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([tenantId, provider, createdAt])
+  @@map("integration_runs")
+}
+
+model IntegrationMapping {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  provider String @db.VarChar(30)
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  kind String @db.VarChar(30)
+  externalId String @map("external_id") @db.VarChar(100)
+  localId Int @map("local_id")
+  externalName String @map("external_name") @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, provider, kind, externalId])
+  @@unique([tenantId, provider, kind, localId])
+  @@map("integration_mappings")
+}
+
+// Personal CRM calendar and durable, explicitly authorized DingTalk projections.
+model CalendarEntry {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  ownerId Int @map("owner_id")
+  title String @db.VarChar(200)
+  description String @db.Text
+  location String @db.VarChar(300)
+  startsAt DateTime @map("starts_at") @db.DateTime(3)
+  endsAt DateTime @map("ends_at") @db.DateTime(3)
+  freeBusy String @default("busy") @map("free_busy") @db.VarChar(10)
+  status String @default("scheduled") @db.VarChar(20)
+  revision Int @default(1)
+  origin String @default("crm") @db.VarChar(20)
+  externalId String? @map("external_id") @db.VarChar(200)
+  externalSnapshot Json? @map("external_snapshot")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([tenantId, ownerId, startsAt])
+  @@unique([tenantId, ownerId, externalId])
+  @@map("calendar_entries")
+}
+model ActivitySyncSetting {
+  id String @id @db.VarChar(36)
+  tenantId Int @map("tenant_id")
+  ownerId Int @map("owner_id")
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  calendarEnabled Boolean @default(false) @map("calendar_enabled")
+  todoEnabled Boolean @default(false) @map("todo_enabled")
+  autoEnabled Boolean @default(false) @map("auto_enabled")
+  lastScannedAt DateTime? @map("last_scanned_at")
+  lastError String? @map("last_error") @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, ownerId])
+  @@map("activity_sync_settings")
+}
+model ActivitySyncLink {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  ownerId Int @map("owner_id")
+  kind String @db.VarChar(20)
+  sourceId Int @map("source_id")
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  externalId String @map("external_id") @db.VarChar(200)
+  sourceVersion String @map("source_version") @db.VarChar(64)
+  archivedAt DateTime? @map("archived_at")
+  payload Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, ownerId, kind, sourceId])
+  @@unique([tenantId, bindingHash, kind, externalId])
+  @@map("activity_sync_links")
+}
+model ActivitySyncJob {
+  id String @id @db.VarChar(36)
+  tenantId Int @map("tenant_id")
+  ownerId Int @map("owner_id")
+  kind String @db.VarChar(20)
+  sourceId Int @map("source_id")
+  sourceVersion String @map("source_version") @db.VarChar(64)
+  bindingHash String @map("binding_hash") @db.VarChar(64)
+  settingsVersion DateTime @map("settings_version") @db.DateTime(3)
+  operation String @db.VarChar(20)
+  payload Json
+  externalId String? @map("external_id") @db.VarChar(200)
+  status String @default("prepared") @db.VarChar(20)
+  leaseToken String? @map("lease_token") @db.VarChar(36)
+  forceOverwrite Boolean @default(false) @map("force_overwrite")
+  error String? @db.VarChar(500)
+  evidence Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, ownerId, kind, sourceId, sourceVersion])
+  @@index([tenantId, ownerId, status])
+  @@map("activity_sync_jobs")
+}
+
 // ============ 1. 租户与权限域 ============
 
 model Tenant {
@@ -75,6 +197,7 @@ model User {
   id            Int        @id @default(autoincrement())
   tenantId      Int        @map("tenant_id")
   username      String     @db.VarChar(50)
+  employeeNo    String?    @map("employee_no") @db.VarChar(40)
   passwordHash  String     @map("password_hash") @db.VarChar(200)
   name          String     @db.VarChar(50)
   phone         String?    @db.VarChar(200)
@@ -97,6 +220,8 @@ model User {
   roles         UserRole[]
 
   @@unique([tenantId, username])
+  @@unique([tenantId, employeeNo])
+  @@index([tenantId, phone])
   @@index([tenantId, deptId])
   @@index([dingtalkUserid])
   @@map("users")
@@ -185,6 +310,8 @@ model Customer {
   name              String       @db.VarChar(200)
   nameFingerprint   String?      @map("name_fingerprint") @db.Char(64)
   shortName         String?      @map("short_name") @db.VarChar(100)
+  customerCategory  String       @default("direct") @map("customer_category") @db.VarChar(20)
+  channelBrand      String?      @map("channel_brand") @db.VarChar(50)
   groupId           Int?         @map("group_id")
   industry          String?      @db.VarChar(50)
   level             String?      @db.VarChar(20)
@@ -206,6 +333,8 @@ model Customer {
   establishedDate   DateTime?    @map("established_date") @db.Date
   legalPerson       String?      @map("legal_person") @db.VarChar(50)
   creditCode        String?      @map("credit_code") @db.VarChar(18)
+  companyPhone      String?      @map("company_phone") @db.VarChar(50)
+  creditFingerprint String?      @map("credit_fingerprint") @db.Char(64)
   employeeCount     String?      @map("employee_count") @db.VarChar(20)
   yonyouProduct     String?      @map("yonyou_product") @db.VarChar(100)
   yonyouModules     String?      @map("yonyou_modules") @db.Text
@@ -236,6 +365,7 @@ model Customer {
 
   @@unique([tenantId, code])
   @@unique([tenantId, nameFingerprint])
+  @@unique([tenantId, creditFingerprint], map: "customers_tenant_credit_key")
   @@index([tenantId, ownerId])
   @@index([tenantId, poolType])
   @@index([tenantId, industry])
@@ -824,10 +954,11 @@ model Product {
   description       String?  @db.Text
   specification     String?  @db.VarChar(200)
   unit              String   @default("个") @db.VarChar(20)
-  listPrice         Decimal  @default(0) @map("list_price") @db.Decimal(12, 2)
+  listPrice         Decimal? @map("list_price") @db.Decimal(12, 2)
+  pricingStatus String @default("fixed") @map("pricing_status") @db.VarChar(30)
   partnerPrice      Decimal? @map("partner_price") @db.Decimal(12, 2)
   costPrice         Decimal? @map("cost_price") @db.Decimal(12, 2)
-  taxRate           Decimal  @default(13) @map("tax_rate") @db.Decimal(5, 2)
+  taxRate           Decimal? @map("tax_rate") @db.Decimal(5, 2)
   yonyouProductCode String?  @map("yonyou_product_code") @db.VarChar(50)
   isActive          Boolean  @default(true) @map("is_active")
   sortOrder         Int      @default(0) @map("sort_order")
@@ -869,6 +1000,7 @@ enum ContractType {
   ai_fde
   saas_sub
   channel
+  other
 }
 
 model Contract {
@@ -876,6 +1008,7 @@ model Contract {
   tenantId          Int            @map("tenant_id")
   contractNo        String         @map("contract_no") @db.VarChar(30)
   name              String         @db.VarChar(200)
+  signingCompany    String?        @map("signing_company") @db.VarChar(200)
   customerId        Int            @map("customer_id")
   opportunityId     Int?           @map("opportunity_id")
   quoteSnapshot     Json?          @map("quote_snapshot")
@@ -1265,14 +1398,14 @@ model Invoice {
   orderId           Int?           @map("order_id")
   milestoneId       Int?           @map("milestone_id")
   customerId        Int            @map("customer_id")
-  invoiceType       InvoiceType    @default(special) @map("invoice_type")
+  invoiceType       InvoiceType?   @default(special) @map("invoice_type")
   direction         InvoiceDirection @default(output)
   amount            Decimal        @db.Decimal(15, 2)
-  amountExclTax     Decimal        @map("amount_excl_tax") @db.Decimal(15, 2)
-  taxRate           Decimal        @default(13) @map("tax_rate") @db.Decimal(5, 2)
-  taxAmount         Decimal        @map("tax_amount") @db.Decimal(15, 2)
+  amountExclTax     Decimal?       @map("amount_excl_tax") @db.Decimal(15, 2)
+  taxRate           Decimal?       @default(13) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount         Decimal?       @map("tax_amount") @db.Decimal(15, 2)
   invoiceTitle      String         @map("invoice_title") @db.VarChar(200)
-  taxNo             String         @map("tax_no") @db.VarChar(20)
+  taxNo             String?        @map("tax_no") @db.VarChar(20)
   bankName          String?        @map("bank_name") @db.VarChar(100)
   bankAccount       String?        @map("bank_account") @db.VarChar(200)
   address           String?        @db.VarChar(200)
@@ -1347,7 +1480,7 @@ model PaymentPlan {
   planNo           String             @map("plan_no") @db.VarChar(20)
   amount           Decimal            @db.Decimal(15, 2)
   ratio            Decimal?           @db.Decimal(5, 2)
-  dueDate          DateTime           @map("due_date") @db.Date
+  dueDate          DateTime?          @map("due_date") @db.Date
   triggerCondition String?            @map("trigger_condition") @db.VarChar(200)
   status           PaymentPlanStatus  @default(pending)
   receivedAmount   Decimal            @default(0) @map("received_amount") @db.Decimal(15, 2)
@@ -1393,7 +1526,7 @@ model Receipt {
   allocatedAmount   Decimal        @default(0) @map("allocated_amount") @db.Decimal(15, 2)
   unallocatedAmount Decimal        @default(0) @map("unallocated_amount") @db.Decimal(15, 2)
   receiptDate       DateTime       @map("receipt_date") @db.Date
-  method            ReceiptMethod  @default(bank_transfer)
+  method            ReceiptMethod? @default(bank_transfer)
   bankAccount       String?        @map("bank_account") @db.VarChar(200)
   serialNo          String?        @map("serial_no") @db.VarChar(50)
   payerName         String?        @map("payer_name") @db.VarChar(200)
@@ -1916,6 +2049,7 @@ enum ApprovalAction {
   rejected
   transferred
   added
+  skipped
 }
 
 // ============ 11. 里程碑模板域 ============
@@ -2109,6 +2243,7 @@ enum ApproverType {
   dept_leader
   applicant_leader
   users_all
+  users_any
 }
 
 model AiAuditLog {
@@ -2182,6 +2317,25 @@ model NotificationTemplate {
 
   @@unique([tenantId, code, channel])
   @@map("notification_templates")
+}
+
+// Immutable source workbooks and decoded rows; operator imports only, human-admin reads.
+model SourceArchive {
+  id           String   @id @db.Char(36)
+  tenantId     Int      @map("tenant_id")
+  filename     String   @db.VarChar(200)
+  sha256       String   @db.Char(64)
+  size         Int
+  contentBytes Bytes    @map("content_bytes") @db.MediumBlob
+  sheets       Json
+  rowCount     Int      @map("row_count")
+  summary      Json?
+  createdBy    Int      @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, sha256])
+  @@index([tenantId, createdAt])
+  @@map("source_archives")
 }
 
 model File {
@@ -2325,4 +2479,29 @@ model SystemCommandExecution {
 
   @@unique([tenantId, jobName, requestKey], map: "system_command_identity_key")
   @@map("system_command_executions")
+}
+
+// Evidence-backed private product, pricing and customer-project knowledge.
+// Administrator-only in the first release; no automatic quote/financial/external effects.
+model KnowledgeEntry {
+  id Int @id @default(autoincrement())
+  tenantId Int @map("tenant_id")
+  sourceKey String @map("source_key") @db.VarChar(120)
+  kind String @db.VarChar(20)
+  title String @db.VarChar(200)
+  customerId Int? @map("customer_id")
+  summary String @db.Text
+  evidenceStatus String @map("evidence_status") @db.VarChar(30)
+  sources Json
+  content Json
+  activityLinks Json? @map("activity_links")
+  contentHash String @map("content_hash") @db.VarChar(64)
+  version Int @default(1)
+  createdBy Int @map("created_by")
+  updatedBy Int @map("updated_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@unique([tenantId, sourceKey])
+  @@index([tenantId, kind, customerId])
+  @@map("knowledge_entries")
 }

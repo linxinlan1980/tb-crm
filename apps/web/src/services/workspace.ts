@@ -17,6 +17,8 @@ export interface Resource {
   canCreate: boolean;
   canEdit: boolean;
   readonly?: boolean;
+  sortFields?:{key:string;label:string}[];
+  defaultSort?:{sortBy:string;sortOrder:'asc'|'desc'};
 }
 export const get = <T>(path: string, params?: Record<string, unknown>) => request.get<never, T>(path, { params });
 export const post = <T>(path: string, data: unknown) => request.post<never, T>(path, data);
@@ -36,6 +38,9 @@ export const statusNames: Record<string, string> = {
   ai_fde: 'AI场景交付',
   saas_sub: 'SaaS订阅',
   channel: '渠道合同',
+  other: '其他 / 待分类',
+  direct: '普通直客',
+  sales_channel: '销售渠道客户',
   website: '官网',
   referral: '转介绍',
   exhibition: '展会',

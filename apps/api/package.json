@@ -1,6 +1,6 @@
 {
   "name": "@partneros/api",
-  "version": "0.2.0-demo.2",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "nest start --watch",

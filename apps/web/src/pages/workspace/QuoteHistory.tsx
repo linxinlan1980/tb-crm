@@ -1,4 +1,5 @@
-import { Table } from 'antd';
+import Table from '../../components/BusinessTable';
+import {} from 'antd';
 import { money, type RecordRow } from '../../services/workspace';
 export function QuoteLines({ items }: { items: unknown }) {
   const rows = Array.isArray(items)
@@ -27,8 +28,18 @@ export default function QuoteHistory({ versions }: { versions: RecordRow[] }) {
       pagination={false}
       columns={[
         { title: '版本', dataIndex: 'version' },
-        { title: '含税合计', dataIndex: 'total', render: money },
-        { title: '报价时间', dataIndex: 'createdAt', render: (v) => new Date(v).toLocaleString() },
+        { title: '报价合计（税口径见原件）', dataIndex: 'total', render: money },
+        {
+          title: '资料报价日期',
+          render: (_, r: RecordRow) => {
+            const line = Array.isArray(r.items) ? r.items[0] : null;
+            const meta = line && typeof line === 'object' ? (line as RecordRow).salesIntake : null;
+            return meta && typeof meta === 'object'
+              ? String((meta as RecordRow).sourceDate ?? '待核实')
+              : new Date(String(r.createdAt)).toLocaleString();
+          },
+        },
+        { title: '归档时间', dataIndex: 'createdAt', render: (v) => new Date(v).toLocaleString() },
       ]}
       expandable={{ expandedRowRender: (r) => <QuoteLines items={r.items} /> }}
     />

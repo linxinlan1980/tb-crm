@@ -1,3 +1,4 @@
+import { roleAuthority } from '../../../common/types/role-authority';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
@@ -59,7 +60,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
     if (!session) throw new UnauthorizedException({ code: 1005, message: '会话已撤销或过期，请重新登录' });
     const roles = user.roles.map((entry) => entry.role);
-    const scopes = ['all', 'dept', 'team', 'custom', 'self'] as const;
+
     return {
       userId: user.id,
       tenantId: user.tenantId,
@@ -67,17 +68,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       name: user.name,
       sessionId: session.id,
       deptId: user.deptId,
-      roles: roles.map((role) => role.code),
-      permissions: [
-        ...new Set(
-          roles.flatMap((role) =>
-            Array.isArray(role.permissions)
-              ? role.permissions.filter((permission): permission is string => typeof permission === 'string')
-              : [],
-          ),
-        ),
-      ],
-      dataScope: scopes.find((scope) => roles.some((role) => role.dataScope === scope)) ?? 'self',
+      ...roleAuthority(roles),
     };
   }
 }

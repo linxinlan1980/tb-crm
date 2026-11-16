@@ -1,3 +1,4 @@
+import { roleAuthority } from '../../common/types/role-authority';
 import {
   BadRequestException,
   ConflictException,
@@ -13,11 +14,12 @@ import { Prisma, type AgentGrant } from '@prisma/client';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service';
 import type { Actor } from '../../common/types/actor';
-import { admin, hasPermission } from '../workspace/access';
+import { admin } from '../workspace/access';
 import { checkVersion, json, runCommand, text, type Tx } from '../workspace/command-runner';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { CapabilityService } from './capability.service';
 import { contextHash, digest, grantInput, invocation, only, tokenHash, uuid } from './agent-policy';
+import { ReportCapabilityService } from './report-capability.service';
 import { agentCatalog } from './agent.catalog';
 
 const grantSelect = {
@@ -43,6 +45,7 @@ export class AgentService {
     private readonly config: ConfigService,
     private readonly workspace: WorkspaceService,
     private readonly capabilities: CapabilityService,
+    private readonly reports: ReportCapabilityService,
   ) {}
   private hash(token: string) {
     return tokenHash(token, this.config.getOrThrow<string>('app.jwt.secret'));
@@ -75,17 +78,7 @@ export class AgentService {
       tenantId: user.tenantId,
       sessionId: session.id,
       deptId: user.deptId,
-      roles: roles.map((r) => r.code),
-      permissions: [
-        ...new Set(
-          roles.flatMap((r) =>
-            Array.isArray(r.permissions) ? r.permissions.filter((p): p is string => typeof p === 'string') : [],
-          ),
-        ),
-      ],
-      dataScope:
-        (['all', 'dept', 'team', 'custom', 'self'] as const).find((s) => roles.some((r) => r.dataScope === s)) ??
-        'self',
+      ...roleAuthority(roles),
     };
     if (contextHash(actor) !== grant.contextHash) throw new UnauthorizedException('委托人的权限已变化，请重新授权');
     return actor;
@@ -154,13 +147,7 @@ export class AgentService {
     const input = grantInput(body),
       grantId = randomUUID(),
       token = 'tbcrm_agent_' + randomBytes(32).toString('base64url');
-    const allowed = this.capabilities.list(a).map((c) => c.id);
-    if (
-      hasPermission(a, 'action:create') &&
-      hasPermission(a, 'customer:read') &&
-      (admin(a) || a.roles.includes('sales_manager') || a.roles.includes('sales'))
-    )
-      allowed.push('action.propose', 'action.execute');
+    const allowed = agentCatalog(a).tools.map(c => c.id);
     if (input.capabilities.some((c) => !allowed.includes(c))) throw new ForbiddenException('不能委托本人没有的能力');
     const result = await runCommand(this.prisma, a, 'agent.grant.issue', body, async (tx) => {
       if (!a.sessionId) throw new ForbiddenException('需要有效人工会话');
@@ -371,7 +358,8 @@ export class AgentService {
       });
     });
     try {
-      const result = await this.capabilities.invoke(initial.actor, call.capabilityId, call.input, {
+      const reader = call.capabilityId.startsWith('report.') ? this.reports : this.capabilities;
+      const result = await reader.invoke(initial.actor, call.capabilityId, call.input, {
         grantId: initial.grant.id,
         agentExecutionId: executionId,
       });

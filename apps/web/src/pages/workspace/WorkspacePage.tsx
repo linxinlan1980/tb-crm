@@ -1,3 +1,9 @@
+import Table from '../../components/BusinessTable';
+import StatisticsPeople, { statisticsPeopleFromParams } from '../../components/StatisticsPeople';
+import type { SpreadsheetCell } from '../../utils/xlsx';
+import { csvCell } from '../../utils/csv';
+import { useSearchParams } from 'react-router-dom';
+import StatisticsPeriod, { defaultStatisticsRange } from '../../components/StatisticsPeriod';
 import { useEffect, useState, useRef } from 'react';
 import {
   Alert,
@@ -12,7 +18,6 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Tag,
   Tabs,
   Typography,
@@ -22,6 +27,9 @@ import { PlusOutlined, ReloadOutlined, ExportOutlined } from '@ant-design/icons'
 import ContractChanges from './ContractChanges';
 import AttachmentPanel from './AttachmentPanel';
 import QuoteHistory, { QuoteLines } from './QuoteHistory';
+import TradeClassificationPanel from './TradeClassificationPanel';
+import OpportunityFollowup from './OpportunityFollowup';
+import BusinessSort, { type BusinessSortValue } from '../../components/BusinessSort';
 import {
   get,
   post,
@@ -41,10 +49,15 @@ interface ListResult {
 }
 const labels: Record<string, string> = {
   id: '编号',
+  itemName:'服务/产品',unitPrice:'单价',manDays:'人天',
   acceptanceState: '验收状态',
   actualHours: '累计实际工时',
   milestoneId: '关联里程碑',
   name: '名称',
+  shortName: '客户简称',
+  creditCode: '统一社会信用代码',
+  companyPhone: '企业联系电话',
+  legalPerson: '法定代表人',
   code: '编码',
   companyName: '企业名称',
   content: '内容',
@@ -54,10 +67,13 @@ const labels: Record<string, string> = {
   level: '级别',
   status: '状态',
   poolType: '客户池',
+  customerCategory: '客户标记',
+  channelBrand: '销售渠道',
   stage: '阶段',
   amount: '金额',
   totalAmountInclTax: '价税合计',
   contractNo: '合同编号',
+  signingCompany: '我方签约主体',
   orderNo: '订单编号',
   projectNo: '项目编号',
   planNo: '回款编号',
@@ -65,12 +81,19 @@ const labels: Record<string, string> = {
   receiptNo: '收款编号',
   receivedAmount: '已收金额',
   outstandingAmount: '未收金额',
-  dueDate: '到期日',
+  totalReceived: '合同已收款',
+  totalOutstanding: '合同待收款',
+  totalInvoiced: '已开票金额',
+  triggerCondition: '阶段 / 触发条件',
+  dueDate: '计划日期',
   orderDate: '订单日期',
   invoiceDate: '开票日期',
   receiptDate: '收款日期',
   budgetAmount: '项目预算',
   createdAt: '创建时间',
+  activityAt: '历史发生时间',
+  amountStatus: '金额说明',
+  linkedContract: '关联合同',
   updatedAt: '更新时间',
   ownerId: '负责人编号',
   ownerName: '负责人',
@@ -100,6 +123,8 @@ const labels: Record<string, string> = {
   estimatedPrice: '报价单价',
   estimatedAmount: '报价金额',
   listPrice: '目录单价',
+  pricingStatus:'定价状态',
+  specification:'规格与报价依据',
   category: '分类',
   unit: '单位',
   description: '说明',
@@ -113,6 +138,9 @@ const stages: Record<string, string> = {
   intention: '意向',
   contact: '初步接触',
   requirement: '需求确认',
+  blueprint: '方案设计',
+  development: '实施协作',
+  testing: '测试验证',
   proposal: '方案报价',
   negotiation: '商务谈判',
   signing: '签约',
@@ -122,8 +150,8 @@ const stages: Record<string, string> = {
 };
 const display = (name: string, v: unknown) =>
   v === null || v === undefined ? (
-    '—'
-  ) : name === 'status' || name === 'poolType' || name === 'acceptanceState' ? (
+    name==='listPrice'?'按范围核价':'—'
+  ) : name === 'status' || name === 'poolType' || name === 'acceptanceState' || name === 'customerCategory' || name === 'channelBrand' ? (
     <Tag
       color={
         ['approved', 'signed', 'completed', 'won', 'delivered'].includes(String(v))
@@ -135,8 +163,8 @@ const display = (name: string, v: unknown) =>
     >
       {statusNames[String(v)] ?? String(v)}
     </Tag>
-  ) : name === 'source' || name === 'contractType' || name === 'category' ? (
-    (statusNames[String(v)] ?? String(v))
+  ) : name === 'source' || name === 'contractType' || name === 'category' || name === 'pricingStatus' ? (
+    (({fixed:'固定目录价',quote_required:'按范围核价'} as Record<string,string>)[String(v)] ?? statusNames[String(v)] ?? String(v))
   ) : name === 'stage' ? (
     (stages[String(v)] ?? String(v))
   ) : name.toLowerCase().includes('amount') || name === 'listPrice' || name === 'estimatedPrice' ? (
@@ -149,11 +177,22 @@ const display = (name: string, v: unknown) =>
     String(v)
   );
 export default function WorkspacePage({ kind, poolType }: { kind: string; poolType?: string }) {
+  const [params]=useSearchParams();
+  const pageLabels:Record<string,string>={...labels,dueDate:kind==='payment-plans'?'预计收款日':'计划完成日'};
+  const [sorting,setSorting]=useState<BusinessSortValue>(()=>({sortBy:kind==='actions'?'dueDate':'createdAt',sortOrder:kind==='actions'?'asc':'desc'}));
+  const [people, setPeople] = useState(() => statisticsPeopleFromParams(params));
+  const [personActive, setPersonActive] = useState(() => params.has('personRange'));
+  const [dateActive,setDateActive]=useState(()=>!!params.get('from'));
+  const [period,setPeriod]=useState(()=>({from:params.get('from')??defaultStatisticsRange().from,to:params.get('to')??defaultStatisticsRange().to}));
+  const defaultDateFields:Record<string,string>={contracts:'signDate',opportunities:'expectedCloseDate','payment-plans':'dueDate',invoices:'invoiceDate',receipts:'receiptDate',actions:'dueDate',tasks:'dueDate'};
+  const [dateField,setDateField]=useState(defaultDateFields[kind]??'createdAt');
+  const [customerCategory, setCustomerCategory] = useState<string>();
+  const [channelBrand, setChannelBrand] = useState<string>();
   const [spec, setSpec] = useState<Resource>(),
     [rows, setRows] = useState<RecordRow[]>([]),
     [total, setTotal] = useState(0),
     [page, setPage] = useState(1),
-    [query, setQuery] = useState(''),
+    [query, setQuery] = useState(params.get('keyword')??''),
     [loading, setLoading] = useState(false),
     [error, setError] = useState('');
   const [detail, setDetail] = useState<RecordRow>(),
@@ -187,7 +226,10 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
       current = false;
     };
   }, [kind, selectedProject]);
+  const listRevision = useRef(0);
   const load = async () => {
+    const revision = ++listRevision.current;
+    setRows([]); setTotal(0);
     setLoading(true);
     setError('');
     try {
@@ -197,27 +239,35 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           page,
           pageSize: 20,
           keyword: query,
+          ...sorting,
           ...(poolType ? { poolType } : {}),
+          ...(kind === 'customers' ? { customerCategory, channelBrand } : {}),
+          ...(personActive && kind !== 'products' ? people : {}),
+          ...(dateActive?{...period,dateField}:{}),
         }),
       ]);
+      if (revision !== listRevision.current) return;
       setSpec(specs.find((s) => s.key === kind));
       setRows(res.items);
       setTotal(res.meta.total);
     } catch (e) {
-      setError(errorText(e));
+      if (revision === listRevision.current) setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (revision === listRevision.current) setLoading(false);
     }
   };
   useEffect(() => {
     setDetail(undefined);
     setEditing(undefined);
     setPage(1);
-    setQuery('');
+    setQuery(params.get('keyword')??'');
+    setSorting({sortBy:kind==='actions'?'dueDate':'createdAt',sortOrder:kind==='actions'?'asc':'desc'});
   }, [kind, poolType]);
+  useEffect(()=>{const selected=params.get('id');if(selected&&/^[1-9]\d*$/.test(selected))void get<RecordRow>(`/workspace/${kind}/${selected}`).then(setDetail).catch(e=>message.error(errorText(e)));},[kind,params.get('id')]);
   useEffect(() => {
     void load();
-  }, [kind, poolType, page, query]);
+    return () => {listRevision.current++;};
+  }, [kind, poolType, page, query, customerCategory, channelBrand,personActive,people.personRange,people.ownerId,people.deptId,dateActive,dateField,period.from,period.to,sorting.sortBy,sorting.sortOrder]);
   const openDetail = async (row: RecordRow) => {
     try {
       setDetail(await get<RecordRow>(`/workspace/${kind}/${row.id}`));
@@ -263,6 +313,45 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
         for (const f of spec.fields)
           if (!f.required && (data[f.key] === undefined || data[f.key] === '')) data[f.key] = null;
       setBusy(true);
+      if (kind === 'customers') {
+        const fields = Object.fromEntries(
+          ['name', 'shortName', 'creditCode', 'companyPhone', 'website', 'address', 'legalPerson']
+            .filter((k) => data[k] !== undefined)
+            .map((k) => [k, data[k]]),
+        );
+        const check = await post<{
+          hardDuplicate: boolean;
+          restrictedMatch: boolean;
+          matches: { id: number; name: string; reasons: string[] }[];
+        }>('/workspace/customers/duplicate-check', { ...fields, ...(editing ? { excludeId: editing.id } : {}) });
+        if (check.hardDuplicate) {
+          message.error('存在同名或相同统一社会信用代码的客户，请联系主管核对');
+          return;
+        }
+        if (check.matches.length || check.restrictedMatch) {
+          const proceed = await new Promise<boolean>((resolve) =>
+            Modal.confirm({
+              title: '发现可能重复的客户',
+              content: (
+                <div>
+                  {check.matches.map((r) => (
+                    <p key={r.id}>
+                      {r.name}：{r.reasons.join('、')}
+                    </p>
+                  ))}
+                  {check.restrictedMatch && <p>另有权限范围外的相似记录，请联系主管核对。</p>}
+                  <p>共享电话、网站或相近名称可能属于不同主体，请确认后再保存。</p>
+                </div>
+              ),
+              okText: '确认不同主体，继续保存',
+              cancelText: '返回核对',
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+            }),
+          );
+          if (!proceed) return;
+        }
+      }
       const body = { data, requestKey: editRequestKey.current, expectedUpdatedAt: editing?.updatedAt };
       if (editing) await put(`/workspace/${kind}/${editing.id}`, body);
       else await post(`/workspace/${kind}`, body);
@@ -307,8 +396,8 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     }
     if (action === 'assign')
       try {
-        const overview = await get<{ users: RecordRow[] }>('/workspace/overview');
-        setOptions({ users: overview.users });
+        const users = await get<RecordRow[]>(`/workspace/customers/${row.id}/assignment-people`);
+        setOptions({ users });
       } catch (e) {
         message.error(errorText(e));
       }
@@ -323,6 +412,10 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     if (!command) return;
     try {
       const fields = await actionForm.validateFields();
+      if (command.action === 'sign' && Array.isArray(fields.paymentSchedule))
+        fields.paymentSchedule = fields.paymentSchedule.map(
+          (p: { amount: unknown; dueDate: string; condition: string }) => ({ ...p, amount: String(p.amount) }),
+        );
       setBusy(true);
       const result = await post<RecordRow & { kind?: string }>(
         `/workspace/${kind}/${command.row.id}/${command.action}`,
@@ -340,18 +433,24 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
       setBusy(false);
     }
   };
-  const exportData = () => {
-    const columns = Object.keys(rows[0] ?? {}).filter((k) => labels[k]);
+  const exportData = async (format: 'xlsx' | 'csv' = 'xlsx') => {
+    const columns = Object.keys(rows[0] ?? {}).filter((k) => pageLabels[k]);
+    if (format === 'xlsx') {
+      try {
+        const numeric = new Set(['amount', 'totalAmount', 'receivedAmount', 'allocatedAmount', 'unallocatedAmount', 'price', 'unitPrice', 'quantity']);
+        const values: SpreadsheetCell[][] = rows.map(r => columns.map(k => {
+          const v = r[k];
+          if (numeric.has(k) && typeof v === 'string' && /^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(v)) return { decimal: v };
+          return typeof v === 'number' || typeof v === 'boolean' ? v : v == null ? '' : String(v);
+        }));
+        await (await import('../../utils/xlsx')).downloadSpreadsheet(`${kind}-当前页`, columns.map(k => pageLabels[k]), values);
+      } catch (e) { message.error(errorText(e)); }
+      return;
+    }
     const csv =
       '\uFEFF' +
-      [columns.map((k) => labels[k]), ...rows.map((r) => columns.map((k) => String(r[k] ?? '')))]
-        .map((line) =>
-          line
-            .map(
-              (c) => '"' + (/^[\s]*[=+\-@]/.test(c) || /^[\t\r\n]/.test(c) ? "'" : '') + c.split('"').join('""') + '"',
-            )
-            .join(','),
-        )
+      [columns.map((k) => pageLabels[k]), ...rows.map((r) => columns.map((k) => String(r[k] ?? '')))]
+        .map((line) => line.map(csvCell).join(','))
         .join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
@@ -362,7 +461,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
   };
   const availableActions = (row: RecordRow) =>
     spec?.actions.filter((a) => {
-      if (a === 'follow') return false;
+      if (a === 'follow') return false; // The opportunity drawer owns the contextual followup form.
       if (kind === 'customers')
         return row.poolType === 'public' ? a === 'claim' || a === 'assign' : a === 'return' || a === 'assign';
       if (kind === 'leads') return row.status !== 'converted';
@@ -400,17 +499,17 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     }) ?? [];
   const primary = spec?.name ?? 'name';
   const extras: Record<string, string[]> = {
-    customers: ['industry', 'poolType', 'ownerName'],
+    customers: ['customerCategory', 'channelBrand', 'industry', 'poolType', 'ownerName'],
     contacts: ['customerName', 'title', 'phone', 'email'],
     leads: ['contactName', 'source', 'status', 'assigneeName'],
     opportunities: ['stage', 'amount', 'ownerName'],
-    contracts: ['customerName', 'status', 'amount', 'ownerName'],
+    contracts: ['customerName', 'signingCompany', 'status', 'amount', 'totalReceived', 'totalInvoiced', 'totalOutstanding', 'ownerName'],
     orders: ['customerName', 'status', 'totalAmountInclTax', 'orderDate'],
     projects: ['status', 'progress', 'acceptanceState', 'plannedEndDate'],
     tasks: ['status', 'assigneeName', 'dueDate'],
     actions: ['status', 'assigneeName', 'dueDate'],
-    followups: ['customerName', 'nextAction', 'nextFollowAt'],
-    products: ['category', 'unit', 'listPrice', 'taxRate'],
+    followups: ['customerName', 'activityAt', 'nextAction', 'nextFollowAt'],
+    products: ['category', 'unit', 'pricingStatus', 'listPrice', 'taxRate'],
     'payment-plans': ['status', 'amount', 'receivedAmount', 'outstandingAmount', 'dueDate'],
     invoices: ['customerName', 'amount', 'invoiceDate', 'status'],
     receipts: ['customerName', 'amount', 'receiptDate', 'status'],
@@ -419,6 +518,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
   const columns = [
     {
       title: spec?.title ?? '名称',
+      width:240,
       dataIndex: primary,
       key: primary,
       render: (_: unknown, r: RecordRow) => (
@@ -427,7 +527,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
     },
     ...extra
       .filter((k) => k !== primary && rows.some((r) => k in r))
-      .map((k) => ({ title: labels[k] ?? k, dataIndex: k, key: k, render: (v: unknown) => display(k, v) })),
+      .map((k) => ({ title: pageLabels[k] ?? k, width:['customerName','signingCompany'].includes(k)?180:k==='nextAction'?320:/amount|price|totalReceived|totalInvoiced|totalOutstanding/i.test(k)?160:120, dataIndex: k, key: k, render: (v: unknown) => display(k, v) })),
     {
       title: '操作',
       key: 'operations',
@@ -469,9 +569,11 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           </Typography.Text>
         </div>
         <Space>
-          <Button icon={<ExportOutlined />} disabled={!rows.length} onClick={exportData}>
-            导出当前页
+          {kind==='products' && spec?.canCreate && <Button href='/business-knowledge'>查看版本报价与产品知识</Button>}
+          <Button icon={<ExportOutlined />} disabled={!rows.length} onClick={() => void exportData()}>
+            导出 Excel
           </Button>
+          <Button disabled={!rows.length} onClick={() => void exportData('csv')}>导出 CSV</Button>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>
             刷新
           </Button>
@@ -487,7 +589,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           style={{ marginBottom: 16 }}
           type="warning"
           showIcon
-          message={kind === 'invoices' ? '演示系统，暂无税务开票功能' : '当前页面为只读查询'}
+          message={kind === 'invoices' ? '税务开票服务尚未开通' : '当前页面为只读查询'}
           description="本页不执行业务处理；独立收款台账支持登记及核销，银行、税务与会计接口仍未开放。"
           action={<Button href="/finance/ledger">收款登记与核销</Button>}
         />
@@ -502,6 +604,21 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
         />
       )}
       <Card>
+        <Space wrap style={{marginBottom:12}}>
+          {kind !== 'products' && <Button onClick={() => {setPersonActive(v=>!v);setPage(1);}}>{personActive ? '人员筛选已启用' : '启用人员筛选'}</Button>}
+          <Button type={dateActive?'primary':'default'} onClick={()=>{setDateActive(v=>!v);setPage(1);}}>{dateActive?'日期筛选已启用':'启用日期筛选'}</Button>
+          {dateActive&&<Select aria-label="日期筛选依据" style={{width:180}} value={dateField} options={[...new Set(kind==='contracts'?['signDate','createdAt','startDate','endDate']:[defaultDateFields[kind]??'createdAt','createdAt'])].map(v=>({value:v,label:({signDate:'签约日期',createdAt:'建档日期',startDate:'服务开始日期',endDate:'服务结束日期',expectedCloseDate:'预计成交日期',dueDate:kind==='payment-plans'?'预计收款日':'计划完成日',invoiceDate:'开票日期',receiptDate:'到账日期'}as Record<string,string>)[v]}))} onChange={v=>{setDateField(v);setPage(1);}}/>}
+        </Space>
+        {personActive && kind !== 'products' && <StatisticsPeople value={people} onChange={v => {setPeople(v);setPage(1);}}/>}
+        {dateActive&&<StatisticsPeriod value={period} onChange={v=>{setPeriod(v);setPage(1);}}/>}
+        {spec?.sortFields&&<div><BusinessSort value={sorting} fields={spec.sortFields} onChange={v=>{setSorting(v);setPage(1);}}/></div>}
+        {kind === 'customers' && <Space wrap style={{ marginBottom: 16 }}>
+          <Select aria-label="客户标记筛选" allowClear placeholder="全部客户标记" style={{ width: 180 }} value={customerCategory}
+            options={[{ value: 'direct', label: '普通直客' }, { value: 'sales_channel', label: '销售渠道客户' }]}
+            onChange={v => { setCustomerCategory(v); setPage(1); }} />
+          <Select aria-label="销售渠道筛选" allowClear placeholder="全部销售渠道" style={{ width: 180 }} value={channelBrand}
+            options={['钉钉','用友','阿里','其他'].map(v => ({ value: v, label: v }))} onChange={v => { setChannelBrand(v); setPage(1); }} />
+        </Space>}
         <Input.Search
           style={{ width: 320, marginBottom: 20 }}
           placeholder={`搜索${spec?.title ?? ''}`}
@@ -512,13 +629,15 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
           }}
         />
         <Table
+          serverSorted
           rowKey="id"
           loading={loading}
           dataSource={rows}
-          columns={columns}
-          scroll={{ x: 900 }}
+          columns={columns.map(c=>c.dataIndex&&spec?.sortFields?.some(f=>f.key===c.dataIndex)?{...c,sorter:true,sortOrder:sorting.sortBy===c.dataIndex?(sorting.sortOrder==='asc'?'ascend' as const:'descend' as const):null}:c)}
+          onChange={(_pagination,_filters,sorter)=>{if(!Array.isArray(sorter)&&sorter.order&&typeof sorter.field==='string'){setSorting({sortBy:sorter.field,sortOrder:sorter.order==='ascend'?'asc':'desc'});setPage(1);}}}
+          scroll={{ x: Math.max(900,columns.reduce((n,c)=>n+(typeof c.width==='number'?c.width:120),0)) }}
           pagination={{ current: page, pageSize: 20, total, onChange: setPage, showTotal: (n) => `共 ${n} 条` }}
-          locale={{ emptyText: <Empty description="暂无数据，可新建或初始化演示数据" /> }}
+          locale={{ emptyText: <Empty description="暂无业务数据" /> }}
         />
       </Card>
       <Drawer width={760} title={`${spec?.title}详情`} open={!!detail} onClose={() => setDetail(undefined)}>
@@ -530,7 +649,7 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
               size="small"
               items={Object.entries(detail)
                 .filter(([k, v]) => k in labels && v !== null)
-                .map(([k, v]) => ({ key: k, label: labels[k], children: display(k, v) }))}
+                .map(([k, v]) => ({ key: k, label: pageLabels[k], children: display(k, v) }))}
             />
             {['projects', 'tasks'].includes(kind) && (
               <AttachmentPanel
@@ -553,9 +672,13 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                 <QuoteLines items={(detail.quoteSnapshot as Record<string, unknown>).items} />
               </Card>
             )}
+            {['contracts','opportunities'].includes(kind)&&<TradeClassificationPanel kind={kind} id={detail.id} version={detail.updatedAt} onChanged={()=>{void openDetail(detail);void load();}}/>}
             {detail.related && typeof detail.related === 'object' && (
+              <>
+              {kind==='opportunities'&&<Space style={{marginTop:20}}><OpportunityFollowup row={detail} onChanged={()=>{void openDetail(detail);void load();}}/></Space>}
               <Tabs
                 style={{ marginTop: 24 }}
+                defaultActiveKey={Object.keys(detail.related).includes(params.get('tab')??'')?params.get('tab')!:undefined}
                 items={Object.entries(detail.related).map(([name, values]) => ({
                   key: name,
                   label:
@@ -566,14 +689,18 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                         contracts: '合同',
                         projects: '项目',
                         followups: '跟进',
+                        actions: '行动计划',
                         orders: '订单',
                         'payment-plans': '回款计划',
+                        invoices: '开票记录',
+                        receipts: '回款单',
                         tasks: '任务',
                         milestones: '里程碑',
                         deliveryEvents: '交付与验收记录',
                         quote: '报价明细',
                         quoteVersions: '报价历史版本',
                         changes: '合同变更记录',
+                        items:'合同明细',linkedContract:'关联合同',
                       } as Record<string, string>
                     )[name] ?? name,
                   children:
@@ -615,6 +742,12 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                           },
                         ]}
                       />
+                    ) : name==='followups' ? (
+                      <Table<RecordRow> rowKey="id" size="small" title={()=>'最多显示最近30条关联记录；完整历史见跟进记录列表'} pagination={{pageSize:5}} dataSource={(values as RecordRow[]).map(r=>{const source=(r.aiStructured&&typeof r.aiStructured==='object'?(r.aiStructured as Record<string,unknown>).salesIntake:undefined) as Record<string,unknown>|undefined;return {...r,activityAt:source?source.occurredAt:r.createdAt};})} scroll={{x:650}} columns={[
+                        {title:'跟进时间',dataIndex:'activityAt',defaultSortOrder:'descend',width:145,render:(_,r)=>{const source=(r.aiStructured&&typeof r.aiStructured==='object'?(r.aiStructured as Record<string,unknown>).salesIntake:undefined) as Record<string,unknown>|undefined;const time=source?source.occurredAt:r.createdAt;return <>{time?String(time).slice(0,10):'原始日期待核'}{source?.dateEstimated===true&&<Tag>估算日期</Tag>}</>;}},
+                        {title:'内容与结果',dataIndex:'content',render:(_,r)=><><div style={{whiteSpace:'pre-wrap'}}>{String(r.content??'')}</div>{r.result?<Tag>{String(r.result)}</Tag>:null}</>},
+                        {title:'下一步',dataIndex:'nextAction',width:220,render:(_,r)=><>{String(r.nextAction??'—')}<div>{r.nextFollowAt?String(r.nextFollowAt).slice(0,10):''}</div></>},
+                      ]}/>
                     ) : name === 'quoteVersions' ? (
                       <QuoteHistory versions={values as RecordRow[]} />
                     ) : (
@@ -625,13 +758,14 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
                         pagination={false}
                         scroll={{ x: 500 }}
                         columns={Object.keys((values as RecordRow[])[0] ?? {})
-                          .filter((k) => labels[k] || k === 'name')
+                          .filter((k) => pageLabels[k] || k === 'name')
                           .slice(0, 7)
-                          .map((k) => ({ title: labels[k] ?? k, dataIndex: k, render: (v: unknown) => display(k, v) }))}
+                          .map((k) => ({ title: pageLabels[k] ?? k, dataIndex: k, render: (v: unknown) => display(k, v) }))}
                       />
                     ),
                 }))}
               />
+              </>
             )}
           </>
         )}
@@ -695,6 +829,54 @@ export default function WorkspacePage({ kind, poolType }: { kind: string; poolTy
       >
         <Typography.Paragraph>对象：{String(command?.row[primary] ?? '')}。此操作会保存业务变更。</Typography.Paragraph>
         <Form form={actionForm} layout="vertical">
+          {kind === 'contracts' && command?.action === 'sign' && (
+            <>
+              <Alert
+                type="info"
+                showIcon
+                message={`合同金额 ${String(command.row.amount)}。请按实际付款条款填写各期金额、约定收款日期和条件；合计须等于合同金额。`}
+                style={{ marginBottom: 16 }}
+              />
+              <Form.List name="paymentSchedule" initialValue={[{}]}>
+                {(fields, { add, remove }) => (
+                  <>
+                    {fields.map((field, index) => (
+                      <Card
+                        key={field.key}
+                        size="small"
+                        title={`第${index + 1}期`}
+                        extra={
+                          fields.length > 1 ? (
+                            <Button type="link" onClick={() => remove(field.name)}>
+                              删除
+                            </Button>
+                          ) : null
+                        }
+                        style={{ marginBottom: 12 }}
+                      >
+                        <Form.Item name={[field.name, 'amount']} label="本期金额" rules={[{ required: true }]}>
+                          <InputNumber stringMode min="0.01" precision={2} style={{ width: '100%' }} />
+                        </Form.Item>
+                        <Form.Item name={[field.name, 'dueDate']} label="约定收款日期" rules={[{ required: true }]}>
+                          <Input type="date" />
+                        </Form.Item>
+                        <Form.Item
+                          name={[field.name, 'condition']}
+                          label="付款条件"
+                          rules={[{ required: true, whitespace: true }]}
+                        >
+                          <Input maxLength={200} placeholder="按合同填写，例如签约首款或验收尾款" />
+                        </Form.Item>
+                      </Card>
+                    ))}
+                    <Button onClick={() => add()} disabled={fields.length >= 24} block>
+                      追加一期
+                    </Button>
+                  </>
+                )}
+              </Form.List>
+            </>
+          )}
           {command?.action === 'submit' && approvalForm && (
             <>
               <Alert

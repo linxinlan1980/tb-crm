@@ -29,6 +29,13 @@ export class ApprovalController {
   ) {
     return this.service.publish(a, flowId, b);
   }
+  @Post('flows/:id/deactivate') @Permissions('approval:design') deactivate(
+    @CurrentUser() a: Actor,
+    @Param('id', ParseIntPipe) flowId: number,
+    @Body() b: Record<string, unknown>,
+  ) {
+    return this.service.deactivateFlow(a, flowId, b);
+  }
   @Post('flows/:id/preview') preview(
     @CurrentUser() a: Actor,
     @Param('id', ParseIntPipe) flowId: number,

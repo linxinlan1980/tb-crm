@@ -9,10 +9,10 @@ const node = {
   additionalProperties: false,
   properties: {
     name: { type: 'string', maxLength: 50 },
-    approverType: { enum: ['user', 'users_all', 'role', 'dept_leader'] },
+    approverType: { enum: ['user', 'users_all', 'users_any', 'role', 'dept_leader'] },
     approverValue: {
       type: 'string',
-      description: 'users_all:2..8 distinct user IDs separated by commas; every member must approve',
+      description: 'users_all:2..8 distinct user IDs separated by commas; every member must approve; users_any:2..8 distinct user IDs, any eligible non-applicant member may approve',
     },
     condition: { type: 'string', description: 'always or anchored amount comparison' },
   },
@@ -80,6 +80,10 @@ const keyed = (properties: Record<string, unknown>, required: string[] = []) => 
 });
 const writeGuards = ['authenticated tenant/actor', 'Serializable transaction', 'durable idempotency', 'audit'];
 export const APPROVAL_OPERATIONS: readonly Operation[] = [
+  definition('approval.request','write','POST','/api/v1/capabilities/approval.request/invoke','authenticated',
+    {type:'object',additionalProperties:false,required:['kind','requestKey'],properties:{kind:{enum:['form','contracts','orders','projects']},requestKey,recordId:integer,expectedUpdatedAt:{type:'string',format:'date-time'},flowId:integer,title:{type:'string'},amount:{type:'string'},form:{type:'object'}}},objectResult,
+    [...writeGuards,'human session only; delegated agent grants do not acquire this capability','strict discriminated input schema','same generic ApprovalService or guarded WorkspaceService submit as web','business document current owner scope, state and expectedUpdatedAt','no approvals, role changes or historical catch-up']),
+
   definition(
     'approval.history',
     'read',
@@ -210,6 +214,23 @@ export const APPROVAL_OPERATIONS: readonly Operation[] = [
     keyed({ expectedUpdatedAt: { type: 'string', format: 'date-time' } }, ['expectedUpdatedAt']),
     objectResult,
     [...writeGuards, 'tenant flow', 'expectedUpdatedAt', 'non-empty nodes'],
+    'super_admin',
+  ),
+  definition(
+    'approval.flow.deactivate',
+    'write',
+    'POST',
+    '/api/v1/approvals/flows/{flowId}/deactivate',
+    'approval:design',
+    keyed({ expectedUpdatedAt: { type: 'string', format: 'date-time' } }, ['expectedUpdatedAt']),
+    objectResult,
+    [
+      ...writeGuards,
+      'tenant flow',
+      'expectedUpdatedAt',
+      'active flow only',
+      'existing instance snapshots continue unchanged',
+    ],
     'super_admin',
   ),
   definition(

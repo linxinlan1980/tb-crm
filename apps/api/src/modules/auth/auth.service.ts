@@ -1,3 +1,4 @@
+import { roleAuthority } from '../../common/types/role-authority';
 import {
   Injectable,
   UnauthorizedException,
@@ -52,16 +53,19 @@ export class AuthService {
   }
   async login(dto: LoginDto) {
     const tenantCode = dto.tenantCode ?? 'TINGMENG';
-    const key = digest(tenantCode.toLowerCase() + ':' + dto.username.toLowerCase());
+    const identifier = dto.username.trim();
+    const matches = await this.prisma.system.user.findMany({
+      where: { deletedAt: null, tenant: { code: tenantCode }, OR: [
+        { username: identifier }, { employeeNo: identifier }, { phone: identifier },
+      ] }, include, take: 2,
+    });
+    // Names are display-only. A duplicated phone or a cross-field collision cannot select an arbitrary person.
+    const user = matches.length === 1 ? matches[0] : null;
+    const key = digest(tenantCode.toLowerCase() + ':' + (user?.username ?? identifier).toLowerCase());
     const attempt = await this.prisma.system.authAttempt.findUnique({ where: { key } });
-    const now = new Date(),
-      windowMs = 15 * 60 * 1000;
+    const now = new Date(), windowMs = 15 * 60 * 1000;
     if (attempt && now.getTime() - attempt.windowStartedAt.getTime() < windowMs && attempt.failures >= 8)
       throw new HttpException('登录失败次数过多，请15分钟后重试', 429);
-    const user = await this.prisma.system.user.findFirst({
-      where: { username: dto.username, deletedAt: null, tenant: { code: tenantCode } },
-      include,
-    });
     const passwordValid = await bcrypt.compare(dto.password, user?.passwordHash || dummyHash);
     if (!user || !passwordValid) {
       await this.transaction(async (tx) => {
@@ -200,6 +204,7 @@ export class AuthService {
     });
     if (!user) throw new UnauthorizedException('用户不存在');
     const roles = user.roles.map((r) => r.role);
+    const authority = roleAuthority(roles);
     return {
       id: user.id,
       username: user.username,
@@ -208,14 +213,8 @@ export class AuthService {
       avatar: user.avatarUrl,
       dept: user.department ? { id: user.department.id, name: user.department.name } : null,
       roles: roles.map((r) => ({ id: r.id, code: r.code, name: r.name })),
-      permissions: [
-        ...new Set(
-          roles.flatMap((r) =>
-            Array.isArray(r.permissions) ? r.permissions.filter((p): p is string => typeof p === 'string') : [],
-          ),
-        ),
-      ],
-      dataScope: ['all', 'dept', 'team', 'custom', 'self'].find((s) => roles.some((r) => r.dataScope === s)) ?? 'self',
+      permissions: authority.permissions,
+      dataScope: authority.dataScope,
       updatedAt: user.updatedAt,
     };
   }
@@ -295,7 +294,8 @@ export class AuthService {
     });
   }
   private generateTokens(user: AuthUser, sid: string) {
-    const roles = user.roles.map((r) => r.role.code);
+    const authority = roleAuthority(user.roles.map((r) => r.role));
+    const roles = authority.roles;
     const payload = { sub: user.id, tid: user.tenantId, username: user.username, name: user.name, roles, sid };
     const accessToken = this.jwtService.sign(
       { ...payload, jti: randomUUID() },
@@ -317,6 +317,13 @@ export class AuthService {
         avatar: user.avatarUrl,
         dept: user.department ? { id: user.department.id, name: user.department.name } : null,
         roles,
+        permissions: authority.permissions,
+        dataScope: authority.dataScope,
+        company: {
+          code: user.tenant.code,
+          name: process.env.TENANT_NAME || user.tenant.name,
+          purpose: process.env.ACCOUNT_PURPOSE === 'test' ? 'test' : 'business',
+        },
       },
     };
   }

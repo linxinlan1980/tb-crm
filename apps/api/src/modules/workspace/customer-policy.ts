@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
 import { ConflictException, BadRequestException } from '@nestjs/common';
 import type { Tx } from './command-runner';
+import { creditCode } from './customer-matching';
 export const nameKey = (value: string) =>
   createHash('sha256').update(value.normalize('NFKC').replace(/\s+/gu, '').toLowerCase()).digest('hex');
 export async function customerNames(tx: Tx, tenantId: number) {
-  const rows = await tx.customer.findMany({ where: { tenantId }, select: { id: true, name: true } });
-  return rows.map((r) => ({ id: r.id, key: nameKey(r.name) }));
+  const rows = await tx.customer.findMany({ where: { tenantId }, select: { id: true, name: true, creditCode: true } });
+  return rows.map((r) => ({
+    id: r.id,
+    key: nameKey(r.name),
+    creditCode: r.creditCode?.normalize('NFKC').replace(/\s/gu, '').toUpperCase() ?? null,
+  }));
 }
 export async function uniqueCustomer(tx: Tx, tenantId: number, name: string, except?: number) {
   // Covers legacy NULL fingerprints as well; no existing duplicate is silently merged.
@@ -22,6 +27,10 @@ export async function uniqueCustomer(tx: Tx, tenantId: number, name: string, exc
 }
 export const importColumns = {
   客户名称: ['name', 200],
+  客户简称: ['shortName', 100],
+  统一社会信用代码: ['creditCode', 40],
+  企业联系电话: ['companyPhone', 50],
+  法定代表人: ['legalPerson', 50],
   行业: ['industry', 50],
   级别: ['level', 20],
   地区: ['region', 50],
@@ -31,6 +40,10 @@ export const importColumns = {
 } as const;
 export type ImportData = {
   name: string;
+  shortName?: string;
+  creditCode?: string;
+  companyPhone?: string;
+  legalPerson?: string;
   industry?: string;
   level?: string;
   region?: string;
@@ -49,7 +62,7 @@ export function parseCsv(csv: string): string[][] {
     row.push(field);
     field = '';
     ended = false;
-    if (row.length > 7) throw new BadRequestException('CSV最多7列');
+    if (row.length > 11) throw new BadRequestException('CSV最多11列');
   };
   for (let i = 0; i < csv.length; i++) {
     const c = csv[i];
@@ -104,6 +117,13 @@ export function csvRecords(raw: string) {
       if (value) data[key] = value;
     }
     if (!data.name) error = '客户名称不能为空';
+    if (data.creditCode) {
+      try {
+        data.creditCode = creditCode(data.creditCode)!;
+      } catch {
+        error = '统一社会信用代码须为18位有效字母和数字';
+      }
+    }
     if (data.level && !['重点客户', '普通客户', '潜在客户'].includes(data.level))
       error = '级别需为重点客户、普通客户或潜在客户';
     return { row: index + 2, data: data as ImportData, error };

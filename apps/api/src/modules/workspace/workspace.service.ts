@@ -1,3 +1,4 @@
+import { permits, strings } from '../system/roles/access-policy';
 import {
   Injectable,
   BadRequestException,
@@ -12,6 +13,7 @@ import type { Actor } from '../../common/types/actor';
 import { ApprovalService } from '../approval/approval.service';
 import {
   admin,
+  companyWide,
   boss,
   manager,
   allowWrite,
@@ -23,8 +25,21 @@ import {
   requirePermission,
 } from './access';
 import { cleanInput, resource, resources } from './registry';
-import { uniqueCustomer } from './customer-policy';
+import { uniqueCustomerIdentity } from './customer-identity';
+import { creditCode, identityMatch, type IdentityInput } from './customer-matching';
+import { statisticsResourceFilter, statisticsOptions, statisticsScope, statisticsProperties } from './statistics-scope';
+import { businessDay, reportQuery } from './analytics-policy';
+import { businessPolicy, notifyOpportunity } from './business-policy';
 import { recalculateCustomerContracts } from './contract-change-policy';
+import {businessReport} from './business-report-policy';
+import {contractTrades} from './trade-store';
+import {ownTradeAmount} from './trade-policy';
+import { salesAmountProjection, salesIntakeMeta, salesForecastEligible } from './sales-intake-policy';
+import { followupTime } from './sales-activity-policy';
+import { opportunityFollowInput, opportunityFollowSchema } from './opportunity-follow-policy';
+import { pendingCustomerName } from './pending-customer';
+import { workspaceSortFields, defaultWorkspaceSort, workspaceOrderBy } from './workspace-sort';
+import { paymentSchedule, paymentScheduleSchema } from './payment-schedule';
 import { financeEventsForActor, hideReceiptCorrectionFields } from './finance-policy';
 import { deliveryPeople, handoverProjectManager } from './delivery-staff-policy';
 import {
@@ -37,7 +52,7 @@ import {
   taskProject,
   validateTaskMilestone,
 } from './delivery-policy';
-import { checkVersion, id, object, runCommand, text, json, type Tx, type Row } from './command-runner';
+import { checkVersion, id, object, runCommand, text, json, validateActor, type Tx, type Row } from './command-runner';
 
 // Runtime registry delegates are constrained to resource(), while payloads are validated by cleanInput().
 interface Delegate {
@@ -81,7 +96,12 @@ export class WorkspaceService {
           ? r.actions.filter(
               (action) =>
                 action !== 'follow' &&
-                (!['assign', 'accept', 'reject_acceptance', 'handover_pm'].includes(action) || admin(a) || manager(a)),
+                (!['assign', 'accept', 'reject_acceptance', 'handover_pm'].includes(action) ||
+                  admin(a) ||
+                  manager(a)) &&
+                (key !== 'customers' ||
+                  !['assign', 'claim', 'return'].includes(action) ||
+                  hasPermission(a, action === 'assign' ? 'customer:assign' : 'pool:' + action)),
             )
           : [];
         const properties = Object.fromEntries(
@@ -109,8 +129,81 @@ export class WorkspaceService {
           version: '1.0',
           canCreate,
           canEdit,
+          sortFields:workspaceSortFields(key), defaultSort:defaultWorkspaceSort(key),
           actions,
           operations: [
+            ...(key === 'customers' && canCreate
+              ? [
+                  {
+                    id: 'customers.duplicate.check',
+                    version: '1.0',
+                    effect: 'read',
+                    permission: 'customer:create or customer:update; current scope',
+                    route: 'POST /workspace/customers/duplicate-check',
+                    inputSchema: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        name: { type: 'string', maxLength: 200 },
+                        shortName: { type: 'string', maxLength: 100 },
+                        creditCode: { type: 'string' },
+                        companyPhone: { type: 'string', maxLength: 50 },
+                        website: { type: 'string', maxLength: 200 },
+                        address: { type: 'string', maxLength: 500 },
+                        legalPerson: { type: 'string', maxLength: 50 },
+                        excludeId: { type: 'integer', minimum: 1 },
+                      },
+                    },
+                    outputSchema: {
+                      type: 'object',
+                      required: ['hardDuplicate', 'matches', 'restrictedMatch'],
+                      properties: {
+                        hardDuplicate: { type: 'boolean' },
+                        restrictedMatch: { type: 'boolean' },
+                        matches: { type: 'array', maxItems: 20 },
+                      },
+                    },
+                    guards: [
+                      'live actor; tenant only',
+                      'excluded record must be visible',
+                      'protected matches reveal no identifiers, names or owners',
+                      '10000 row budget; no silent truncation',
+                    ],
+                    evidence: ['visible reason projection; hard duplicate enforcement repeated on writes'],
+                  },
+                ]
+              : []),
+            ...(key === 'customers' && (admin(a) || manager(a))
+              ? [
+                  {
+                    id: 'customers.assignment.people',
+                    version: '1.0',
+                    effect: 'read',
+                    permission: 'customer:update; admin or sales_manager',
+                    route: 'GET /workspace/customers/{recordId}/assignment-people',
+                    inputSchema: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['recordId'],
+                      properties: { recordId: { type: 'integer', minimum: 1 } },
+                    },
+                    outputSchema: {
+                      type: 'array',
+                      maxItems: 200,
+                      items: { type: 'object', required: ['id', 'name', 'deptId'] },
+                    },
+                    guards: [
+                      'live authenticated actor',
+                      'customer visibility',
+                      'active sales accounts; same department for manager',
+                      'bounded eligible recipient projection; no credentials',
+                    ],
+                    evidence: [
+                      'recipient id and department; assignment separately rechecks permissions and customer version',
+                    ],
+                  },
+                ]
+              : []),
             ...(['projects', 'tasks'].includes(key) && canEdit
               ? [
                   {
@@ -160,6 +253,12 @@ export class WorkspaceService {
                   page: { type: 'integer', minimum: 1 },
                   pageSize: { type: 'integer', minimum: 1, maximum: 100 },
                   keyword: { type: 'string', maxLength: 100 },
+                  sortBy:{enum:workspaceSortFields(key).map(f=>f.key)},sortOrder:{enum:['asc','desc']},
+                  ...statisticsProperties,
+                  from: { type:'string',format:'date',description:'Inclusive 2010..2060 business date; provide to together' },
+                  to: { type:'string',format:'date' },
+                  dateField:{type:'string',description:'Resource-specific server allowlisted date axis'},
+                  ...(key==='customers'?{customerCategory:{enum:['direct','sales_channel']},channelBrand:{enum:['钉钉','用友','阿里','其他']}}:{}),
                 },
               },
               outputSchema: { type: 'object', required: ['items', 'meta'] },
@@ -231,7 +330,8 @@ export class WorkspaceService {
               : []),
             ...actions.map((action) => ({
               id: `${key}.${action}`,
-              version: key === 'projects' || key === 'tasks' ? '2.0' : '1.0',
+              version:
+                key === 'projects' || key === 'tasks' || (key === 'contracts' && action === 'sign') ? '2.0' : '1.0',
               effect: 'write',
               permission: resourcePermission(key, 'update'),
               inputSchema: {
@@ -239,6 +339,8 @@ export class WorkspaceService {
                 required: [
                   'requestKey',
                   'expectedUpdatedAt',
+                  ...(key==='opportunities'&&action==='follow'?['followup']:[]),
+                  ...(key === 'contracts' && action === 'sign' ? ['paymentSchedule'] : []),
                   ...((key === 'projects' &&
                     ['advance', 'request_acceptance', 'reject_acceptance', 'accept', 'handover_pm'].includes(action)) ||
                   key === 'tasks'
@@ -249,6 +351,7 @@ export class WorkspaceService {
                 ],
                 properties: {
                   ...commandProperties,
+                  ...(key === 'contracts' && action === 'sign' ? { paymentSchedule: paymentScheduleSchema } : {}),
                   ...(action === 'submit'
                     ? {
                         form: {
@@ -262,6 +365,7 @@ export class WorkspaceService {
                     : {}),
                   ...(action === 'quote' ? { items: { type: 'array', minItems: 1, maxItems: 20 } } : {}),
                   ...(action === 'lose' ? { reason: { type: 'string', minLength: 1 } } : {}),
+                  ...(key==='opportunities'&&action==='follow'?{followup:opportunityFollowSchema.toJSONSchema()}:{}),
                   ...((key === 'projects' &&
                     ['advance', 'request_acceptance', 'reject_acceptance', 'accept', 'handover_pm'].includes(action)) ||
                   key === 'tasks'
@@ -276,12 +380,15 @@ export class WorkspaceService {
                 'record scope',
                 'expectedUpdatedAt',
                 'business state preconditions',
+                  ...(key==='opportunities'&&action==='follow'?['follow_up:create and visible customer','optional action:create with active opportunity owner','followup and optional action/calendar share one transaction','no external notifications']:[]),
                 ...(key === 'opportunities' && action === 'advance' ? ['next active stage only'] : []),
                 ...(key === 'opportunities' && action === 'lose'
                   ? ['open opportunity; closedAt and zero weightedAmount atomically']
                   : []),
                 ...(key === 'contracts' && action === 'sign'
-                  ? ['approved contract; linked opportunity must be open; atomic won closedAt/winDate']
+                  ? [
+                      'approved contract; linked opportunity must be open; atomic won closedAt/winDate; explicit installments sum to contract amount',
+                    ]
                   : []),
                 'serializable transaction',
                 'durable idempotency',
@@ -301,7 +408,7 @@ export class WorkspaceService {
       tenantId: a.tenantId,
       ...(model?.fields.some((f) => f.name === 'deletedAt') ? { deletedAt: null } : {}),
     };
-    if (admin(a) || boss(a) || kind === 'products') return base;
+    if (companyWide(a) || kind === 'products') return base;
     let visibility: Record<string, unknown>;
     if (kind === 'customers') visibility = await customerScope(tx, a);
     else if (['opportunities', 'contracts', 'orders'].includes(kind)) visibility = await ownerScope(tx, a);
@@ -339,7 +446,11 @@ export class WorkspaceService {
           },
         ],
       };
-    else if (kind === 'followups' || kind === 'receipts')
+    else if (kind === 'receipts') visibility = { OR: [
+      { contractId: { in: (await tx.contract.findMany({where:{tenantId:a.tenantId,deletedAt:null,...(await ownerScope(tx,a))},select:{id:true}})).map(c=>c.id) } },
+      { contractId: null, customerId: { in: (await tx.customer.findMany({ where: {tenantId:a.tenantId,deletedAt:null,...(await customerScope(tx,a,false))},select:{id:true} })).map(c=>c.id) } },
+    ] };
+    else if (kind === 'followups')
       visibility = {
         customerId: {
           in: (
@@ -354,7 +465,7 @@ export class WorkspaceService {
     else visibility = { contract: { tenantId: a.tenantId, deletedAt: null, ...(await ownerScope(tx, a)) } };
     return { ...base, AND: [visibility] };
   }
-  private async require(tx: Tx, a: Actor, kind: string, recordId: number) {
+  async require(tx: Tx, a: Actor, kind: string, recordId: number) {
     const row = await this.db(tx, kind).findFirst({ where: { ...(await this.scope(tx, a, kind)), id: recordId } });
     if (!row) throw new NotFoundException('记录不存在或无权访问');
     return row;
@@ -363,7 +474,7 @@ export class WorkspaceService {
     const p = await taskProject(tx, a, projectId);
     deliveryManager(a, p);
     if (
-      !admin(a) &&
+      !companyWide(a) &&
       p.pmId !== a.userId &&
       !(await tx.project.findFirst({
         where: {
@@ -385,7 +496,9 @@ export class WorkspaceService {
       pageSize = Number(query.pageSize ?? 20);
     if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100)
       throw new BadRequestException('分页参数无效');
-    const where = await this.scope(tx, a, kind);
+    const baseScope = await this.scope(tx, a, kind);
+    const filtered = query.personRange !== undefined ? await statisticsResourceFilter(tx, a, kind, await statisticsScope(tx, a, query)) : {};
+    const where: Record<string, unknown> = { AND: [baseScope, filtered] };
     if (query.keyword) where[r.name] = { contains: query.keyword.slice(0, 100) };
     if (query.status) {
       const model = Prisma.dmmf.datamodel.models.find((m) => m.name[0].toLowerCase() + m.name.slice(1) === r.model);
@@ -398,12 +511,29 @@ export class WorkspaceService {
       if (!['public', 'private', 'dept'].includes(query.poolType)) throw new BadRequestException('客户池无效');
       where.poolType = query.poolType;
     }
+    if (kind === 'customers' && query.ownerId && query.personRange===undefined) where.ownerId = id(Number(query.ownerId));
+    if (kind === 'customers' && query.customerCategory) {
+      if (!['direct','sales_channel'].includes(query.customerCategory)) throw new BadRequestException('客户标记无效');
+      where.customerCategory = query.customerCategory;
+    }
+    if (kind === 'customers' && query.channelBrand) {
+      if (!['钉钉','用友','阿里','其他'].includes(query.channelBrand)) throw new BadRequestException('渠道标记无效');
+      where.channelBrand = query.channelBrand;
+    }
+    if (query.from || query.to) {
+      const p=reportQuery({from:query.from,to:query.to});
+      const defaults: Record<string,string>={contracts:'signDate',opportunities:'expectedCloseDate','payment-plans':'dueDate',invoices:'invoiceDate',receipts:'receiptDate',actions:'dueDate',tasks:'dueDate'};
+      const field=query.dateField ?? defaults[kind] ?? 'createdAt';
+      const allowed=kind==='contracts'?['createdAt','signDate','startDate','endDate']:[defaults[kind]??'createdAt','createdAt'];
+      if(!allowed.includes(field))throw new BadRequestException('日期筛选字段无效');
+      where[field]={gte:new Date(p.start.getTime()-(field==='createdAt'?8*3600000:0)),lt:new Date(p.end.getTime()-(field==='createdAt'?8*3600000:0))};
+    }
     if (query.customerId && r.fields.some((f) => f.key === 'customerId'))
       where.customerId = id(Number(query.customerId));
     const [items, total] = await Promise.all([
       this.db(tx, kind).findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: workspaceOrderBy(kind,query),
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -436,6 +566,8 @@ export class WorkspaceService {
       ).map((c) => [c.id, c.name]),
     );
     for (const row of items) {
+      if(kind==='opportunities')Object.assign(row,salesAmountProjection(row));
+      if(kind==='followups') row.activityAt=followupTime({createdAt:row.createdAt as Date,aiStructured:row.aiStructured});
       if (kind === 'receipts') hideReceiptCorrectionFields(a, row);
       if (typeof row.ownerId === 'number') row.ownerName = names.get(row.ownerId) ?? '未分配';
       if (typeof row.assigneeId === 'number') row.assigneeName = names.get(row.assigneeId) ?? '未分配';
@@ -463,6 +595,9 @@ export class WorkspaceService {
     const tx = this.prisma.system,
       row = await this.require(tx, a, kind, recordId);
     if (kind === 'receipts') hideReceiptCorrectionFields(a, row);
+    if(kind==='opportunities')Object.assign(row,salesAmountProjection(row));
+    if(typeof row.customerId==='number') row.customerName=(await tx.customer.findFirst({where:{tenantId:a.tenantId,id:row.customerId},select:{name:true}}))?.name??'—';
+    if(typeof row.ownerId==='number') row.ownerName=(await tx.user.findFirst({where:{tenantId:a.tenantId,id:row.ownerId},select:{name:true}}))?.name??'历史负责人';
     if (kind === 'customers' && row.poolType === 'public' && !admin(a) && !boss(a))
       return {
         id: row.id,
@@ -476,13 +611,27 @@ export class WorkspaceService {
     const related: Record<string, unknown> = {};
     if (kind === 'customers') {
       for (const child of ['contacts', 'opportunities', 'contracts', 'projects', 'followups'])
-        related[child] = await this.db(tx, child).findMany({
+        if (hasPermission(a, resourcePermission(child, 'read')))
+        related[child] = (await this.db(tx, child).findMany({
           where: { ...(await this.scope(tx, a, child)), customerId: recordId },
           take: 30,
           orderBy: { createdAt: 'desc' },
-        });
+        })).map(r=>child==='opportunities'?salesAmountProjection(r):r);
+      if (hasPermission(a, 'action:read')) related.actions = await tx.actionPlan.findMany({
+        where: { ...(await this.scope(tx, a, 'actions')), targetType: 'customer', targetId: recordId },
+        take: 30, orderBy: { dueDate: 'asc' },
+      });
     }
     if (kind === 'opportunities') {
+      if (hasPermission(a, 'follow_up:read')) related.followups = await tx.followUp.findMany({
+        where: { ...(await this.scope(tx, a, 'followups')), targetType: 'opportunity', targetId: recordId },
+        take: 30, orderBy: { createdAt: 'desc' },
+      });
+      if (hasPermission(a, 'action:read')) related.actions = await tx.actionPlan.findMany({
+        where: { ...(await this.scope(tx, a, 'actions')), targetType: 'customer', targetId: row.customerId as number },
+        take: 30, orderBy: { dueDate: 'asc' },
+      });
+      if(typeof row.contractId==='number'&&hasPermission(a,'contract:read'))related.linkedContract=await tx.contract.findMany({where:{...(await this.scope(tx,a,'contracts')),id:row.contractId}});
       related.quote = await tx.opportunityProduct.findMany({
         where: { tenantId: a.tenantId, opportunityId: recordId },
       });
@@ -493,17 +642,26 @@ export class WorkspaceService {
       });
     }
     if (kind === 'contracts') {
+      if (hasPermission(a,'action:read')) related.actions = await tx.actionPlan.findMany({
+        where:{...(await this.scope(tx,a,'actions')),targetType:'customer',targetId:row.customerId as number,actionType:'contract_lifecycle',title:('成交路径｜'+String(row.contractNo)+'｜'+String(row.name)).slice(0,200)},take:30,
+      });
+      if (hasPermission(a,'opportunity:read')) related.opportunities = (await tx.opportunity.findMany({
+        where: { AND: [await this.scope(tx,a,'opportunities'), { OR: [{contractId:recordId}, ...(typeof row.opportunityId==='number'?[{id:row.opportunityId}]:[])] }] }, take:30,
+      })).map(r=>salesAmountProjection(r));
+      related.items=await tx.contractItem.findMany({where:{tenantId:a.tenantId,contractId:recordId},orderBy:{sortOrder:'asc'}});
       related.changes = await tx.contractChange.findMany({
         where: { tenantId: a.tenantId, contractId: recordId },
         orderBy: { createdAt: 'desc' },
         take: 30,
       });
-      related.orders = await tx.order.findMany({
+      if (hasPermission(a, 'order:read')) related.orders = await tx.order.findMany({
         where: { ...(await this.scope(tx, a, 'orders')), contractId: recordId },
       });
-      related['payment-plans'] = await tx.paymentPlan.findMany({
-        where: { tenantId: a.tenantId, contractId: recordId },
-      });
+      if (hasPermission(a, 'finance:read')) {
+        related['payment-plans'] = await tx.paymentPlan.findMany({ where: { ...(await this.scope(tx, a, 'payment-plans')), contractId: recordId } });
+        related.invoices = await tx.invoice.findMany({ where: { ...(await this.scope(tx, a, 'invoices')), contractId: recordId }, orderBy: { invoiceDate: 'asc' } });
+        related.receipts = await tx.receipt.findMany({ where: { ...(await this.scope(tx, a, 'receipts')), contractId: recordId }, orderBy: { receiptDate: 'asc' } });
+      }
     }
     if (kind === 'projects') {
       const tasks = await this.db(tx, 'tasks').findMany({
@@ -531,7 +689,7 @@ export class WorkspaceService {
       });
     if (kind === 'receipts') {
       related.allocations = await tx.receiptAllocation.findMany({
-        where: { tenantId: a.tenantId, receiptId: recordId },
+        where: { tenantId: a.tenantId, receiptId: recordId, paymentPlan: { contract: { tenantId:a.tenantId,deletedAt:null,...(await ownerScope(tx,a)) } } },
         orderBy: { id: 'desc' },
         take: 100,
       });
@@ -560,6 +718,294 @@ export class WorkspaceService {
     const definition =
       flow.definition && typeof flow.definition === 'object' && !Array.isArray(flow.definition) ? flow.definition : {};
     return { name: flow.name, version: flow.version, fields: definition.fields ?? [] };
+  }
+  async duplicateCheck(a: Actor, body: Record<string, unknown>) {
+    const { excludeId, ...input } = object(body);
+    if (
+      Object.keys(input).some(
+        (k) => !['name', 'shortName', 'creditCode', 'companyPhone', 'website', 'address', 'legalPerson'].includes(k),
+      )
+    )
+      throw new BadRequestException('存在未定义查重参数');
+    const recordId = excludeId === undefined ? undefined : id(excludeId);
+    requirePermission(a, 'customers', recordId ? 'update' : 'create');
+    const normalized = cleanInput('customers', input, true) as IdentityInput;
+    normalized.creditCode = creditCode(normalized.creditCode);
+    return this.prisma.system.$transaction(
+      async (tx) => {
+        await validateActor(tx, a);
+        if (recordId) await this.require(tx, a, 'customers', recordId);
+        const rows = await tx.customer.findMany({
+          where: { tenantId: a.tenantId, ...(recordId ? { id: { not: recordId } } : {}) },
+          select: {
+            id: true,
+            name: true,
+            shortName: true,
+            creditCode: true,
+            companyPhone: true,
+            website: true,
+            address: true,
+            legalPerson: true,
+          },
+          take: 10001,
+        });
+        if (rows.length > 10000) throw new BadRequestException('客户查重超过10000条预算，请联系管理员');
+        const visible = new Set(
+          (await tx.customer.findMany({ where: await this.scope(tx, a, 'customers'), select: { id: true } })).map(
+            (r) => r.id,
+          ),
+        );
+        const matches: { id: number; name: string; hard: boolean; reasons: string[] }[] = [];
+        let hardDuplicate = false,
+          restrictedMatch = false;
+        for (const row of rows) {
+          const match = identityMatch(normalized, row);
+          if (!match.reasons.length) continue;
+          hardDuplicate ||= match.hard;
+          if (!visible.has(row.id)) restrictedMatch = true;
+          else if (matches.length < 20) matches.push({ id: row.id, name: row.name, ...match });
+        }
+        return { hardDuplicate, restrictedMatch, matches };
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
+  }
+  private assignmentAuthority(a: Actor) {
+    requirePermission(a, 'customers', 'update');
+    if ((!admin(a) && !manager(a)) || !hasPermission(a, 'customer:assign'))
+      throw new ForbiddenException('没有客户分配权限');
+  }
+  async allocationPeople(a: Actor) {
+    this.assignmentAuthority(a);
+    return this.prisma.system.$transaction(async (tx) => {
+      await validateActor(tx, a);
+      const rows = await tx.user.findMany({
+        where: {
+          tenantId: a.tenantId,
+          status: 'active',
+          deletedAt: null,
+          ...(!admin(a) ? { deptId: a.deptId } : {}),
+          department: { status: 1, deletedAt: null },
+          roles: { some: { role: { code: 'sales' } } },
+        },
+        include: { roles: { include: { role: true } } },
+        take: 201,
+        orderBy: { id: 'asc' },
+      });
+      if (rows.length > 200) throw new BadRequestException('可分配人员超过200人预算');
+      return rows
+        .filter((u) =>
+          ['customer:read', 'customer:update'].every((p) =>
+            permits(
+              u.roles.flatMap((r) => strings(r.role.permissions)),
+              p,
+            ),
+          ),
+        )
+        .map((u) => ({ id: u.id, name: u.name, deptId: u.deptId }));
+    });
+  }
+  private async assignmentPlan(tx: Tx, a: Actor, customerId: number, targetId: number, expected: unknown) {
+    this.assignmentAuthority(a);
+    const row = await this.require(tx, a, 'customers', customerId);
+    checkVersion(row as { updatedAt: Date }, expected);
+    const counts = await Promise.all([
+      tx.opportunity.count({ where: { tenantId: a.tenantId, customerId, deletedAt: null } }),
+      tx.contract.count({ where: { tenantId: a.tenantId, customerId, deletedAt: null } }),
+      tx.order.count({ where: { tenantId: a.tenantId, customerId, deletedAt: null } }),
+      tx.project.count({ where: { tenantId: a.tenantId, customerId, deletedAt: null } }),
+      tx.lead.count({ where: { tenantId: a.tenantId, convertedCustomerId: customerId, deletedAt: null } }),
+    ]);
+    if (counts.some(Boolean)) throw new ConflictException('客户含关联销售业务，请使用整体交接入口');
+    const target = await tx.user.findFirst({
+      where: {
+        id: targetId,
+        tenantId: a.tenantId,
+        status: 'active',
+        deletedAt: null,
+        department: { status: 1, deletedAt: null },
+        ...(!admin(a) ? { deptId: a.deptId } : {}),
+        roles: { some: { role: { code: 'sales' } } },
+      },
+      include: { roles: { include: { role: true } } },
+    });
+    if (
+      !target ||
+      !['customer:read', 'customer:update'].every((p) =>
+        permits(
+          target.roles.flatMap((r) => strings(r.role.permissions)),
+          p,
+        ),
+      )
+    )
+      throw new BadRequestException('接收人需为可分配部门中已启用、有客户查看/编辑权限的销售');
+    if (row.ownerId === target.id && row.poolType === 'private') throw new ConflictException('客户已属于该销售');
+    return { row, target };
+  }
+  async assignCustomerInTransaction(
+    tx: Tx,
+    a: Actor,
+    customerId: number,
+    targetId: number,
+    expected: unknown,
+    stamp?: Date,
+  ) {
+    const { row, target } = await this.assignmentPlan(tx, a, customerId, targetId, expected);
+    const until = new Date(Date.now() + 30 * 86400000);
+    await tx.customer.update({
+      where: { id: customerId },
+      data: {
+        poolType: 'private',
+        ownerId: target.id,
+        ownerDeptId: target.deptId,
+        protectUntil: until,
+        updatedAt: stamp ?? new Date(Math.max(Date.now(), new Date(row.updatedAt!).getTime() + 1)),
+      },
+    });
+    await tx.privateHolding.deleteMany({ where: { tenantId: a.tenantId, customerId } });
+    await tx.privateHolding.create({
+      data: { tenantId: a.tenantId, userId: target.id, customerId, claimedAt: new Date(), protectUntil: until },
+    });
+    return {
+      id: customerId,
+      name: String(row.name),
+      fromUserId: row.ownerId,
+      toUserId: target.id,
+      toName: target.name,
+    };
+  }
+  private allocationInput(body: Record<string, unknown>, write: boolean) {
+    object(body);
+    if (Object.keys(body).some((k) => !['records', 'userId', 'reason', ...(write ? ['requestKey'] : [])].includes(k)))
+      throw new BadRequestException('不允许的分配参数');
+    if (!Array.isArray(body.records) || body.records.length < 1 || body.records.length > 50)
+      throw new BadRequestException('每批选择1至50个客户');
+    const records = body.records.map((item) => {
+      const row = object(item);
+      if (Object.keys(row).some((k) => !['id', 'expectedUpdatedAt'].includes(k)))
+        throw new BadRequestException('不允许的客户字段');
+      return { id: id(row.id), expectedUpdatedAt: text(row.expectedUpdatedAt, '版本', 40) };
+    });
+    if (new Set(records.map((r) => r.id)).size !== records.length) throw new BadRequestException('客户不能重复');
+    return { records, target: id(body.userId), reason: text(body.reason, '分配原因', 500) };
+  }
+  async allocationPreview(a: Actor, body: Record<string, unknown>) {
+    this.assignmentAuthority(a);
+    const input = this.allocationInput(body, false);
+    return this.prisma.system.$transaction(
+      async (tx) => {
+        await validateActor(tx, a);
+        const items = [];
+        for (const r of input.records) {
+          const p = await this.assignmentPlan(tx, a, r.id, input.target, r.expectedUpdatedAt);
+          items.push({
+            id: p.row.id,
+            name: String(p.row.name),
+            fromUserId: p.row.ownerId,
+            toUserId: p.target.id,
+            toName: p.target.name,
+          });
+        }
+        return { items, reason: input.reason, count: items.length };
+      },
+      { isolationLevel: 'RepeatableRead', timeout: 15000 },
+    );
+  }
+  allocationCommit(a: Actor, body: Record<string, unknown>) {
+    this.assignmentAuthority(a);
+    const input = this.allocationInput(body, true);
+    return runCommand(
+      this.prisma,
+      a,
+      'customer.allocation.batch@1.0',
+      body,
+      async (tx) => {
+        const items = [];
+        for (const r of input.records)
+          items.push(await this.assignCustomerInTransaction(tx, a, r.id, input.target, r.expectedUpdatedAt));
+        return { items, count: items.length, reason: input.reason };
+      },
+      async (tx) => {
+        for (const record of input.records) await this.require(tx, a, 'customers', record.id);
+      },
+    );
+  }
+  async assignmentRecipients(a: Actor, recordId: number) {
+    this.assignmentAuthority(a);
+    await this.prisma.system.$transaction(async (tx) => {
+      await validateActor(tx, a);
+      await this.require(tx, a, 'customers', recordId);
+    });
+    return this.allocationPeople(a);
+  }
+  async allocationOwners(a: Actor) {
+    this.assignmentAuthority(a);
+    return this.prisma.system.$transaction(async (tx) => {
+      await validateActor(tx, a);
+      const rows = await tx.user.findMany({
+        where: {
+          tenantId: a.tenantId,
+          deletedAt: null,
+          ...(!companyWide(a) ? { id: { in: await teamIds(tx, a) } } : {}),
+        },
+        select: { id: true, name: true, status: true, deptId: true },
+        take: 501,
+        orderBy: { id: 'asc' },
+      });
+      if (rows.length > 500) throw new BadRequestException('人员超过500人查询预算');
+      return rows;
+    });
+  }
+  async allocationHistory(a: Actor) {
+    this.assignmentAuthority(a);
+    return this.prisma.system.$transaction(
+      async (tx) => {
+        await validateActor(tx, a);
+        const history = await tx.auditLog.findMany({
+          where: {
+            tenantId: a.tenantId,
+            action: { in: ['customer.allocation.batch@1.0', 'customers.assign'] },
+            ...(!admin(a) ? { userId: a.userId } : {}),
+          },
+          orderBy: { id: 'desc' },
+          take: 50,
+        });
+        const parsed = history.map((row) => {
+          const result =
+            row.afterData && typeof row.afterData === 'object' && !Array.isArray(row.afterData) ? row.afterData : {};
+          const historyItems = Array.isArray(result.items)
+            ? result.items
+            : result.assignment && typeof result.assignment === 'object' && !Array.isArray(result.assignment)
+              ? [result.assignment]
+              : [];
+          const items = Array.isArray(historyItems)
+            ? historyItems.filter(
+                (item): item is { [key: string]: import('@prisma/client').Prisma.JsonValue } =>
+                  !!item && typeof item === 'object' && !Array.isArray(item),
+              )
+            : [];
+          return { row, result, items };
+        });
+        const ids = parsed.flatMap((h) => h.items.map((item) => Number(item.id))).filter(Number.isSafeInteger);
+        const visible = await tx.customer.findMany({
+          where: { tenantId: a.tenantId, deletedAt: null, id: { in: ids }, AND: [await customerScope(tx, a)] },
+          select: { id: true },
+        });
+        const allowed = new Set(visible.map((r) => r.id));
+        return parsed
+          .map(({ row, result, items }) => ({
+            id: row.id,
+            createdAt: row.createdAt,
+            actorId: row.userId,
+            reason: items.every((r) => allowed.has(Number(r.id)))
+              ? String(result.reason ?? '')
+              : '部分客户已不在当前可见范围，历史原因隐藏',
+            items: items.filter((item) => allowed.has(Number(item.id))),
+          }))
+          .filter((r) => r.items.length);
+      },
+      { isolationLevel: 'RepeatableRead' },
+    );
   }
   async deliveryRecipients(a: Actor, kind: string, recordId: number) {
     allowWrite(a);
@@ -596,7 +1042,7 @@ export class WorkspaceService {
     if (!r.readonly) requirePermission(a, kind, recordId ? 'update' : 'create');
     if (Object.keys(body).some((k) => !['requestKey', 'expectedUpdatedAt', 'data'].includes(k)))
       throw new BadRequestException('存在未定义参数');
-    if (r.readonly) throw new BadRequestException('演示系统，暂无财务写入功能');
+    if (r.readonly) throw new BadRequestException('该模块当前只读，写入功能尚未开通');
     if (kind === 'products' && !admin(a)) throw new ForbiddenException('产品目录仅管理员可维护');
     const data = cleanInput(kind, body.data, !!recordId);
     return runCommand(
@@ -626,6 +1072,14 @@ export class WorkspaceService {
           )
             throw new BadRequestException('关联对象创建后不可修改，请新建记录');
         }
+        if(kind==='opportunities' && row && data.amount!==undefined && Object.keys(salesIntakeMeta(row.healthFactors)).length)data.healthFactors=json({...object(row.healthFactors),salesIntake:{...salesIntakeMeta(row.healthFactors),amountKnown:true}});
+        if(kind==='products') {
+          const price=data.listPrice===undefined?row?.listPrice:data.listPrice;
+          const pricing=String(data.pricingStatus??row?.pricingStatus??(price==null?'quote_required':'fixed'));
+          if(pricing==='fixed' && price==null)throw new BadRequestException('固定价产品必须填写明确目录价');
+          if(pricing==='quote_required' && price!=null)throw new BadRequestException('按范围核价产品请清空目录价，版本价格保存在产品知识中');
+          data.pricingStatus=pricing;
+        }
         await this.references(tx, a, kind, { ...row, ...data });
         if (
           ['orders', 'projects'].includes(kind) &&
@@ -635,8 +1089,20 @@ export class WorkspaceService {
           }))
         )
           throw new ConflictException('关联合同变更审批中，请先完成或撤回');
-        if (kind === 'customers' && typeof data.name === 'string')
-          data.nameFingerprint = await uniqueCustomer(tx, a.tenantId, data.name, recordId);
+        if (kind === 'customers')
+          Object.assign(
+            data,
+            await uniqueCustomerIdentity(
+              tx,
+              a.tenantId,
+              {
+                name: String(data.name ?? row?.name),
+                creditCode: (data.creditCode === undefined ? row?.creditCode : data.creditCode) as
+                  string | null | undefined,
+              },
+              recordId,
+            ),
+          );
         const base = { tenantId: a.tenantId, ...(kind === 'products' ? {} : { createdBy: a.userId }) };
         const defaults: Record<string, unknown> = {};
         if (kind === 'products') defaults.category = 'service';
@@ -720,7 +1186,7 @@ export class WorkspaceService {
         }
         if (recordId && row?.updatedAt)
           data.updatedAt = new Date(Math.max(Date.now(), new Date(row.updatedAt).getTime() + 1));
-        const result = recordId
+        let result = recordId
           ? await this.db(tx, kind).update({ where: { id: recordId, tenantId: a.tenantId }, data })
           : await this.db(tx, kind).create({ data: { ...base, ...defaults, ...data } });
         if (kind === 'projects' && !recordId)
@@ -740,6 +1206,17 @@ export class WorkspaceService {
             where: { id: id(data.customerId ?? row?.customerId), tenantId: a.tenantId },
             data: { lastFollowAt: new Date(), lastFollowBy: a.userId },
           });
+        if (!recordId && ['opportunities','contracts'].includes(kind)) {
+          const policy = await businessPolicy(tx, a.tenantId);
+          if (policy && new Date() >= new Date(policy.fromDate+'T00:00:00+08:00') && kind === 'opportunities') await notifyOpportunity(tx, a, result, policy);
+          if (policy && new Date() >= new Date(policy.fromDate+'T00:00:00+08:00') && kind === 'contracts') {
+            if (policy.autoSubmitContracts) {
+              if (new Prisma.Decimal(String(result.amount)).lte(0)) throw new BadRequestException('自动提交审批的合同金额必须大于零');
+              const approval = await this.approval.start(tx, a, { bizType: 'contract', bizId: result.id, bizNo: String(result.contractNo), title: String(result.name), amount: new Prisma.Decimal(String(result.amount)), flowId: policy.contractFlowId });
+              result = await this.db(tx, kind).update({ where: { id: result.id, tenantId: a.tenantId }, data: { approvalId: approval.id, status: 'pending_approval' } });
+            }
+          }
+        }
         return result;
       },
     );
@@ -786,385 +1263,448 @@ export class WorkspaceService {
   async command(a: Actor, kind: string, recordId: number, action: string, body: Record<string, unknown>) {
     allowWrite(a);
     requirePermission(a, kind, 'update');
+    if(kind==='opportunities'&&action==='follow'){
+      requirePermission(a,'followups','create');
+      if(opportunityFollowInput(body.followup).createAction)requirePermission(a,'actions','create');
+    }
     if (
       Object.keys(body).some(
         (k) =>
-          !['requestKey', 'expectedUpdatedAt', 'userId', 'reason', 'note', 'items', 'form', 'actualHours'].includes(k),
+          ![
+            'requestKey',
+            'expectedUpdatedAt',
+            'userId',
+            'reason',
+            'note',
+            'items',
+            'form',
+            'actualHours',
+            ...(kind==='opportunities'&&action==='follow'?['followup']:[]),
+            ...(kind === 'contracts' && action === 'sign' ? ['paymentSchedule'] : []),
+          ].includes(k),
       )
     )
       throw new BadRequestException('存在未定义参数');
     if (!resource(kind).actions.includes(action)) throw new BadRequestException('不支持的业务操作');
-    return runCommand(this.prisma, a, `${kind}.${action}`, { ...body, recordId }, async (tx) => {
-      const row = await this.require(tx, a, kind, recordId);
-      checkVersion(row as { updatedAt: Date }, body.expectedUpdatedAt);
-      if (kind === 'projects') await this.deliveryAuthority(tx, a, recordId);
-      if (
-        kind === 'contracts' &&
-        (await tx.contractChange.count({ where: { tenantId: a.tenantId, contractId: recordId, status: 'pending' } }))
-      )
-        throw new ConflictException('合同变更审批中，请先完成或撤回');
-      const writeStamp = new Date(Math.max(Date.now(), new Date(row.updatedAt!).getTime() + 1));
-      try {
-        const where = { id: recordId, tenantId: a.tenantId };
-        if (kind === 'customers') {
-          const linked =
-            (await tx.opportunity.count({ where: { tenantId: a.tenantId, customerId: recordId, deletedAt: null } })) +
-            (await tx.contract.count({ where: { tenantId: a.tenantId, customerId: recordId, deletedAt: null } })) +
-            (await tx.order.count({ where: { tenantId: a.tenantId, customerId: recordId, deletedAt: null } })) +
-            (await tx.project.count({ where: { tenantId: a.tenantId, customerId: recordId, deletedAt: null } })) +
-            (await tx.lead.count({ where: { tenantId: a.tenantId, convertedCustomerId: recordId, deletedAt: null } }));
-          if (linked && ['claim', 'return', 'assign'].includes(action))
-            throw new ConflictException('客户含关联销售业务，请通过销售归属交接处理，避免业务失联');
-          if (action === 'follow') throw new BadRequestException('请通过跟进表单记录内容');
-          if (action === 'claim') {
-            if (row.poolType !== 'public') throw new ConflictException('客户已被领取');
-            const changed = await tx.customer.updateMany({
-              where: { ...where, poolType: 'public', ownerId: null },
-              data: {
-                poolType: 'private',
-                ownerId: a.userId,
-                ownerDeptId: a.deptId,
-                protectUntil: new Date(Date.now() + 30 * 86400000),
-              },
-            });
-            if (changed.count !== 1) throw new ConflictException('客户已被领取');
-            await tx.privateHolding.create({
-              data: {
-                tenantId: a.tenantId,
-                userId: a.userId,
-                customerId: recordId,
-                claimedAt: new Date(),
-                protectUntil: new Date(Date.now() + 30 * 86400000),
-              },
-            });
-          } else if (action === 'return') {
-            if (row.ownerId !== a.userId && !admin(a) && !manager(a))
-              throw new ForbiddenException('不可退回他人的客户');
-            await tx.customer.update({
-              where,
-              data: { poolType: 'public', ownerId: null, ownerDeptId: null, protectUntil: null },
-            });
-            await tx.privateHolding.deleteMany({ where: { tenantId: a.tenantId, customerId: recordId } });
-          } else if (action === 'assign') {
-            if (!admin(a) && !manager(a)) throw new ForbiddenException('仅主管可分配');
-            const target = await tx.user.findFirst({
-              where: {
-                tenantId: a.tenantId,
-                id: id(body.userId),
-                status: 'active',
-                deletedAt: null,
-                ...(!admin(a) ? { deptId: a.deptId } : {}),
-                roles: { some: { tenantId: a.tenantId, role: { code: 'sales' } } },
-              },
-            });
-            if (!target) throw new BadRequestException('销售不在可分配团队');
-            await tx.customer.update({
-              where,
-              data: { poolType: 'private', ownerId: target.id, ownerDeptId: target.deptId },
-            });
-            await tx.privateHolding.deleteMany({ where: { tenantId: a.tenantId, customerId: recordId } });
-            await tx.privateHolding.create({
-              data: {
-                tenantId: a.tenantId,
-                userId: target.id,
-                customerId: recordId,
-                claimedAt: new Date(),
-                protectUntil: new Date(Date.now() + 30 * 86400000),
-              },
-            });
-          }
-        } else if (kind === 'leads' && action === 'convert') {
-          if (row.status === 'converted') throw new ConflictException('线索已转化');
-          const c = await tx.customer.create({
-            data: {
-              tenantId: a.tenantId,
-              code: code('KH'),
-              name: String(row.companyName),
-              nameFingerprint: await uniqueCustomer(tx, a.tenantId, String(row.companyName)),
-              industry: row.industry as string | null,
-              ownerId: a.userId,
-              ownerDeptId: a.deptId,
-              poolType: 'private',
-              protectUntil: new Date(Date.now() + 30 * 86400000),
-              createdBy: a.userId,
-            },
-          });
-          if (row.contactName)
-            await tx.contact.create({
-              data: { tenantId: a.tenantId, customerId: c.id, name: String(row.contactName), createdBy: a.userId },
-            });
-          await tx.privateHolding.create({
-            data: {
-              tenantId: a.tenantId,
-              customerId: c.id,
-              userId: a.userId,
-              claimedAt: new Date(),
-              protectUntil: c.protectUntil ?? new Date(Date.now() + 30 * 86400000),
-            },
-          });
-          await tx.lead.update({
-            where,
-            data: { status: 'converted', convertedCustomerId: c.id, convertedAt: new Date() },
-          });
-          return { id: c.id, kind: 'customers' };
-        } else if (kind === 'opportunities') {
-          if (row.status !== 'open') throw new BadRequestException('仅开放商机可操作');
-          if (action === 'advance') {
-            // Keep the current stage as an ordering anchor even if it was deactivated.
-            const current = await tx.opportunityStage.findFirst({
-              where: { tenantId: a.tenantId, code: String(row.stage) },
-            });
-            if (!current) throw new ConflictException('当前商机阶段不存在，请先核对阶段配置');
-            const next = await tx.opportunityStage.findFirst({
-              where: { tenantId: a.tenantId, isActive: true, sortOrder: { gt: current.sortOrder } },
-              orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-            });
-            if (!next || next.isWon) throw new BadRequestException('下一步需通过合同签约完成赢单');
-            if (new Prisma.Decimal(String(row.amount)).lte(0) || !row.demandSummary)
-              throw new BadRequestException('请先填写有效金额和需求摘要');
-            await tx.opportunity.update({
-              where,
-              data: {
-                stage: next.code,
-                weightedAmount: new Prisma.Decimal(String(row.amount)).mul(next.probability).div(100),
-                stageEnteredAt: new Date(),
-              },
-            });
-          }
-          if (action === 'lose')
-            await tx.opportunity.update({
-              where,
-              data: {
-                status: 'lost',
-                lossDetail: text(body.reason, '输单原因', 500),
-                closedAt: writeStamp,
-                weightedAmount: 0,
-              },
-            });
-          if (action === 'quote') return this.quote(tx, a, row, body);
-        } else if (['contracts', 'orders'].includes(kind)) {
-          if (action === 'submit') {
-            if (!['draft', 'rejected'].includes(String(row.status))) throw new BadRequestException('当前状态不可提交');
-            if (new Prisma.Decimal(String(row.amount ?? row.totalAmountInclTax)).lte(0))
-              throw new BadRequestException('请先填写有效金额');
-            const approval = await this.approval.start(tx, a, {
-              bizType: kind === 'contracts' ? 'contract' : 'order',
-              form: object(body.form ?? {}),
-              bizId: recordId,
-              bizNo: String(row.contractNo ?? row.orderNo),
-              title: String(row.name ?? row.orderNo),
-              amount: new Prisma.Decimal(String(row.amount ?? row.totalAmountInclTax)),
-            });
-            await this.db(tx, kind).update({ where, data: { status: 'pending_approval', approvalId: approval.id } });
-          } else if (action === 'sign' && kind === 'contracts') {
-            if (row.status !== 'approved') throw new BadRequestException('合同必须先审批通过');
-            if (row.opportunityId) {
-              const closed = await tx.opportunity.updateMany({
-                where: { id: id(row.opportunityId), tenantId: a.tenantId, deletedAt: null, status: 'open' },
+    return runCommand(
+      this.prisma,
+      a,
+      `${kind}.${action}`,
+      { ...body, recordId },
+      async (tx) => {
+        const row = await this.require(tx, a, kind, recordId);
+        checkVersion(row as { updatedAt: Date }, body.expectedUpdatedAt);
+        if (kind === 'projects') await this.deliveryAuthority(tx, a, recordId);
+        if (
+          kind === 'contracts' &&
+          (await tx.contractChange.count({ where: { tenantId: a.tenantId, contractId: recordId, status: 'pending' } }))
+        )
+          throw new ConflictException('合同变更审批中，请先完成或撤回');
+        const writeStamp = new Date(Math.max(Date.now(), new Date(row.updatedAt!).getTime() + 1));
+        let assignmentEvidence: Record<string, unknown> | undefined;
+        try {
+          const where = { id: recordId, tenantId: a.tenantId };
+          if (kind === 'customers') {
+            const linked =
+              (await tx.opportunity.count({ where: { tenantId: a.tenantId, customerId: recordId, deletedAt: null } })) +
+              (await tx.contract.count({ where: { tenantId: a.tenantId, customerId: recordId, deletedAt: null } })) +
+              (await tx.order.count({ where: { tenantId: a.tenantId, customerId: recordId, deletedAt: null } })) +
+              (await tx.project.count({ where: { tenantId: a.tenantId, customerId: recordId, deletedAt: null } })) +
+              (await tx.lead.count({
+                where: { tenantId: a.tenantId, convertedCustomerId: recordId, deletedAt: null },
+              }));
+            if (linked && ['claim', 'return', 'assign'].includes(action))
+              throw new ConflictException('客户含关联销售业务，请通过销售归属交接处理，避免业务失联');
+            if (action === 'follow') throw new BadRequestException('请通过跟进表单记录内容');
+            if (action === 'claim') {
+              if (!hasPermission(a, 'pool:claim')) throw new ForbiddenException('没有领取权限');
+              if (row.poolType !== 'public') throw new ConflictException('客户已被领取');
+              const changed = await tx.customer.updateMany({
+                where: { ...where, poolType: 'public', ownerId: null },
                 data: {
-                  status: 'won',
-                  stage: 'signing',
-                  winDate: writeStamp,
-                  closedAt: writeStamp,
-                  contractId: recordId,
+                  poolType: 'private',
+                  ownerId: a.userId,
+                  ownerDeptId: a.deptId,
+                  protectUntil: new Date(Date.now() + 30 * 86400000),
                 },
               });
-              if (closed.count !== 1) throw new ConflictException('关联商机必须为开放状态才能签约');
-            }
-            await tx.contract.update({ where, data: { status: 'signed', signDate: writeStamp } });
-            await recalculateCustomerContracts(tx, a.tenantId, id(row.customerId));
-            const amount = new Prisma.Decimal(String(row.amount));
-            await tx.paymentPlan.create({
-              data: {
-                tenantId: a.tenantId,
-                contractId: recordId,
-                planNo: code('HK'),
-                amount,
-                outstandingAmount: amount,
-                dueDate: new Date(Date.now() + 30 * 86400000),
-                status: 'pending',
-                triggerCondition: '演示：合同签约后30天',
-              },
-            });
-          } else if (action === 'order' && kind === 'contracts') {
-            if (!['signed', 'executing'].includes(String(row.status)))
-              throw new BadRequestException('签约后才可创建订单');
-            const order = await tx.order.create({
-              data: {
-                tenantId: a.tenantId,
-                orderNo: code('DD'),
-                contractId: recordId,
-                customerId: id(row.customerId),
-                ownerId: id(row.ownerId),
-                orderDate: new Date(),
-                totalAmount: String(row.amount),
-                totalAmountInclTax: String(row.amount),
-                createdBy: a.userId,
-              },
-            });
-            return { id: order.id, kind: 'orders' };
-          } else if (action === 'project' && kind === 'contracts') {
-            if (!['signed', 'executing'].includes(String(row.status)))
-              throw new BadRequestException('签约后才可创建项目');
-            const project = await tx.project.create({
-              data: {
-                tenantId: a.tenantId,
-                projectNo: code('XM'),
-                name: `${row.name}·交付`,
-                contractId: recordId,
-                customerId: id(row.customerId),
-                pmId: a.userId,
-                salesOwnerId: id(row.ownerId),
-                status: 'draft',
-                budgetAmount: String(row.amount),
-                plannedStartDate: new Date(),
-                plannedEndDate: new Date(Date.now() + 90 * 86400000),
-                createdBy: a.userId,
-              },
-            });
-            for (const [i, name] of ['项目启动', '方案确认', '系统上线', '验收交付'].entries())
-              await tx.projectMilestone.create({
+              if (changed.count !== 1) throw new ConflictException('客户已被领取');
+              await tx.privateHolding.create({
                 data: {
                   tenantId: a.tenantId,
-                  projectId: project.id,
-                  name,
-                  stage: ['initiation', 'blueprint', 'go_live', 'acceptance'][i],
-                  sortOrder: i + 1,
-                  weight: 25,
-                  plannedDate: new Date(Date.now() + (i + 1) * 20 * 86400000),
+                  userId: a.userId,
+                  customerId: recordId,
+                  claimedAt: new Date(),
+                  protectUntil: new Date(Date.now() + 30 * 86400000),
                 },
               });
-            return { id: project.id, kind: 'projects' };
-          } else if (action === 'confirm' && kind === 'orders') {
-            if (row.status !== 'approved') throw new BadRequestException('订单必须审批通过');
-            await tx.order.update({ where, data: { status: 'confirmed' } });
-          } else if (action === 'deliver' && kind === 'orders') {
-            if (row.status !== 'confirmed') throw new BadRequestException('请先确认订单');
-            await tx.order.update({ where, data: { status: 'delivered', actualDeliveryDate: new Date() } });
-          } else throw new BadRequestException('操作与业务对象不匹配');
-        } else if (kind === 'projects') {
-          if (action === 'handover_pm') await handoverProjectManager(tx, a, await taskProject(tx, a, recordId), body);
-          if (action === 'submit') {
-            if (!['draft', 'rejected'].includes(String(row.status)))
-              throw new BadRequestException('仅草稿或驳回项目可提交');
-            const approval = await this.approval.start(tx, a, {
-              bizType: 'project_initiation',
-              form: object(body.form ?? {}),
-              bizId: recordId,
-              bizNo: String(row.projectNo),
-              title: String(row.name),
-              amount: new Prisma.Decimal(String(row.budgetAmount ?? 0)),
-            });
-            await tx.project.update({ where, data: { status: 'pending_approval', approvalId: approval.id } });
-          }
-
-          if (action === 'start') {
-            if (row.status !== 'active') throw new BadRequestException('项目未激活');
-            if (row.actualStartDate) throw new ConflictException('项目已启动');
-            deliveryManager(a, await taskProject(tx, a, recordId));
-            await tx.project.update({ where, data: { actualStartDate: new Date() } });
-            await deliveryEvent(tx, a, recordId, 'project.started', '项目启动', { pmId: row.pmId });
-          }
-          if (['advance', 'request_acceptance', 'reject_acceptance', 'accept'].includes(action)) {
-            const project = await taskProject(tx, a, recordId);
-            await projectDeliveryCommand(tx, a, project, action, body);
-          }
-        } else if (kind === 'tasks') {
-          const p = await taskProject(tx, a, id(row.projectId));
-          activeDelivery(p);
-          if (row.assigneeId !== a.userId || ['reopen_task', 'assign_task'].includes(action)) {
-            await this.deliveryAuthority(tx, a, p.id);
-          }
-          const note = text(body.note, '任务结果或整改说明', 3000);
-          let assignment: Record<string, unknown> = {};
-          if (action === 'assign_task') {
-            if (['done', 'cancelled'].includes(String(row.status)))
-              throw new ConflictException('历史已完成或取消任务不能转派');
-            const recipient = (await deliveryPeople(tx, a, p)).find((u) => u.id === id(body.userId));
-            if (!recipient || recipient.id === row.assigneeId)
-              throw new BadRequestException('接收人不可用或没有实际变化');
-            assignment = { fromUserId: row.assigneeId, toUserId: recipient.id, toName: recipient.name };
-            await tx.projectTask.update({ where, data: { assigneeId: recipient.id } });
-          } else if (action === 'start_task') {
-            if (row.status !== 'todo') throw new ConflictException('仅待办任务可开始');
-            await tx.projectTask.update({ where, data: { status: 'in_progress' } });
-          } else if (action === 'complete') {
-            if (row.status !== 'in_progress') throw new ConflictException('请先开始任务再记录完成');
-            await tx.projectTask.update({
-              where,
-              data: { status: 'done', completedAt: new Date(), actualHours: taskHours(body.actualHours) },
-            });
-          } else if (action === 'reopen_task') {
-            if (row.status !== 'done') throw new ConflictException('仅已完成任务可发起整改');
-            await tx.projectTask.update({ where, data: { status: 'todo', completedAt: null } });
-            const milestone = row.milestoneId
-              ? await tx.projectMilestone.findFirst({
-                  where: { id: id(row.milestoneId), tenantId: a.tenantId, projectId: p.id },
-                })
-              : await tx.projectMilestone.findFirst({
-                  where: { tenantId: a.tenantId, projectId: p.id },
-                  orderBy: { sortOrder: 'desc' },
-                });
-            if (milestone)
-              await tx.projectMilestone.updateMany({
-                where: { tenantId: a.tenantId, projectId: p.id, sortOrder: { gte: milestone.sortOrder } },
-                data: { status: 'pending', completedAt: null, completedBy: null, actualDate: null, deliverables: null },
+            } else if (action === 'return') {
+              if (!hasPermission(a, 'pool:return')) throw new ForbiddenException('没有退回公海权限');
+              if (row.ownerId !== a.userId && !admin(a) && !manager(a))
+                throw new ForbiddenException('不可退回他人的客户');
+              await tx.customer.update({
+                where,
+                data: { poolType: 'public', ownerId: null, ownerDeptId: null, protectUntil: null },
               });
-            const total = await tx.projectMilestone.count({ where: { tenantId: a.tenantId, projectId: p.id } });
-            const done = await tx.projectMilestone.count({
-              where: { tenantId: a.tenantId, projectId: p.id, status: 'completed' },
-            });
-            const nextMilestone = await tx.projectMilestone.findFirst({
-              where: { tenantId: a.tenantId, projectId: p.id, status: { not: 'completed' } },
-              orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-            });
-            await tx.project.update({
-              where: { id: p.id },
+              await tx.privateHolding.deleteMany({ where: { tenantId: a.tenantId, customerId: recordId } });
+            } else if (action === 'assign') {
+              if (!hasPermission(a, 'customer:assign')) throw new ForbiddenException('没有客户分配权限');
+              if (!admin(a) && !manager(a)) throw new ForbiddenException('仅主管可分配');
+              assignmentEvidence = await this.assignCustomerInTransaction(
+                tx,
+                a,
+                recordId,
+                id(body.userId),
+                body.expectedUpdatedAt,
+                writeStamp,
+              );
+            }
+          } else if (kind === 'leads' && action === 'convert') {
+            if (row.status === 'converted') throw new ConflictException('线索已转化');
+            const c = await tx.customer.create({
               data: {
-                progress: total ? Math.round((done / total) * 100) : 0,
-                stage: (nextMilestone?.stage ?? 'initiation') as 'initiation',
+                tenantId: a.tenantId,
+                code: code('KH'),
+                name: String(row.companyName),
+                ...(await uniqueCustomerIdentity(tx, a.tenantId, {
+                  name: String(row.companyName),
+                  creditCode: row.creditCode as string | null,
+                })),
+                industry: row.industry as string | null,
+                ownerId: a.userId,
+                ownerDeptId: a.deptId,
+                poolType: 'private',
+                protectUntil: new Date(Date.now() + 30 * 86400000),
+                createdBy: a.userId,
               },
             });
+            if (row.contactName)
+              await tx.contact.create({
+                data: { tenantId: a.tenantId, customerId: c.id, name: String(row.contactName), createdBy: a.userId },
+              });
+            await tx.privateHolding.create({
+              data: {
+                tenantId: a.tenantId,
+                customerId: c.id,
+                userId: a.userId,
+                claimedAt: new Date(),
+                protectUntil: c.protectUntil ?? new Date(Date.now() + 30 * 86400000),
+              },
+            });
+            await tx.lead.update({
+              where,
+              data: { status: 'converted', convertedCustomerId: c.id, convertedAt: new Date() },
+            });
+            return { id: c.id, kind: 'customers' };
+          } else if (kind === 'opportunities') {
+            if(action==='follow'){
+              requirePermission(a,'followups','create');
+              const f=opportunityFollowInput(body.followup);
+              await this.require(tx,a,'customers',id(row.customerId));
+              const now=new Date(),due=f.nextFollowAt?new Date(f.nextFollowAt+'T00:00:00Z'):null;
+              const follow=await tx.followUp.create({data:{tenantId:a.tenantId,targetType:'opportunity',targetId:recordId,customerId:id(row.customerId),method:f.method,content:f.content,nextAction:f.nextAction,nextFollowAt:due,createdBy:a.userId}});
+              await tx.opportunity.update({where,data:{lastFollowAt:now,followCount:{increment:1},...(f.nextAction?{nextAction:f.nextAction}:{}),...(due?{nextActionDate:due}:{})}});
+              await tx.customer.update({where:{id:id(row.customerId),tenantId:a.tenantId},data:{lastFollowAt:now,lastFollowBy:a.userId}});
+              let actionId:number|undefined,calendarId:number|undefined;
+              if(f.createAction){
+                requirePermission(a,'actions','create');
+                if(!due||due.toISOString().slice(0,10)<new Date(Date.now()+8*3600000).toISOString().slice(0,10))throw new BadRequestException('下一步行动须安排今天或今后日期');
+                if(!await tx.user.findFirst({where:{tenantId:a.tenantId,id:id(row.ownerId),status:'active',deletedAt:null}}))throw new ConflictException('商机负责人已停用，请先交接');
+                let startsAt:Date|undefined;
+                for(const minute of [600,630,660,690,780,810,840,870,900,930]){const start=new Date(due.getTime()+(minute-480)*60000);if(start<=now)continue;if(!await tx.calendarEntry.count({where:{tenantId:a.tenantId,ownerId:id(row.ownerId),status:'scheduled',freeBusy:'busy',startsAt:{lt:new Date(start.getTime()+1800000)},endsAt:{gt:start}}})){startsAt=start;break;}}
+                if(!startsAt)throw new ConflictException('该日工作时段已满，请选择其他跟进日期');
+                const actionPlan=await tx.actionPlan.create({data:{tenantId:a.tenantId,targetType:'customer',targetId:id(row.customerId),title:('商机跟进｜'+String(row.code)+'｜'+f.nextAction).slice(0,200),content:'商机#'+recordId+' '+String(row.name)+'\n本次记录：'+f.content+'\n下一步：'+f.nextAction,assigneeId:id(row.ownerId),dueDate:due,source:'manual',createdBy:a.userId}});
+                actionId=actionPlan.id;
+                const entry=await tx.calendarEntry.create({data:{tenantId:a.tenantId,ownerId:id(row.ownerId),title:actionPlan.title,description:'【拟定业务推进时段】行动#'+actionId+'；非客户确认会议。\n'+f.nextAction,location:'业务推进安排',startsAt,endsAt:new Date(startsAt.getTime()+1800000),origin:'crm_plan',externalId:'crm-action-plan:'+actionId,externalSnapshot:json({actionId,customerId:row.customerId,opportunityId:recordId,proposed:true})}});calendarId=entry.id;
+              }
+              return {id:recordId,kind,action,followupId:follow.id,actionId,calendarId};
+            }
+            if (row.status !== 'open') throw new BadRequestException('仅开放商机可操作');
+            if (action === 'advance') {
+              // Keep the current stage as an ordering anchor even if it was deactivated.
+              const current = await tx.opportunityStage.findFirst({
+                where: { tenantId: a.tenantId, code: String(row.stage) },
+              });
+              if (!current) throw new ConflictException('当前商机阶段不存在，请先核对阶段配置');
+              const next = await tx.opportunityStage.findFirst({
+                where: { tenantId: a.tenantId, isActive: true, sortOrder: { gt: current.sortOrder } },
+                orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+              });
+              if (!next || next.isWon) throw new BadRequestException('下一步需通过合同签约完成赢单');
+              const customer=await tx.customer.findFirst({where:{tenantId:a.tenantId,id:id(row.customerId),deletedAt:null},select:{name:true}});
+              if(pendingCustomerName(customer?.name)&&!['new','qualified'].includes(next.code))throw new BadRequestException('客户名字待核实，请先确认客户身份，再进入方案或商务阶段');
+              if (new Prisma.Decimal(String(row.amount)).lte(0) || !row.demandSummary)
+                throw new BadRequestException('请先填写有效金额和需求摘要');
+              await tx.opportunity.update({
+                where,
+                data: {
+                  stage: next.code,
+                  weightedAmount: new Prisma.Decimal(String(row.amount)).mul(next.probability).div(100),
+                  stageEnteredAt: new Date(),
+                },
+              });
+            }
+            if (action === 'lose')
+              await tx.opportunity.update({
+                where,
+                data: {
+                  status: 'lost',
+                  lossDetail: text(body.reason, '输单原因', 500),
+                  closedAt: writeStamp,
+                  weightedAmount: 0,
+                },
+              });
+            if (action === 'quote') return this.quote(tx, a, row, body);
+          } else if (['contracts', 'orders'].includes(kind)) {
+            if (action === 'submit') {
+              if (!['draft', 'rejected'].includes(String(row.status)))
+                throw new BadRequestException('当前状态不可提交');
+              if (new Prisma.Decimal(String(row.amount ?? row.totalAmountInclTax)).lte(0))
+                throw new BadRequestException('请先填写有效金额');
+              const approval = await this.approval.start(tx, a, {
+                bizType: kind === 'contracts' ? 'contract' : 'order',
+                form: object(body.form ?? {}),
+                bizId: recordId,
+                bizNo: String(row.contractNo ?? row.orderNo),
+                title: String(row.name ?? row.orderNo),
+                amount: new Prisma.Decimal(String(row.amount ?? row.totalAmountInclTax)),
+              });
+              await this.db(tx, kind).update({ where, data: { status: 'pending_approval', approvalId: approval.id } });
+            } else if (action === 'sign' && kind === 'contracts') {
+              if (row.status !== 'approved') throw new BadRequestException('合同必须先审批通过');
+              const schedule = paymentSchedule(body.paymentSchedule, String(row.amount));
+              if (await tx.paymentPlan.count({ where: { tenantId: a.tenantId, contractId: recordId } }))
+                throw new ConflictException('合同已有回款计划，请先核对历史数据，系统不会重复生成');
+              if (row.opportunityId) {
+                const closed = await tx.opportunity.updateMany({
+                  where: { id: id(row.opportunityId), tenantId: a.tenantId, deletedAt: null, status: 'open' },
+                  data: {
+                    status: 'won',
+                    stage: 'signing',
+                    winDate: writeStamp,
+                    closedAt: writeStamp,
+                    contractId: recordId,
+                  },
+                });
+                if (closed.count !== 1) throw new ConflictException('关联商机必须为开放状态才能签约');
+              }
+              await tx.contract.update({ where, data: { status: 'signed', signDate: writeStamp } });
+              await recalculateCustomerContracts(tx, a.tenantId, id(row.customerId));
+              for (const installment of schedule)
+                await tx.paymentPlan.create({
+                  data: {
+                    tenantId: a.tenantId,
+                    contractId: recordId,
+                    planNo: code('HK'),
+                    ...installment,
+                    outstandingAmount: installment.amount,
+                    status: 'pending',
+                  },
+                });
+            } else if (action === 'order' && kind === 'contracts') {
+              if (!['signed', 'executing'].includes(String(row.status)))
+                throw new BadRequestException('签约后才可创建订单');
+              const order = await tx.order.create({
+                data: {
+                  tenantId: a.tenantId,
+                  orderNo: code('DD'),
+                  contractId: recordId,
+                  customerId: id(row.customerId),
+                  ownerId: id(row.ownerId),
+                  orderDate: new Date(),
+                  totalAmount: String(row.amount),
+                  totalAmountInclTax: String(row.amount),
+                  createdBy: a.userId,
+                },
+              });
+              return { id: order.id, kind: 'orders' };
+            } else if (action === 'project' && kind === 'contracts') {
+              if (!['signed', 'executing'].includes(String(row.status)))
+                throw new BadRequestException('签约后才可创建项目');
+              const project = await tx.project.create({
+                data: {
+                  tenantId: a.tenantId,
+                  projectNo: code('XM'),
+                  name: `${row.name}·交付`,
+                  contractId: recordId,
+                  customerId: id(row.customerId),
+                  pmId: a.userId,
+                  salesOwnerId: id(row.ownerId),
+                  status: 'draft',
+                  budgetAmount: String(row.amount),
+                  plannedStartDate: new Date(),
+                  plannedEndDate: new Date(Date.now() + 90 * 86400000),
+                  createdBy: a.userId,
+                },
+              });
+              for (const [i, name] of ['项目启动', '方案确认', '系统上线', '验收交付'].entries())
+                await tx.projectMilestone.create({
+                  data: {
+                    tenantId: a.tenantId,
+                    projectId: project.id,
+                    name,
+                    stage: ['initiation', 'blueprint', 'go_live', 'acceptance'][i],
+                    sortOrder: i + 1,
+                    weight: 25,
+                    plannedDate: new Date(Date.now() + (i + 1) * 20 * 86400000),
+                  },
+                });
+              return { id: project.id, kind: 'projects' };
+            } else if (action === 'confirm' && kind === 'orders') {
+              if (row.status !== 'approved') throw new BadRequestException('订单必须审批通过');
+              await tx.order.update({ where, data: { status: 'confirmed' } });
+            } else if (action === 'deliver' && kind === 'orders') {
+              if (row.status !== 'confirmed') throw new BadRequestException('请先确认订单');
+              await tx.order.update({ where, data: { status: 'delivered', actualDeliveryDate: new Date() } });
+            } else throw new BadRequestException('操作与业务对象不匹配');
+          } else if (kind === 'projects') {
+            if (action === 'handover_pm') await handoverProjectManager(tx, a, await taskProject(tx, a, recordId), body);
+            if (action === 'submit') {
+              if (!['draft', 'rejected'].includes(String(row.status)))
+                throw new BadRequestException('仅草稿或驳回项目可提交');
+              const approval = await this.approval.start(tx, a, {
+                bizType: 'project_initiation',
+                form: object(body.form ?? {}),
+                bizId: recordId,
+                bizNo: String(row.projectNo),
+                title: String(row.name),
+                amount: new Prisma.Decimal(String(row.budgetAmount ?? 0)),
+              });
+              await tx.project.update({ where, data: { status: 'pending_approval', approvalId: approval.id } });
+            }
+
+            if (action === 'start') {
+              if (row.status !== 'active') throw new BadRequestException('项目未激活');
+              if (row.actualStartDate) throw new ConflictException('项目已启动');
+              deliveryManager(a, await taskProject(tx, a, recordId));
+              await tx.project.update({ where, data: { actualStartDate: new Date() } });
+              await deliveryEvent(tx, a, recordId, 'project.started', '项目启动', { pmId: row.pmId });
+            }
+            if (['advance', 'request_acceptance', 'reject_acceptance', 'accept'].includes(action)) {
+              const project = await taskProject(tx, a, recordId);
+              await projectDeliveryCommand(tx, a, project, action, body);
+            }
+          } else if (kind === 'tasks') {
+            const p = await taskProject(tx, a, id(row.projectId));
+            activeDelivery(p);
+            if (row.assigneeId !== a.userId || ['reopen_task', 'assign_task'].includes(action)) {
+              await this.deliveryAuthority(tx, a, p.id);
+            }
+            const note = text(body.note, '任务结果或整改说明', 3000);
+            let assignment: Record<string, unknown> = {};
+            if (action === 'assign_task') {
+              if (['done', 'cancelled'].includes(String(row.status)))
+                throw new ConflictException('历史已完成或取消任务不能转派');
+              const recipient = (await deliveryPeople(tx, a, p)).find((u) => u.id === id(body.userId));
+              if (!recipient || recipient.id === row.assigneeId)
+                throw new BadRequestException('接收人不可用或没有实际变化');
+              assignment = { fromUserId: row.assigneeId, toUserId: recipient.id, toName: recipient.name };
+              await tx.projectTask.update({ where, data: { assigneeId: recipient.id } });
+            } else if (action === 'start_task') {
+              if (row.status !== 'todo') throw new ConflictException('仅待办任务可开始');
+              await tx.projectTask.update({ where, data: { status: 'in_progress' } });
+            } else if (action === 'complete') {
+              if (row.status !== 'in_progress') throw new ConflictException('请先开始任务再记录完成');
+              await tx.projectTask.update({
+                where,
+                data: { status: 'done', completedAt: new Date(), actualHours: taskHours(body.actualHours) },
+              });
+            } else if (action === 'reopen_task') {
+              if (row.status !== 'done') throw new ConflictException('仅已完成任务可发起整改');
+              await tx.projectTask.update({ where, data: { status: 'todo', completedAt: null } });
+              const milestone = row.milestoneId
+                ? await tx.projectMilestone.findFirst({
+                    where: { id: id(row.milestoneId), tenantId: a.tenantId, projectId: p.id },
+                  })
+                : await tx.projectMilestone.findFirst({
+                    where: { tenantId: a.tenantId, projectId: p.id },
+                    orderBy: { sortOrder: 'desc' },
+                  });
+              if (milestone)
+                await tx.projectMilestone.updateMany({
+                  where: { tenantId: a.tenantId, projectId: p.id, sortOrder: { gte: milestone.sortOrder } },
+                  data: {
+                    status: 'pending',
+                    completedAt: null,
+                    completedBy: null,
+                    actualDate: null,
+                    deliverables: null,
+                  },
+                });
+              const total = await tx.projectMilestone.count({ where: { tenantId: a.tenantId, projectId: p.id } });
+              const done = await tx.projectMilestone.count({
+                where: { tenantId: a.tenantId, projectId: p.id, status: 'completed' },
+              });
+              const nextMilestone = await tx.projectMilestone.findFirst({
+                where: { tenantId: a.tenantId, projectId: p.id, status: { not: 'completed' } },
+                orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+              });
+              await tx.project.update({
+                where: { id: p.id },
+                data: {
+                  progress: total ? Math.round((done / total) * 100) : 0,
+                  stage: (nextMilestone?.stage ?? 'initiation') as 'initiation',
+                },
+              });
+            }
+            await tx.project.update({
+              where: { id: p.id },
+              data: { updatedAt: new Date(Math.max(Date.now(), p.updatedAt.getTime() + 1)) },
+            });
+            await deliveryEvent(
+              tx,
+              a,
+              p.id,
+              'task.' + action,
+              note,
+              {
+                from: row.status,
+                ...assignment,
+                ...(action === 'complete'
+                  ? {
+                      actualHours: taskHours(body.actualHours).toFixed(1),
+                      attachments: await tx.evidenceAttachment.findMany({
+                        where: { tenantId: a.tenantId, subjectKind: 'tasks', subjectId: recordId, withdrawnAt: null },
+                        select: { id: true, filename: true, sha256: true, size: true },
+                        orderBy: { id: 'asc' },
+                      }),
+                    }
+                  : {}),
+              },
+              recordId,
+            );
+          } else if (kind === 'actions' && action === 'complete') {
+            if (!['pending', 'in_progress', 'overdue'].includes(String(row.status)))
+              throw new ConflictException('行动已完成或取消');
+            await this.db(tx, kind).update({ where, data: { status: 'completed', completedAt: new Date() } });
+            await tx.calendarEntry.updateMany({where:{tenantId:a.tenantId,origin:'crm_plan',externalId:'crm-action-plan:'+recordId,status:'scheduled'},data:{status:'completed',revision:{increment:1}}});
           }
-          await tx.project.update({
-            where: { id: p.id },
-            data: { updatedAt: new Date(Math.max(Date.now(), p.updatedAt.getTime() + 1)) },
+          return {
+            id: recordId,
+            kind,
+            action,
+            ...(assignmentEvidence
+              ? {
+                  assignment: assignmentEvidence,
+                  reason: body.reason === undefined ? '客户分配' : text(body.reason, '分配原因', 500),
+                }
+              : {}),
+          };
+        } finally {
+          await this.db(tx, kind).update({
+            where: { id: recordId, tenantId: a.tenantId },
+            data: { updatedAt: writeStamp },
           });
-          await deliveryEvent(
-            tx,
-            a,
-            p.id,
-            'task.' + action,
-            note,
-            {
-              from: row.status,
-              ...assignment,
-              ...(action === 'complete'
-                ? {
-                    actualHours: taskHours(body.actualHours).toFixed(1),
-                    attachments: await tx.evidenceAttachment.findMany({
-                      where: { tenantId: a.tenantId, subjectKind: 'tasks', subjectId: recordId, withdrawnAt: null },
-                      select: { id: true, filename: true, sha256: true, size: true },
-                      orderBy: { id: 'asc' },
-                    }),
-                  }
-                : {}),
-            },
-            recordId,
-          );
-        } else if (kind === 'actions' && action === 'complete') {
-          if (!['pending', 'in_progress', 'overdue'].includes(String(row.status)))
-            throw new ConflictException('行动已完成或取消');
-          await this.db(tx, kind).update({ where, data: { status: 'completed', completedAt: new Date() } });
         }
-        return { id: recordId, kind, action };
-      } finally {
-        await this.db(tx, kind).update({
-          where: { id: recordId, tenantId: a.tenantId },
-          data: { updatedAt: writeStamp },
-        });
-      }
-    });
+      },
+      async (tx) => {
+        if (kind === 'customers' && action === 'assign') await this.require(tx, a, kind, recordId);
+        if(kind==='opportunities'&&action==='follow'){
+          const opportunity=await this.require(tx,a,kind,recordId);
+          await this.require(tx,a,'customers',id(opportunity.customerId));
+        }
+      },
+    );
   }
   private async projectMilestones(tx: Tx, a: Actor, projectId: number, start: Date, end: Date) {
     for (const [i, name] of ['项目启动', '方案确认', '系统上线', '验收交付'].entries())
@@ -1222,7 +1762,7 @@ export class WorkspaceService {
     await tx.opportunityProduct.createMany({ data: items });
     await tx.opportunity.update({
       where: { id: row.id, tenantId: a.tenantId },
-      data: { amount: total, updatedAt: new Date(Math.max(Date.now(), new Date(row.updatedAt!).getTime() + 1)) },
+      data: { amount: total, ...(Object.keys(salesIntakeMeta(row.healthFactors)).length?{healthFactors:json({...object(row.healthFactors),salesIntake:{...salesIntakeMeta(row.healthFactors),amountKnown:true,forecastEligible:true,amountBasis:'正式产品报价明细总额'}})}:{}), updatedAt: new Date(Math.max(Date.now(), new Date(row.updatedAt!).getTime() + 1)) },
     });
     const latest = await tx.opportunityQuote.findFirst({
       where: { tenantId: a.tenantId, opportunityId: row.id },
@@ -1234,57 +1774,99 @@ export class WorkspaceService {
     });
     return { id: row.id, version, total: total.toString(), items };
   }
-  async overview(a: Actor) {
-    const tx = this.prisma.system;
-    const [customers, opps, contracts, projects, plans, actions, users] = await Promise.all([
-      tx.customer.findMany({ where: await this.scope(tx, a, 'customers') }),
-      tx.opportunity.findMany({ where: await this.scope(tx, a, 'opportunities') }),
-      tx.contract.findMany({ where: await this.scope(tx, a, 'contracts') }),
-      tx.project.findMany({ where: await this.scope(tx, a, 'projects') }),
-      tx.paymentPlan.findMany({ where: await this.scope(tx, a, 'payment-plans') }),
-      tx.actionPlan.findMany({
-        where: { ...(await this.scope(tx, a, 'actions')), status: { in: ['pending', 'in_progress', 'overdue'] } },
-        take: 20,
-        orderBy: { dueDate: 'asc' },
-      }),
+  async statisticsOptions(a: Actor) {
+    await validateActor(this.prisma.system, a);
+    return statisticsOptions(this.prisma.system, a);
+  }
+  async overview(a: Actor, query: Record<string, string> = {}) {
+    if (Object.keys(query).some(k => !['from','to','personRange','ownerId','deptId'].includes(k))) throw new BadRequestException('工作台日期筛选参数无效');
+    const period = query.from || query.to ? reportQuery({from:query.from,to:query.to}) : null;
+    const dates = (field: string, timestamp = false) => period ? { [field]: { gte: new Date(period.start.getTime() - (timestamp ? 8*3600000 : 0)), lt: new Date(period.end.getTime() - (timestamp ? 8*3600000 : 0)) } } : {};
+    return this.prisma.system.$transaction(async tx => {
+    await validateActor(tx, a);
+    const audience = await statisticsScope(tx, a, query);
+    const scoped = async (kind: string) => ({ AND: [await this.scope(tx, a, kind), await statisticsResourceFilter(tx, a, kind, audience)] });
+    const [customers, opps, contracts, projects, plans, actions, users, receipts, invoices] = await Promise.all([
+      hasPermission(a, resourcePermission('customers', 'read'))
+        ? tx.customer.findMany({ where: { ...(await scoped('customers')), ...dates('createdAt',true) } })
+        : Promise.resolve([]),
+      hasPermission(a, resourcePermission('opportunities', 'read'))
+        ? tx.opportunity.findMany({ where: { ...(await scoped('opportunities')), ...dates('expectedCloseDate') } })
+        : Promise.resolve([]),
+      hasPermission(a, resourcePermission('contracts', 'read'))
+        ? tx.contract.findMany({ where: { ...(await scoped('contracts')), ...dates('signDate') } })
+        : Promise.resolve([]),
+      hasPermission(a, resourcePermission('projects', 'read'))
+        ? tx.project.findMany({ where: { ...(await scoped('projects')), ...dates('createdAt',true) } })
+        : Promise.resolve([]),
+      hasPermission(a, resourcePermission('payment-plans', 'read'))
+        ? tx.paymentPlan.findMany({ where: { ...(await scoped('payment-plans')), ...dates('dueDate') } })
+        : Promise.resolve([]),
+      hasPermission(a, 'action:read')
+        ? tx.actionPlan.findMany({
+            where: { ...(await scoped('actions')), ...dates('dueDate'), status: { in: ['pending', 'in_progress', 'overdue'] } },
+            take: 20,
+            orderBy: { dueDate: 'asc' },
+          })
+        : Promise.resolve([]),
       tx.user.findMany({
         where: {
           tenantId: a.tenantId,
           status: 'active',
           deletedAt: null,
-          ...(!admin(a) && !boss(a) ? { id: { in: await teamIds(tx, a) } } : {}),
+          ...(audience.ownerIds ? { id: { in: audience.ownerIds } } : {}),
         },
         select: { id: true, name: true, deptId: true },
       }),
+      period && hasPermission(a,'finance:read') ? tx.receipt.findMany({where:{...(await scoped('receipts')),status:'confirmed',...dates('receiptDate')}}) : Promise.resolve([]),
+      period && hasPermission(a,'finance:read') ? tx.invoice.findMany({where:{...(await scoped('invoices')),status:{in:['invoiced','sent']},...dates('invoiceDate')}}) : Promise.resolve([]),
     ]);
     const sum = (values: Prisma.Decimal[]) => values.reduce((n, v) => n.add(v), new Prisma.Decimal(0)).toString();
     const stages = await tx.opportunityStage.findMany({
       where: { tenantId: a.tenantId, isActive: true },
       orderBy: { sortOrder: 'asc' },
     });
-    return {
+    const allFinancialContractIds=[...new Set([...contracts.map(c=>c.id),...plans.map(p=>p.contractId),...invoices.map(i=>i.contractId),...receipts.flatMap(r=>r.contractId?[r.contractId]:[])])];
+    const trades=await contractTrades(tx,a.tenantId,allFinancialContractIds),commissionIds=new Set([...trades].filter(([,t])=>t.category==='software_commission').map(([id])=>id));
+    let businessSummary:ReturnType<typeof businessReport>['summary']|null=null;
+    const businessProjectAccess=hasPermission(a,'project:read');
+    if(hasPermission(a,'finance:read')&&hasPermission(a,'contract:read')){
+      const cids=contracts.filter(c=>c.currency==='CNY'&&['signed','executing','completed'].includes(c.status)).map(c=>c.id);
+      const bp=await tx.paymentPlan.findMany({where:{AND:[await scoped('payment-plans'),{contractId:{in:cids}}]}});
+      const bi=await tx.invoice.findMany({where:{AND:[await scoped('invoices'),{contractId:{in:cids}}]}});
+      const bj=businessProjectAccess?await tx.project.findMany({where:{AND:[await this.scope(tx,a,'projects'),{contractId:{in:cids}}]}}):[];
+      if([contracts,bp,bi,bj].some(rows=>rows.length>10000))throw new BadRequestException('统计超过10000条，请缩小日期或人员范围');
+      const bc=await tx.customer.findMany({where:{tenantId:a.tenantId,id:{in:contracts.map(c=>c.customerId)}},select:{id:true,name:true,customerCategory:true,channelBrand:true}});
+      businessSummary=businessReport(contracts,bp,bi,bj,trades,new Map(bc.map(c=>[c.id,c])),period??reportQuery({from:'2010-01-01',to:'2060-12-31'})).summary;
+    }
+    const today = new Date(businessDay(new Date()) + 'T00:00:00.000Z');
+    return {businessSummary,businessProjectAccess,
+      audience,
+      restrictedModules: ['customers', 'opportunities', 'contracts', 'projects', 'payment-plans', 'actions'].filter(
+        (kind) => !hasPermission(a, resourcePermission(kind, 'read')),
+      ),
       role: admin(a) ? 'admin' : boss(a) ? 'boss' : manager(a) ? 'manager' : 'sales',
       customers: customers.length,
       openOpportunities: opps.filter((o) => o.status === 'open').length,
-      pipeline: sum(opps.filter((o) => o.status === 'open').map((o) => o.amount)),
+      pipeline: sum(opps.filter((o) => o.status === 'open' && salesForecastEligible(o)).map((o) => ownTradeAmount(o)??new Prisma.Decimal(0))),
       signedAmount: sum(
-        contracts.filter((c) => ['signed', 'executing', 'completed'].includes(c.status)).map((c) => c.amount),
+        contracts.filter((c) => ['signed', 'executing', 'completed'].includes(c.status)&&!commissionIds.has(c.id)).map((c) => c.amount),
       ),
-      received: sum(plans.map((p) => p.receivedAmount)),
+      received: period ? sum(receipts.filter(r=>!r.contractId||!commissionIds.has(r.contractId)).map(r=>r.amount)) : sum(plans.map((p) => p.receivedAmount)),
+      invoiced: sum(invoices.filter(i=>!commissionIds.has(i.contractId)).map(i=>i.amount)),
       outstanding: sum(plans.map((p) => p.outstandingAmount)),
-      overdue: sum(
-        plans.filter((p) => p.dueDate < new Date() && p.status !== 'cancelled').map((p) => p.outstandingAmount),
-      ),
+      overdue: sum(plans.filter((p) => p.dueDate && p.dueDate < today && p.status !== 'cancelled').map((p) => p.outstandingAmount)),
       projects: projects.length,
       funnel: stages.map((s) => ({
         name: s.name,
         code: s.code,
-        count: opps.filter((o) => o.stage === s.code).length,
-        amount: sum(opps.filter((o) => o.stage === s.code).map((o) => o.amount)),
+        count: opps.filter((o) => o.status === 'open' && o.stage === s.code).length,
+        amount: sum(opps.filter((o) => o.status === 'open' && o.stage === s.code && salesForecastEligible(o)).map((o) => ownTradeAmount(o)??new Prisma.Decimal(0))),
       })),
       actions,
       users,
-      financeNotice: '财务数据为合成演示数据，暂无真实财务处理功能',
+      financeNotice: '本地收款台账支持登记、复核、核销及更正；银行、税务和会计连接尚未开通。',
     };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 15000 });
   }
 }

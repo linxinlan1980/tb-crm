@@ -1,6 +1,19 @@
-import { condition, flowInput } from './flow-rules';
+import { anySignature, condition, flowInput } from './flow-rules';
 import { cleanInput } from '../workspace/registry';
 describe('Workflow and business input boundaries', () => {
+  test('accepts explicit distinct any-one signers and preserves snapshot group semantics',()=>{
+    const flow=flowInput({name:'合成或签',bizType:'contract',nodes:[{name:'任一同意',approverType:'users_any',approverValue:'2,3,4'}]});
+    expect(flow.nodes[0].approverType).toBe('users_any');
+    expect(anySignature({flowSnapshot:{nodes:[{order:1,mode:'any'}]}},1)).toBe(true);
+    expect(anySignature({flowSnapshot:{nodes:[{order:1,mode:'all'}]}},1)).toBe(false);
+    expect(anySignature({flowSnapshot:{nodes:[{order:2,mode:'any'}]}},1)).toBe(false);
+    expect(anySignature(null,1)).toBe(false);
+    expect(()=>flowInput({name:'重复或签',bizType:'contract',nodes:[{name:'审批',approverType:'users_any',approverValue:'2,2'}]})).toThrow();
+  });
+  test('accepts a channel marker without permitting identity injection',()=>{
+    expect(cleanInput('customers',{name:'合成渠道客户',customerCategory:'sales_channel',channelBrand:'钉钉'})).toEqual({name:'合成渠道客户',customerCategory:'sales_channel',channelBrand:'钉钉'});
+    expect(()=>cleanInput('customers',{name:'合成客户',customerCategory:'admin'})).toThrow();
+  });
   test.each(['amount >= 100000 || true', 'window.alert(1)', 'amount > -1', 'amount >= 1.001', 'garbage'])(
     'rejects malformed condition %s',
     (expr) => expect(() => condition(expr, 0)).toThrow(),

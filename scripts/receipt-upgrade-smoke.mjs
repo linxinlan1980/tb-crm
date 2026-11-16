@@ -1,3 +1,5 @@
+import { readUpgradeFixture } from './upgrade-fixture.mjs';
+const prior = 'fd56b998d3a7488285804bb6846cd06a5e51af2d';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
@@ -14,7 +16,6 @@ assert.match(new URL(process.env.DATABASE_URL).pathname, /^\/tb_crm_test_[a-z0-9
 const require = createRequire(new URL('../packages/database/package.json', import.meta.url));
 const { PrismaClient } = require('@prisma/client');
 const db = new PrismaClient();
-const prior = 'fd56b998d3a7488285804bb6846cd06a5e51af2d';
 const scratch = await mkdtemp(join(tmpdir(), 'crm-receipt-upgrade-'));
 let api,
   cloneApi,
@@ -41,16 +42,26 @@ async function call(path, method = 'GET', body, token, expected = 200) {
   ok(r.status === expected, `${method} ${path}: ${r.status} ${out.message ?? ''}`);
   return out.data;
 }
-// The current client and API write AuditLog.source/principal_label, which the prior release predates.
+// The current client needs audit metadata and employee_no, which the prior release predates.
 // Add them only while seeding through current code, then restore the exact prior shape before migrating.
-const auditColumns = (add) =>
-  db.$executeRawUnsafe(
+const auditColumns = async (add) => {
+  await db.$executeRawUnsafe(
     add
       ? "ALTER TABLE audit_logs ADD COLUMN source ENUM('human','agent','system','import') NOT NULL DEFAULT 'human', ADD COLUMN principal_label VARCHAR(100) NULL"
       : 'ALTER TABLE audit_logs DROP COLUMN source, DROP COLUMN principal_label',
   );
+  await db.$executeRawUnsafe(add
+    ? 'ALTER TABLE users ADD COLUMN employee_no VARCHAR(40) NULL'
+    : 'ALTER TABLE users DROP COLUMN employee_no');
+  await db.$executeRawUnsafe(add
+    ? 'ALTER TABLE contracts ADD COLUMN signing_company VARCHAR(200) NULL'
+    : 'ALTER TABLE contracts DROP COLUMN signing_company');
+  await db.$executeRawUnsafe(add
+    ? "ALTER TABLE customers ADD COLUMN customer_category VARCHAR(20) NOT NULL DEFAULT 'direct', ADD COLUMN channel_brand VARCHAR(50) NULL"
+    : 'ALTER TABLE customers DROP COLUMN customer_category, DROP COLUMN channel_brand');
+};
 try {
-  const archive = run('git', ['archive', prior, 'packages/database/prisma'], { encoding: null }).stdout;
+  const archive = readUpgradeFixture('receipt');
   run('tar', ['-xf', '-', '-C', scratch], { input: archive });
   run('pnpm', [
     '--filter',
@@ -88,6 +99,7 @@ try {
   const principal = await db.user.findFirstOrThrow({ where: { tenantId: tenant.id, username: 'admin' } });
   const customer = await db.customer.create({
     data: { tenantId: tenant.id, code: 'UPGRADE-C', name: '升级保留客户', ownerId: principal.id },
+    select: { id: true, name: true, updatedAt: true },
   });
   const fingerprint = createHash('sha256').update('UPGRADE-BANK-ID').digest('hex');
   await db.$executeRaw`INSERT INTO receipts (tenant_id,receipt_no,customer_id,amount,allocated_amount,unallocated_amount,receipt_date,status,ledger_managed,reference_key,serial_no,created_by,updated_at) VALUES (${tenant.id},'UPGRADE-ROOT',${customer.id},5.00,0.00,5.00,'2026-11-01','draft',true,${fingerprint},'UPGRADE-BANK-ID',${principal.id},CURRENT_TIMESTAMP(3))`;
@@ -97,6 +109,8 @@ try {
     await db.$queryRaw`SELECT id,receipt_no,amount,status,reference_key,updated_at FROM receipts ORDER BY id`;
   await auditColumns(false);
   run('pnpm', ['--filter', '@partneros/database', 'migrate:deploy']);
+  const upgradedCustomer = await db.customer.findUniqueOrThrow({ where: { id: customer.id } });
+  ok(upgradedCustomer.companyPhone === null && upgradedCustomer.creditFingerprint === null && upgradedCustomer.name === customer.name && upgradedCustomer.updatedAt.getTime() === customer.updatedAt.getTime(), 'Identity migration preserves historical customer with nullable new fields');
   const receipts = await db.receipt.findMany({ where: { tenantId: tenant.id }, orderBy: { id: 'asc' } });
   ok(receipts.length === 3, 'Populated old receipts preserved');
   for (let i = 0; i < 3; i++) {
@@ -126,6 +140,10 @@ try {
     (await db.user.findUniqueOrThrow({ where: { id: principal.id } })).passwordHash === principal.passwordHash,
     'Upgrade preserves passwords',
   );
+  const migratedStaff = await db.user.findUniqueOrThrow({ where: { id: principal.id } });
+  ok(migratedStaff.employeeNo === 'RY' + String(principal.id).padStart(6, '0') &&
+    migratedStaff.updatedAt.getTime() === principal.updatedAt.getTime(),
+    'Personnel migration backfills unique identifier without changing the user version');
   run('pnpm', ['--filter', '@partneros/database', 'migrate:deploy']);
   ok((await db.receiptVoucher.count()) === 2, 'Repeated migration does not duplicate roots');
   api = spawn(process.execPath, ['apps/api/dist/main.js'], {

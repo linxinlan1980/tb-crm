@@ -1,0 +1,21 @@
+// Operator-only encrypted backup. Does not load another company's environment.
+import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { resolve, join } from 'node:path';
+import { homedir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+const project = fileURLToPath(new URL('../', import.meta.url));
+const [code, filename] = process.argv.slice(2);
+if (!code || !/^[A-Z][A-Z0-9_-]{1,29}$/.test(code) || !filename) throw new Error('Usage: node deploy/company-backup.mjs COMPANY_CODE FILE.crmbackup');
+const dir = join(project, '.local/accounts');
+const registry = JSON.parse(readFileSync(join(dir, 'registry.json'), 'utf8'));
+const account = registry.accounts.find((a) => a.code === code && a.status === 'ready');
+if (!account) throw new Error('Company account not ready');
+const config = JSON.parse(readFileSync(account.configFile, 'utf8'));
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'LANG', 'TZ'].includes(k)));
+Object.assign(env, config, { DB_TRANSPORT: 'native' });
+const native = join(homedir(), '.local/share/tb-crm-runtime/mysql-8.4.11-macos15-arm64/bin');
+if (process.env.MYSQL_BIN_DIR) env.MYSQL_BIN_DIR = process.env.MYSQL_BIN_DIR;
+else if (existsSync(join(native, 'mysqldump'))) env.MYSQL_BIN_DIR = native;
+const result = spawnSync(process.execPath, ['deploy/data.mjs', 'backup', resolve(filename)], { cwd: project, env, stdio: 'inherit' });
+process.exitCode = result.status ?? 1;

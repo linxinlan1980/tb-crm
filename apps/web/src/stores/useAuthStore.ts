@@ -7,6 +7,9 @@ interface UserInfo {
   avatar?: string;
   dept?: { id: number; name: string } | null;
   roles: string[];
+  permissions?: string[];
+  dataScope?: string;
+  company?: { code: string; name: string; purpose: 'test' | 'business' };
 }
 
 interface AuthState {
@@ -31,6 +34,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
+    sessionStorage.removeItem('companyCode');
     sessionStorage.removeItem('accessToken');
     sessionStorage.removeItem('refreshToken');
     sessionStorage.removeItem('user');

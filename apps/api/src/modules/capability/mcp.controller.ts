@@ -1,3 +1,7 @@
+import { ApprovalRequestService, approvalRequestInput } from './approval-request.service';
+import { allowedReportCapabilities } from '../workspace/analytics.contract';
+import { ReportCapabilityService } from './report-capability.service';
+import { reportMcpInput, statisticsDate } from './report-mcp-schema';
 import { approvalCatalog } from '../approval/approval.catalog';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { ApprovalService } from '../approval/approval.service';
@@ -13,13 +17,15 @@ import { CapabilityService } from './capability.service';
 @Controller('mcp')
 export class McpController {
   constructor(
+    private readonly approvalRequests: ApprovalRequestService,
     private readonly capabilities: CapabilityService,
     private readonly workspace: WorkspaceService,
     private readonly approvals: ApprovalService,
+    private readonly reports: ReportCapabilityService,
   ) {}
   @Post()
   async handle(@CurrentUser() actor: Actor, @Req() req: Request, @Res() res: Response, @Body() body: unknown) {
-    const server = new McpServer({ name: 'tb-crm', version: '0.2.0' });
+    const server = new McpServer({ name: 'tb-crm', version: '0.3.0' });
     const definitions = this.capabilities.list(actor);
     const invoke = async (name: string, args: unknown) => {
       try {
@@ -78,15 +84,27 @@ export class McpController {
         };
       }
     };
+    server.registerTool('approval.request',{
+      description:'以当前人工登录身份发起通用表单或提交现有合同、订单、立项审批；复用网页权限、版本、幂等和通用审批服务。不会代替审批人作出决定。独立智能体委托不开放此写入。',
+      inputSchema:approvalRequestInput,
+      annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true},
+    }, args=>read(()=>this.approvalRequests.request(actor,args)));
     const kinds = Object.keys(resources) as [string, ...string[]];
     server.registerTool(
       'workspace.list',
       {
-        description: '分页查询当前身份可见的客户、联系人、线索、商机、合同、订单、项目、任务与演示财务数据。',
+        description: '分页查询当前身份可见的客户、联系人、线索、商机、合同、订单、项目、任务与本地财务台账（只读）。',
         inputSchema: z
           .object({
             kind: z.enum(kinds),
+            personRange: z.enum(['self','person','company','department']).optional(),
+            ownerId: z.number().int().positive().max(2147483647).optional(),
+            deptId: z.number().int().positive().max(2147483647).optional(),
             keyword: z.string().max(100).optional(),
+            from: statisticsDate.optional(), to: statisticsDate.optional(),
+            dateField: z.enum(['createdAt','signDate','startDate','endDate','expectedCloseDate','dueDate','receiptDate','invoiceDate']).optional(),
+            customerCategory: z.enum(['direct','sales_channel']).optional(),
+            channelBrand: z.enum(['钉钉','用友','其他']).optional(),
             page: z.number().int().min(1).max(1000000).optional(),
             pageSize: z.number().int().min(1).max(100).optional(),
           })
@@ -96,7 +114,7 @@ export class McpController {
       (args) =>
         read(() =>
           this.workspace.list(actor, args.kind, {
-            ...(args.keyword ? { keyword: args.keyword } : {}),
+            ...Object.fromEntries(Object.entries(args).filter(([k,v]) => !['kind','page','pageSize'].includes(k) && v !== undefined).map(([k,v])=>[k,String(v)])),
             page: String(args.page ?? 1),
             pageSize: String(args.pageSize ?? 20),
           }),
@@ -111,14 +129,17 @@ export class McpController {
       },
       (args) => read(() => this.workspace.detail(actor, args.kind, args.recordId)),
     );
+    for (const report of allowedReportCapabilities(actor)) {
+      server.registerTool(report.id, { description: report.description, inputSchema: reportMcpInput, annotations: {readOnlyHint:true,destructiveHint:false} }, args => read(()=>this.reports.invoke(actor,report.id,args)));
+    }
     server.registerTool(
       'workspace.overview',
       {
         description: '查询当前角色个人、团队或全公司的经营指标与漏斗。',
-        inputSchema: z.object({}).strict(),
+        inputSchema: z.object({from:statisticsDate.optional(),to:statisticsDate.optional(),personRange:z.enum(['self','person','company','department']).optional(),ownerId:z.number().int().positive().max(2147483647).optional(),deptId:z.number().int().positive().max(2147483647).optional()}).strict(),
         annotations: { readOnlyHint: true },
       },
-      () => read(() => this.workspace.overview(actor)),
+      args => read(() => this.workspace.overview(actor,Object.fromEntries(Object.entries(args).filter(([,v])=>v!==undefined).map(([k,v])=>[k,String(v)])))),
     );
     server.registerTool(
       'workspace.schema',

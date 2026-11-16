@@ -1,3 +1,4 @@
+import { permits, strings } from '../system/roles/access-policy';
 import {
   Injectable,
   BadRequestException,
@@ -8,9 +9,10 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service';
 import type { Actor } from '../../common/types/actor';
-import { admin, manager } from './access';
+import { admin, manager, customerScope } from './access';
 import { runCommand, object, text, id, checkVersion, json, type Tx } from './command-runner';
 import { csvRecords, customerNames, nameKey, type ImportData } from './customer-policy';
+import { creditFingerprint } from './customer-matching';
 import { Prisma, type Contract } from '@prisma/client';
 import { WorkspaceService } from './workspace.service';
 import { ApprovalService } from '../approval/approval.service';
@@ -122,6 +124,7 @@ export class CommercialService {
     });
   }
   private operator(a: Actor, importOnly = false) {
+    if (!importOnly && !hasPermission(a, 'customer:assign')) throw new ForbiddenException('没有客户分配及交接权限');
     if (!hasPermission(a, importOnly ? 'customer:create' : 'customer:update'))
       throw new ForbiddenException('当前权限不允许此客户操作');
     if (!admin(a) && (importOnly || !manager(a)))
@@ -139,6 +142,7 @@ export class CommercialService {
         tenantId: a.tenantId,
         deletedAt: null,
         ...(!admin(a) ? { OR: [{ poolType: 'public' as const }, { ownerId: { in: members.map((m) => m.id) } }] } : {}),
+        AND: [await customerScope(this.prisma.system, a)],
         ...(keyword ? { name: { contains: keyword.slice(0, 100) } } : {}),
       },
       select: { id: true, name: true, ownerId: true, poolType: true },
@@ -151,9 +155,10 @@ export class CommercialService {
         status: 'active',
         deletedAt: null,
         ...(!admin(a) ? { deptId: a.deptId } : {}),
+        department: { status: 1, deletedAt: null },
         roles: { some: { tenantId: a.tenantId, role: { code: 'sales' } } },
       },
-      select: { id: true, name: true },
+      include: { roles: { include: { role: true } } },
       take: 100,
     });
     return {
@@ -161,7 +166,18 @@ export class CommercialService {
         ...c,
         ownerName: members.find((m) => m.id === c.ownerId)?.name ?? '公海或历史负责人',
       })),
-      recipients,
+      recipients: recipients
+        .filter(
+          (u) =>
+            u.deptId !== null &&
+            ['customer:read', 'customer:update'].every((p) =>
+              permits(
+                u.roles.flatMap((r) => strings(r.role.permissions)),
+                p,
+              ),
+            ),
+        )
+        .map((u) => ({ id: u.id, name: u.name })),
     };
   }
   async changes(a: Actor, contractId: number) {
@@ -208,11 +224,20 @@ export class CommercialService {
     const csv = body.csv,
       parsed = csvRecords(csv);
     return runCommand(this.prisma, a, 'customer.import.preview', body, async (tx) => {
-      const known = new Set((await customerNames(tx, a.tenantId)).map((r) => r.key));
+      const identities = await customerNames(tx, a.tenantId);
+      const known = new Set(identities.map((r) => r.key));
+      const knownCredits = new Set(identities.map((r) => r.creditCode).filter(Boolean));
       const rows: PreviewRow[] = parsed.map((r) => {
         const key = nameKey(r.data.name ?? '');
-        const status = r.error ? 'error' : known.has(key) ? 'duplicate' : 'ready';
-        if (status === 'ready') known.add(key);
+        const status = r.error
+          ? 'error'
+          : known.has(key) || !!(r.data.creditCode && knownCredits.has(r.data.creditCode))
+            ? 'duplicate'
+            : 'ready';
+        if (status === 'ready') {
+          known.add(key);
+          if (r.data.creditCode) knownCredits.add(r.data.creditCode);
+        }
         return { ...r, status };
       });
       const previewId = randomUUID(),
@@ -262,18 +287,27 @@ export class CommercialService {
         tenant.maxCustomers
       )
         throw new ConflictException('企业客户额度不足');
-      const known = new Set((await customerNames(tx, a.tenantId)).map((r) => r.key));
-      if (ready.some((r) => known.has(nameKey(r.data.name))))
-        throw new ConflictException('预检后已有同名客户创建，本次未写入任何客户，请重新预检');
+      const identities = await customerNames(tx, a.tenantId);
+      const known = new Set(identities.map((r) => r.key));
+      const knownCredits = new Set(identities.map((r) => r.creditCode).filter(Boolean));
+      if (
+        ready.some(
+          (r) => known.has(nameKey(r.data.name)) || !!(r.data.creditCode && knownCredits.has(r.data.creditCode)),
+        )
+      )
+        throw new ConflictException('预检后已有同名或同证照客户创建，本次未写入任何客户，请重新预检');
       const ids: number[] = [];
       for (const r of ready) {
         const c = await tx.customer.create({
           data: {
             ...r.data,
             nameFingerprint: nameKey(r.data.name),
+            creditFingerprint: creditFingerprint(r.data.creditCode ?? null),
             tenantId: a.tenantId,
             code: 'KH' + randomUUID().replaceAll('-', '').slice(0, 16),
-            poolType: 'public',
+            poolType: 'private',
+            ownerId: a.userId,
+            ownerDeptId: a.deptId,
             createdBy: a.userId,
           },
         });
@@ -285,7 +319,9 @@ export class CommercialService {
         imported: ids.length,
         skippedDuplicates: rows.filter((r) => r.status === 'duplicate').length,
         customerIds: ids,
-        poolType: 'public',
+        poolType: 'private',
+        ownerId: a.userId,
+        ownerDeptId: a.deptId,
         sourceHash: preview.sourceHash,
       };
     });
@@ -293,7 +329,12 @@ export class CommercialService {
   private async handoverPlan(tx: Tx, a: Actor, customerId: number, targetId: number) {
     this.operator(a);
     const members = await tx.user.findMany({
-      where: { tenantId: a.tenantId, ...(!admin(a) ? { deptId: a.deptId } : {}) },
+      where: {
+        tenantId: a.tenantId,
+        ...(!admin(a)
+          ? { deptId: a.deptId, ...(a.dataScope === 'self' || a.dataScope === 'custom' ? { id: a.userId } : {}) }
+          : {}),
+      },
       select: { id: true },
     });
     if (!admin(a) && a.deptId === null) throw new ForbiddenException('主管需先分配到部门');
@@ -303,6 +344,7 @@ export class CommercialService {
         id: customerId,
         tenantId: a.tenantId,
         deletedAt: null,
+        AND: [await customerScope(tx, a)],
         ...(!admin(a) ? { OR: [{ poolType: 'public' as const }, { ownerId: { in: memberIds } }] } : {}),
       },
     });
@@ -316,9 +358,17 @@ export class CommercialService {
         ...(!admin(a) ? { deptId: a.deptId } : {}),
         roles: { some: { tenantId: a.tenantId, role: { code: 'sales' } } },
       },
+      include: { roles: { include: { role: true } } },
     });
     if (
       !target ||
+      target.deptId === null ||
+      !['customer:read', 'customer:update'].every((p) =>
+        permits(
+          target.roles.flatMap((r) => strings(r.role.permissions)),
+          p,
+        ),
+      ) ||
       (target.deptId !== null &&
         !(await tx.department.findFirst({
           where: { id: target.deptId, tenantId: a.tenantId, status: 1, deletedAt: null },
@@ -407,53 +457,66 @@ export class CommercialService {
     this.operator(a);
     keys(body, ['requestKey', 'expectedUpdatedAt', 'digest', 'userId', 'reason']);
     const reason = text(body.reason, '交接原因', 1000);
-    return runCommand(this.prisma, a, 'customer.sales.handover', { ...body, customerId }, async (tx) => {
-      const p = await this.handoverPlan(tx, a, customerId, id(body.userId));
-      checkVersion(p.customer, body.expectedUpdatedAt);
-      if (body.digest !== p.graphDigest) throw new ConflictException('关联业务在预检后有变化，请重新预检交接范围');
-      if (p.customer.ownerId === p.target.id) throw new BadRequestException('接收人已是负责人');
-      const filter = { tenantId: a.tenantId, customerId, deletedAt: null };
-      await tx.customer.update({
-        where: { id: customerId },
-        data: {
-          poolType: 'private',
-          ownerId: p.target.id,
-          ownerDeptId: p.target.deptId,
-          protectUntil: new Date(Date.now() + 30 * 86400000),
-          updatedBy: a.userId,
-          updatedAt: new Date(Math.max(Date.now(), p.customer.updatedAt.getTime() + 1)),
-        },
-      });
-      await tx.opportunity.updateMany({ where: filter, data: { ownerId: p.target.id } });
-      await tx.contract.updateMany({ where: filter, data: { ownerId: p.target.id } });
-      await tx.order.updateMany({ where: filter, data: { ownerId: p.target.id } });
-      await tx.project.updateMany({ where: filter, data: { salesOwnerId: p.target.id } });
-      await tx.lead.updateMany({
-        where: { tenantId: a.tenantId, convertedCustomerId: customerId, deletedAt: null },
-        data: { assigneeId: p.target.id },
-      });
-      if (p.customer.ownerId)
-        await tx.actionPlan.updateMany({
-          where: {
-            tenantId: a.tenantId,
-            targetType: 'customer',
-            targetId: customerId,
-            assigneeId: p.customer.ownerId,
-            status: { in: ['pending', 'in_progress', 'overdue'] },
+    return runCommand(
+      this.prisma,
+      a,
+      'customer.sales.handover',
+      { ...body, customerId },
+      async (tx) => {
+        const p = await this.handoverPlan(tx, a, customerId, id(body.userId));
+        checkVersion(p.customer, body.expectedUpdatedAt);
+        if (body.digest !== p.graphDigest) throw new ConflictException('关联业务在预检后有变化，请重新预检交接范围');
+        if (p.customer.ownerId === p.target.id) throw new BadRequestException('接收人已是负责人');
+        const filter = { tenantId: a.tenantId, customerId, deletedAt: null };
+        await tx.customer.update({
+          where: { id: customerId },
+          data: {
+            poolType: 'private',
+            ownerId: p.target.id,
+            ownerDeptId: p.target.deptId,
+            protectUntil: new Date(Date.now() + 30 * 86400000),
+            updatedBy: a.userId,
+            updatedAt: new Date(Math.max(Date.now(), p.customer.updatedAt.getTime() + 1)),
           },
+        });
+        await tx.opportunity.updateMany({ where: filter, data: { ownerId: p.target.id } });
+        await tx.contract.updateMany({ where: filter, data: { ownerId: p.target.id } });
+        await tx.order.updateMany({ where: filter, data: { ownerId: p.target.id } });
+        await tx.project.updateMany({ where: filter, data: { salesOwnerId: p.target.id } });
+        await tx.lead.updateMany({
+          where: { tenantId: a.tenantId, convertedCustomerId: customerId, deletedAt: null },
           data: { assigneeId: p.target.id },
         });
-      await tx.privateHolding.deleteMany({ where: { tenantId: a.tenantId, customerId } });
-      await tx.privateHolding.create({
-        data: {
-          tenantId: a.tenantId,
-          customerId,
-          userId: p.target.id,
-          claimedAt: new Date(),
-          protectUntil: new Date(Date.now() + 30 * 86400000),
-        },
-      });
-      return { customerId, fromUserId: p.customer.ownerId, toUserId: p.target.id, counts: p.counts, reason };
-    });
+        if (p.customer.ownerId)
+          await tx.actionPlan.updateMany({
+            where: {
+              tenantId: a.tenantId,
+              targetType: 'customer',
+              targetId: customerId,
+              assigneeId: p.customer.ownerId,
+              status: { in: ['pending', 'in_progress', 'overdue'] },
+            },
+            data: { assigneeId: p.target.id },
+          });
+        await tx.privateHolding.deleteMany({ where: { tenantId: a.tenantId, customerId } });
+        await tx.privateHolding.create({
+          data: {
+            tenantId: a.tenantId,
+            customerId,
+            userId: p.target.id,
+            claimedAt: new Date(),
+            protectUntil: new Date(Date.now() + 30 * 86400000),
+          },
+        });
+        return { customerId, fromUserId: p.customer.ownerId, toUserId: p.target.id, counts: p.counts, reason };
+      },
+      async (tx) => {
+        const visible = await tx.customer.findFirst({
+          where: { id: customerId, tenantId: a.tenantId, deletedAt: null, AND: [await customerScope(tx, a)] },
+          select: { id: true },
+        });
+        if (!visible) throw new NotFoundException('客户不存在或无权访问');
+      },
+    );
   }
 }

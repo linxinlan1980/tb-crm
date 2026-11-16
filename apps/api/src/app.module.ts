@@ -34,7 +34,12 @@ import configuration from './config/configuration';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, envFilePath: ['../../.env', '.env'], load: [configuration] }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      ignoreEnvFile: process.env.CRM_ACCOUNT_WORKER === 'true',
+      envFilePath: ['../../.env', '.env'],
+      load: [configuration],
+    }),
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
@@ -57,7 +62,10 @@ import configuration from './config/configuration';
     WorkspaceModule,
   ],
   controllers: [HealthController],
-  providers: [ReadinessService, PoolCronService, FinanceCronService,
+  providers: [
+    ReadinessService,
+    PoolCronService,
+    FinanceCronService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: PrototypeGuard },

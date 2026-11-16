@@ -8,16 +8,22 @@ const Dashboard = lazy(() => import('./pages/dashboard/DashboardPage'));
 const Workspace = lazy(() => import('./pages/workspace/WorkspacePage'));
 const Approval = lazy(() => import('./pages/approval/ApprovalCenterPage'));
 const Designer = lazy(() => import('./pages/approval/FlowDesignerPage'));
+const PersonalCalendar = lazy(() => import('./pages/workspace/CalendarPage'));
 const Integration = lazy(() => import('./pages/workspace/IntegrationPage'));
 const System = lazy(() => import('./pages/workspace/SystemPage'));
 const Account = lazy(() => import('./pages/workspace/AccountPage'));
+const CustomerAllocation = lazy(() => import('./pages/workspace/CustomerAllocationPage'));
 const CustomerOperations = lazy(() => import('./pages/workspace/CustomerOperationsPage'));
 const Ai = lazy(() => import('./pages/workspace/AiPage'));
 const Notifications = lazy(() => import('./pages/notification/NotificationCenterPage'));
 const Finance = lazy(() => import('./pages/workspace/FinancePage'));
 const FinanceLedger = lazy(() => import('./pages/workspace/FinanceLedgerPage'));
 const ServiceTickets = lazy(() => import('./pages/workspace/ServiceTicketsPage'));
+const Analytics = lazy(() => import('./pages/analytics/AnalyticsPage'));
 const Board = lazy(() => import('./pages/workspace/BoardPage'));
+const SourceArchives = lazy(() => import('./pages/workspace/SourceArchivesPage'));
+const Knowledge = lazy(() => import('./pages/workspace/KnowledgePage'));
+const BusinessRules = lazy(() => import('./pages/workspace/BusinessRulesPage'));
 function Private({ children }: { children: React.ReactNode }) {
   return useAuthStore((s) => s.accessToken) ? <>{children}</> : <Navigate to="/login" replace />;
 }
@@ -73,6 +79,32 @@ export default function App() {
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
+            <Route path="analytics" element={<Analytics />} />
+            <Route path="calendar" element={<PersonalCalendar />} />
+            <Route
+              path="source-archives"
+              element={
+                <Admin>
+                  <SourceArchives />
+                </Admin>
+              }
+            />
+            <Route
+              path="business-knowledge"
+              element={
+                <Admin>
+                  <Knowledge />
+                </Admin>
+              }
+            />
+            <Route
+              path="business-rules"
+              element={
+                <Admin>
+                  <BusinessRules />
+                </Admin>
+              }
+            />
             <Route path="service-tickets" element={<ServiceTickets />} />
             {Object.entries(routes).map(([path, kind]) => (
               <Route key={path} path={path} element={<Workspace key={kind} kind={kind} />} />
@@ -85,6 +117,14 @@ export default function App() {
               element={
                 <Supervisor>
                   <CustomerOperations />
+                </Supervisor>
+              }
+            />
+            <Route
+              path="customer-allocation"
+              element={
+                <Supervisor>
+                  <CustomerAllocation />
                 </Supervisor>
               }
             />

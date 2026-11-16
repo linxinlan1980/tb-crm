@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Avatar, Dropdown, Tag, Typography, message } from 'antd';
+import { Layout, Menu, Avatar, Dropdown, Tag, Typography, message, Button, Result } from 'antd';
+import { menuAccess } from '../services/access';
 import { authApi } from '../services/auth.api';
 import {
   DashboardOutlined,
@@ -14,6 +15,7 @@ import {
   RobotOutlined,
   LogoutOutlined,
   ApiOutlined,
+  MenuOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../stores/useAuthStore';
 const { Header, Sider, Content } = Layout;
@@ -21,7 +23,25 @@ export default function BasicLayout() {
   const [collapsed, setCollapsed] = useState(false),
     navigate = useNavigate(),
     location = useLocation();
+  const [mobile, setMobile] = useState(false);
   const { user, logout } = useAuthStore();
+  useEffect(() => {
+    void authApi
+      .getMe()
+      .then((profile) => {
+        const current = useAuthStore.getState();
+        if (current.user?.id === profile.id && current.accessToken && current.refreshToken)
+          current.setAuth(current.accessToken, current.refreshToken, {
+            ...current.user,
+            permissions: profile.permissions,
+            dataScope: profile.dataScope,
+          });
+      })
+      .catch(() => {
+        /* Authentication handler manages revoked sessions. */
+      });
+  }, []);
+  const fictionalDemo = user?.company?.code === 'TIANYU' && user?.company?.purpose === 'test';
   const roles = user?.roles ?? [],
     isAdmin = roles.includes('super_admin'),
     roleName = isAdmin
@@ -33,6 +53,8 @@ export default function BasicLayout() {
           : '销售';
   const items = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: '经营工作台' },
+    { key: '/calendar', icon: <AuditOutlined />, label: '日程与业务推进' },
+    { key: '/analytics', icon: <DashboardOutlined />, label: '合同与收款统计' },
     {
       key: 'customer',
       icon: <TeamOutlined />,
@@ -40,7 +62,10 @@ export default function BasicLayout() {
       children: [
         { key: '/customers', label: '客户档案' },
         ...(isAdmin || roles.includes('sales_manager')
-          ? [{ key: '/customer-operations', label: '客户导入 / 销售交接' }]
+          ? [
+              { key: '/customer-allocation', label: '客户分配工作台' },
+              { key: '/customer-operations', label: '客户导入 / 销售交接' },
+            ]
           : []),
         { key: '/contacts', label: '联系人' },
         { key: '/pool/public', label: '公海客户' },
@@ -58,6 +83,7 @@ export default function BasicLayout() {
         { key: '/opportunities', label: '商机与报价' },
         { key: '/opportunities/board', label: '商机看板' },
         { key: '/products', label: '产品目录' },
+        ...(isAdmin ? [{ key: '/business-knowledge', label: '产品报价与项目知识' }] : []),
       ],
     },
     {
@@ -67,6 +93,8 @@ export default function BasicLayout() {
       children: [
         { key: '/contracts', label: '合同管理' },
         { key: '/orders', label: '订单管理' },
+        ...(isAdmin ? [{ key: '/business-rules', label: '内部提醒与审批规则' }] : []),
+        ...(isAdmin ? [{ key: '/source-archives', label: '历史资料与补录来源' }] : []),
       ],
     },
     {
@@ -85,10 +113,10 @@ export default function BasicLayout() {
       label: '财务中心',
       children: [
         { key: '/finance/ledger', label: '收款登记与核销' },
-        { key: '/finance/payment-plans', label: '回款计划 · 演示' },
-        { key: '/invoices', label: '发票记录 · 演示' },
-        { key: '/receipts', label: '收款记录 · 演示' },
-        { key: '/finance/aging', label: '财务功能展示' },
+        { key: '/finance/payment-plans', label: '收款计划' },
+        { key: '/invoices', label: '发票记录' },
+        { key: '/receipts', label: '历史收款记录' },
+        { key: '/finance/aging', label: '财务服务' },
       ],
     },
     { key: '/notifications', icon: <AuditOutlined />, label: '站内通知' },
@@ -109,8 +137,17 @@ export default function BasicLayout() {
         collapsed={collapsed}
         onCollapse={setCollapsed}
         width={232}
+        breakpoint="lg"
+        collapsedWidth={mobile ? 0 : 80}
+        onBreakpoint={(broken) => {
+          setMobile(broken);
+          setCollapsed(broken);
+        }}
         theme="light"
-        style={{ borderRight: '1px solid #e2e8f0' }}
+        style={{
+          borderRight: '1px solid #e2e8f0',
+          ...(mobile ? { position: 'fixed', height: '100dvh', zIndex: 1000, overflow: 'auto' } : {}),
+        }}
       >
         <div className="brand" onClick={() => navigate('/dashboard')}>
           <div className="brand-mark">伴</div>
@@ -125,8 +162,15 @@ export default function BasicLayout() {
           mode="inline"
           selectedKeys={[location.pathname]}
           defaultOpenKeys={['customer', 'sales']}
-          items={items}
+          items={items.flatMap<(typeof items)[number]>((item) => {
+            if ('children' in item && item.children) {
+              const children = item.children.filter((child) => menuAccess(child.key, user?.permissions ?? [], isAdmin));
+              return children.length ? [{ ...item, children }] : [];
+            }
+            return menuAccess(item.key, user?.permissions ?? [], isAdmin) ? [item] : [];
+          })}
           onClick={({ key }) => {
+            if (mobile) setCollapsed(true);
             if (key.startsWith('/')) navigate(key);
           }}
           style={{ border: 0 }}
@@ -144,16 +188,36 @@ export default function BasicLayout() {
             justifyContent: 'space-between',
           }}
         >
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+            {mobile && (
+              <Button
+                aria-label="打开导航"
+                icon={<MenuOutlined />}
+                onClick={() => setCollapsed(!collapsed)}
+                style={{ marginRight: 8 }}
+              />
+            )}
             <Typography.Text strong>客户经营与销售协同</Typography.Text>
-            <Tag style={{ marginLeft: 12 }} color="blue">
-              商用建设预览
+            <Tag
+              className="company-badge"
+              style={{
+                marginLeft: 12,
+                maxWidth: mobile ? 'calc(100vw - 120px)' : 360,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              color={user?.company?.purpose === 'test' ? 'orange' : 'blue'}
+            >
+              {fictionalDemo ? '虚构演示数据' : user?.company?.purpose === 'test' ? '测试帐套' : '正式帐套'} ·{' '}
+              {user?.company?.name ?? sessionStorage.getItem('companyCode')}
             </Tag>
           </div>
           <Dropdown
             menu={{
               items: [
                 { key: 'account', label: '账号与安全' },
+                { key: 'switch-company', label: '切换公司帐套' },
                 { key: 'logout', label: '退出登录', icon: <LogoutOutlined /> },
               ],
               onClick: async ({ key }) => {
@@ -171,15 +235,22 @@ export default function BasicLayout() {
               },
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-              <Tag>{roleName}</Tag>
+            <div
+              aria-label="当前账号菜单"
+              style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexShrink: 0 }}
+            >
+              {!mobile && <Tag>{roleName}</Tag>}
               <Avatar style={{ background: '#1e40af' }}>{user?.name?.slice(0, 1)}</Avatar>
-              <span>{user?.name}</span>
+              {!mobile && <span>{user?.name}</span>}
             </div>
           </Dropdown>
         </Header>
         <Content style={{ padding: 28, background: '#f5f7fb', minWidth: 0 }}>
-          <Outlet key={user?.id} />
+          {menuAccess(location.pathname, user?.permissions ?? [], isAdmin) ? (
+            <Outlet key={`${sessionStorage.getItem('companyCode')}:${user?.id}`} />
+          ) : (
+            <Result status="403" title="当前角色未获此功能权限" subTitle="请由管理员在角色功能权限中配置" />
+          )}
         </Content>
       </Layout>
     </Layout>

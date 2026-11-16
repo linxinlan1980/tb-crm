@@ -1,0 +1,26 @@
+{
+  "version": "2.0-ai-20261116",
+  "fictional": true,
+  "result": "PASS",
+  "checks": 1561,
+  "database": "isolated synthetic MySQL",
+  "stories": 12,
+  "sourceMaterials": 58,
+  "aiPlans": 36,
+  "localCalendarEntries": 36,
+  "approvalFlows": 36,
+  "approvals": 246,
+  "approvalStates": {
+    "pending": 102,
+    "approved": 72,
+    "rejected": 36,
+    "withdrawn": 36
+  },
+  "externalEffects": 0,
+  "existingFinancialRowsPreserved": true,
+  "containsRealCompanyData": false,
+  "additionalBaseOpportunityPlans": 1752,
+  "localContractPathForms": 240,
+  "localSignedBusinessClassifications": 240,
+  "supplementalReplaysDuplicateFree": true
+}

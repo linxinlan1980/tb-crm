@@ -18,6 +18,13 @@ const allowedRoles = ['super_admin', 'sales_manager', 'sales', 'gm'];
 function administrator(actor: Actor) {
   if (!actor.roles.includes('super_admin')) throw new ForbiddenException('仅管理员可管理人员');
 }
+function mobile(value: unknown): string | null {
+  if (value == null || value === '') return null;
+  if(typeof value !== 'string') throw new BadRequestException('手机号格式无效');
+  const normalized=value.replace(/[\s()-]/g,'').replace(/^\+?86(?=1\d{10}$)/,'');
+  if(!/^1\d{10}$/.test(normalized)) throw new BadRequestException('请输入完整11位手机号');
+  return normalized;
+}
 function password(value: unknown) {
   if (
     typeof value !== 'string' ||
@@ -45,6 +52,8 @@ function view(user: UserRow) {
   return {
     id: user.id,
     username: user.username,
+    employeeNo: user.employeeNo,
+    phone: user.phone,
     name: user.name,
     email: user.email,
     deptId: user.deptId,
@@ -60,10 +69,12 @@ function view(user: UserRow) {
 @Injectable()
 export class UserService {
   constructor(private prisma: PrismaService) {}
-  async findAll(actor: Actor, query: { page?: number; pageSize?: number; keyword?: string; status?: string }) {
+  async findAll(actor: Actor, query: { page?: number; pageSize?: number; keyword?: string; status?: string; sortBy?:string; sortOrder?:string }) {
     administrator(actor);
     if (query.status && !['active', 'inactive', 'resigned'].includes(query.status))
       throw new BadRequestException('无效用户状态');
+    const sortBy=query.sortBy??'id',sortOrder=(query.sortOrder??'asc') as Prisma.SortOrder;
+    if(!['id','name','username','employeeNo','createdAt','updatedAt','status'].includes(sortBy)||!['asc','desc'].includes(sortOrder))throw new BadRequestException('人员排序字段或方向无效');
     const page = Math.max(1, Math.min(100000, Math.trunc(query.page || 1))),
       pageSize = Math.max(1, Math.min(100, Math.trunc(query.pageSize || 20)));
     const where: Prisma.UserWhereInput = {
@@ -84,7 +95,7 @@ export class UserService {
         where,
         skip: (page - 1) * pageSize,
         take: pageSize,
-        orderBy: { id: 'asc' },
+        orderBy: [{[sortBy]:sortBy==='employeeNo'?{sort:sortOrder,nulls:'last'}:sortOrder},{id:sortOrder}],
         include,
       }),
       this.prisma.system.user.count({ where }),
@@ -127,45 +138,61 @@ export class UserService {
   }
   async create(actor: Actor, body: Record<string, unknown>) {
     administrator(actor);
-    const data = envelope(body, ['username', 'name', 'password', 'deptId', 'roleIds', 'email', 'position']);
+    const data = envelope(body, ['username', 'name', 'password', 'deptId', 'roleIds', 'email', 'position', 'phone']);
     const username = text(data.username, '账号', 40);
     if (!/^[A-Za-z0-9_-]{2,40}$/.test(username))
       throw new BadRequestException('账号需2至40位字母、数字、下划线或短横线');
     const name = text(data.name, '姓名', 50),
       hash = await bcrypt.hash(password(data.password), 12);
     return runCommand(this.prisma, actor, 'identity.user.create', body, async (tx) => {
-      const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: actor.tenantId } });
-      // Serializes administrator and seat changes with other personnel commands.
-      await tx.tenant.update({ where: { id: actor.tenantId }, data: { updatedAt: new Date() } });
-      if (
-        (await tx.user.count({ where: { tenantId: actor.tenantId, status: 'active', deletedAt: null } })) >=
-        tenant.maxUsers
-      )
-        throw new ConflictException('企业可用账号数量已达上限');
-      if (await tx.user.findFirst({ where: { tenantId: actor.tenantId, username } }))
-        throw new ConflictException('账号已存在');
-      const refs = await this.references(tx, actor.tenantId, data, true);
-      const user = await tx.user.create({
-        data: {
-          tenantId: actor.tenantId,
-          username,
-          name,
-          passwordHash: hash,
-          deptId: refs.deptId,
-          email: data.email ? text(data.email, '邮箱', 100) : null,
-          position: data.position ? text(data.position, '职位', 50) : null,
-          createdBy: actor.userId,
-        },
-      });
-      await tx.userRole.createMany({
-        data: refs.roleIds!.map((roleId) => ({ tenantId: actor.tenantId, userId: user.id, roleId })),
-      });
-      return view(await tx.user.findUniqueOrThrow({ where: { id: user.id }, include }));
+      return this.createInTransaction(tx, actor, { ...data, username, name }, hash);
     });
+  }
+  /** The directory importer can only use this to provision inactive accounts with random unknown passwords. */
+  async createInTransaction(
+    tx: Tx,
+    actor: Actor,
+    data: Record<string, unknown>,
+    hash: string,
+    status: 'active' | 'inactive' = 'active',
+  ) {
+    administrator(actor);
+    const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: actor.tenantId } });
+    // Serializes administrator and seat changes with other personnel commands.
+    await tx.tenant.update({ where: { id: actor.tenantId }, data: { updatedAt: new Date() } });
+    if (
+      (await tx.user.count({ where: { tenantId: actor.tenantId, status: 'active', deletedAt: null } })) >=
+      tenant.maxUsers
+    )
+      throw new ConflictException('企业可用账号数量已达上限');
+    if (await tx.user.findFirst({ where: { tenantId: actor.tenantId, OR:[{username:text(data.username,'账号',40)},{employeeNo:text(data.username,'账号',40)},{phone:text(data.username,'账号',40)}] } }))
+      throw new ConflictException('账号已存在');
+    const phone = mobile(data.phone);
+    if(phone && await tx.user.findFirst({where:{tenantId:actor.tenantId,deletedAt:null,OR:[{phone},{username:phone},{employeeNo:phone}]}})) throw new ConflictException('手机号已被其他人员使用');
+    const refs = await this.references(tx, actor.tenantId, data, true);
+    const user = await tx.user.create({
+      data: {
+        tenantId: actor.tenantId,
+        username: text(data.username, '账号', 40),
+        name: text(data.name, '姓名', 50),
+        phone,
+        passwordHash: hash,
+        status,
+        deptId: refs.deptId,
+        email: data.email ? text(data.email, '邮箱', 100) : null,
+        position: data.position ? text(data.position, '职位', 50) : null,
+        createdBy: actor.userId,
+      },
+    });
+    await tx.user.update({where:{id:user.id},data:{employeeNo:'RY'+String(user.id).padStart(6,'0')}});
+    await tx.userRole.createMany({
+      data: refs.roleIds!.map((roleId) => ({ tenantId: actor.tenantId, userId: user.id, roleId })),
+    });
+    return view(await tx.user.findUniqueOrThrow({ where: { id: user.id }, include }));
   }
   async update(actor: Actor, target: number, body: Record<string, unknown>) {
     administrator(actor);
-    const data = envelope(body, ['name', 'deptId', 'roleIds', 'email', 'position', 'status']);
+    const data = envelope(body, ['name', 'deptId', 'roleIds', 'email', 'position', 'status', 'phone']);
     return runCommand(this.prisma, actor, 'identity.user.update', body, async (tx) => {
       await tx.tenant.update({ where: { id: actor.tenantId }, data: { updatedAt: new Date() } });
       const user = await tx.user.findFirst({
@@ -174,6 +201,8 @@ export class UserService {
       });
       if (!user) throw new NotFoundException('用户不存在');
       checkVersion(user, body.expectedUpdatedAt);
+      const phone = data.phone === undefined ? user.phone : mobile(data.phone);
+      if(phone && await tx.user.findFirst({where:{tenantId:actor.tenantId,deletedAt:null,id:{not:target},OR:[{phone},{username:phone},{employeeNo:phone}]}})) throw new ConflictException('手机号已被其他人员使用');
       const refs = await this.references(tx, actor.tenantId, data);
       if (
         data.status !== undefined &&
@@ -226,6 +255,27 @@ export class UserService {
       const nextPermissions = nextRoles.flatMap((r) =>
         Array.isArray(r.permissions) ? r.permissions.filter((v): v is string => typeof v === 'string') : [],
       );
+      const canOwnSales =
+        nextRoles.some((r) => r.code === 'super_admin') ||
+        (nextRoles.some((r) => ['sales', 'sales_manager'].includes(r.code)) &&
+          ['customer:read', 'customer:update'].every((permission) =>
+            nextPermissions.some((p) => [permission, '*', 'customer:*'].includes(p)),
+          ));
+      if (
+        securityChange &&
+        (status !== 'active' || (refs.deptId !== undefined && refs.deptId !== user.deptId) || !canOwnSales)
+      ) {
+        const assets = await Promise.all([
+          tx.customer.count({ where: { tenantId: actor.tenantId, ownerId: target, deletedAt: null } }),
+          tx.opportunity.count({ where: { tenantId: actor.tenantId, ownerId: target, deletedAt: null } }),
+          tx.contract.count({ where: { tenantId: actor.tenantId, ownerId: target, deletedAt: null } }),
+          tx.order.count({ where: { tenantId: actor.tenantId, ownerId: target, deletedAt: null } }),
+        ]);
+        if (assets.some(Boolean))
+          throw new ConflictException(
+            '该人员仍有客户、商机、合同或订单销售归属，请先通过客户分配/整体交接处理，再停用、调岗或移除销售职责',
+          );
+      }
       const canDeliver =
         nextRoles.some((r) => r.code === 'super_admin') ||
         (nextRoles.some((r) => ['sales', 'sales_manager'].includes(r.code)) &&
@@ -271,6 +321,7 @@ export class UserService {
           email: data.email === undefined ? undefined : data.email ? text(data.email, '邮箱', 100) : null,
           position: data.position === undefined ? undefined : data.position ? text(data.position, '职位', 50) : null,
           status,
+          phone,
           updatedBy: actor.userId,
         },
       });
@@ -280,7 +331,7 @@ export class UserService {
           data: roleIds.map((roleId) => ({ tenantId: actor.tenantId, userId: target, roleId })),
         });
       }
-      if (securityChange)
+      if (securityChange || phone !== user.phone)
         await tx.authSession.updateMany({
           where: { tenantId: actor.tenantId, userId: target, revokedAt: null },
           data: { revokedAt: new Date() },

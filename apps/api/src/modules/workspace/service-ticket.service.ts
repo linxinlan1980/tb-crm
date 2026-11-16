@@ -9,7 +9,7 @@ import { Prisma, type ServiceTicket } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import type { Actor } from '../../common/types/actor';
 import { WorkspaceService } from './workspace.service';
-import { admin, allowWrite, hasPermission, ownerScope } from './access';
+import { admin, manager, companyWide, allowWrite, hasPermission, ownerScope } from './access';
 import { runCommand, checkVersion, text, id, json, type Tx } from './command-runner';
 import { deliveryPeople } from './delivery-staff-policy';
 import { ticketActions, ticketKeys, ticketTransition } from './service-ticket-policy';
@@ -55,7 +55,7 @@ export class ServiceTicketService {
         tenantId: a.tenantId,
         id: projectId,
         deletedAt: null,
-        ...(!admin(a)
+        ...(!admin(a) && !(manager(a) && companyWide(a))
           ? {
               OR: [{ pmId: a.userId }, ...(a.roles.includes('sales_manager') ? [await ownerScope(tx, a, 'pmId')] : [])],
             }

@@ -6,8 +6,10 @@ export function customerVisibility(
   teamUserIds?: number[],
   publicVisible = true,
 ): Prisma.CustomerWhereInput {
-  if (actor.roles.includes('super_admin') || actor.roles.includes('gm')) return {};
+  if (actor.roles.includes('super_admin') || actor.roles.includes('gm') || actor.dataScope === 'all') return {};
   const own: Prisma.CustomerWhereInput =
-    actor.roles.includes('sales_manager') && teamUserIds ? { ownerId: { in: teamUserIds } } : { ownerId: actor.userId };
+    ['dept', 'team'].includes(actor.dataScope) && teamUserIds
+      ? { ownerId: { in: teamUserIds } }
+      : { ownerId: actor.userId };
   return publicVisible ? { OR: [{ poolType: 'public' }, own] } : own;
 }

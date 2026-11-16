@@ -48,7 +48,7 @@ const command = async (t, k, r, action, extra = {}) =>
     await call(
       `/workspace/${k}/${r.id}/${action}`,
       'POST',
-      { requestKey: newKey(), expectedUpdatedAt: r.updatedAt, ...extra },
+      { requestKey: newKey(), expectedUpdatedAt: r.updatedAt, ...(k === 'contracts' && action === 'sign' ? { paymentSchedule: [{ amount: String(r.amount), dueDate: '2026-12-31', condition: 'Synthetic fixture agreed terms' }] } : {}), ...extra },
       t,
       201,
     )
@@ -757,7 +757,24 @@ try {
   );
   eq(init.result.serverInfo.name, 'tb-crm');
   const tools = await mcp('tools/list', {}, 2);
-  eq(tools.result.tools.length, 7);
+  eq(tools.result.tools.map(t => t.name).sort(), ['approval.pending','approval.request','customer.get','customer.search','report.business.cash','report.cash.collections','report.sales.forecast','workspace.get','workspace.list','workspace.overview','workspace.schema']);
+  const businessRead=await mcp('tools/call',{name:'report.business.cash',arguments:{from:'2010-01-01',to:'2060-12-31',personRange:'self',sortBy:'amount',sortOrder:'desc'}},89);
+  eq(businessRead.result.isError??false,false,'Human MCP business cash report is readable');
+  const businessResult=JSON.parse(businessRead.result.content[0].text);
+  eq(businessResult.capabilityId,'report.business.cash','MCP uses the same registered report');
+  for(const key of ['signed','contractReceived','unpaid','invoiced','invoiceReceived','invoiceUnpaid','construction'])assert(Object.hasOwn(businessResult.result.summary,key),'Readable received/unpaid metric '+key);
+  eq(tools.result.tools.filter(t=>t.annotations?.readOnlyHint!==true).map(t=>t.name),['approval.request'],'Only explicitly registered approval request may write');
+  eq(tools.result.tools.find(t=>t.name==='approval.request').annotations.destructiveHint,false,'Request does not authorize destructive decisions');
+  const requestInput={kind:'form',requestKey:newKey(),flowId:flow.id,title:'Synthetic MCP approval request',amount:'0',form:{reason:'Synthetic capability integration'}};
+  const requested=await mcp('tools/call',{name:'approval.request',arguments:requestInput},90);
+  eq(requested.result.isError??false,false,'Human MCP uses generic approval service');
+  const requestedApproval=JSON.parse(requested.result.content[0].text);
+  eq((await db.approval.findUniqueOrThrow({where:{id:requestedApproval.id}})).status,'pending','Tool cannot auto-approve');
+  const repeated=await mcp('tools/call',{name:'approval.request',arguments:requestInput},91);
+  eq(JSON.parse(repeated.result.content[0].text).id,requestedApproval.id,'MCP approval request is idempotent');
+  const injected=await mcp('tools/call',{name:'approval.request',arguments:{...requestInput,tenantId:999}},92);
+  eq(injected.result.isError,true,'MCP cannot inject company identity');
+  await call(`/approvals/${requestedApproval.id}/withdraw`,'POST',{requestKey:newKey()},sales,201);
   const tool = await mcp('tools/call', { name: 'customer.get', arguments: { customerId: customer.id } }, 3);
   eq(JSON.parse(tool.result.content[0].text).result.name, name);
   const workspaceTool = await mcp(

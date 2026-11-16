@@ -8,8 +8,11 @@ export class WorkspaceController {
   @Get('schema') schema(@CurrentUser() a: Actor) {
     return this.service.schema(a);
   }
-  @Get('overview') overview(@CurrentUser() a: Actor) {
-    return this.service.overview(a);
+  @Get('statistics-options') statisticsOptions(@CurrentUser() a: Actor) {
+    return this.service.statisticsOptions(a);
+  }
+  @Get('overview') overview(@CurrentUser() a: Actor, @Query() q: Record<string, string>) {
+    return this.service.overview(a, q);
   }
   @Get(':kind') list(@CurrentUser() a: Actor, @Param('kind') kind: string, @Query() q: Record<string, string>) {
     return this.service.list(a, kind, q);
@@ -35,8 +38,17 @@ export class WorkspaceController {
   ) {
     return this.service.deliveryRecipients(a, kind, recordId);
   }
+  @Get('customers/:id/assignment-people') assignmentPeople(
+    @CurrentUser() a: Actor,
+    @Param('id', ParseIntPipe) recordId: number,
+  ) {
+    return this.service.assignmentRecipients(a, recordId);
+  }
   @Post(':kind') create(@CurrentUser() a: Actor, @Param('kind') kind: string, @Body() b: Record<string, unknown>) {
     return this.service.save(a, kind, b);
+  }
+  @Post('customers/duplicate-check') duplicateCheck(@CurrentUser() a: Actor, @Body() b: Record<string, unknown>) {
+    return this.service.duplicateCheck(a, b);
   }
   @Put(':kind/:id') update(
     @CurrentUser() a: Actor,

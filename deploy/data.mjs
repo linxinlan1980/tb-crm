@@ -31,9 +31,11 @@ function run(tool, args, input, root = false) {
   return result.stdout;
 }
 const query = (sql, db, root = false) => run('mysql', ['--batch', '--skip-column-names', ...(db ? [db] : []), '--execute', sql], undefined, root);
+const integrationTables = ['calendar_entries', 'activity_sync_settings', 'activity_sync_links', 'activity_sync_jobs'];
+function tableExists(table, db, root = false) { return Number(query(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='${table}'`, db, root).trim()) === 1; }
 const tables = ['tenants', 'users', 'roles', 'customers', 'contacts', 'opportunities', 'contracts', 'orders', 'projects', 'payment_plans', 'receipts', 'audit_logs'];
 function counts(db, root = false) {
-  return Object.fromEntries(tables.map(table => [table, Number(query(`SELECT COUNT(*) FROM \`${table}\``, db, root).trim())]));
+  return Object.fromEntries([...tables, ...integrationTables.filter(table => tableExists(table, db, root))].map(table => [table, Number(query(`SELECT COUNT(*) FROM \`${table}\``, db, root).trim())]));
 }
 if (command === 'backup') {
   const configNames = ['DEMO_MODE', 'TENANT_CODE', 'TENANT_NAME', 'ADMIN_USERNAME', 'SEED_ADMIN_PASSWORD', 'MYSQL_ROOT_PASSWORD', 'MYSQL_PASSWORD', 'JWT_SECRET', 'ENCRYPTION_KEY', 'DB_NAME', 'WEB_PORT', 'APP_URL'];
@@ -60,6 +62,12 @@ if (command === 'backup') {
   query(`CREATE DATABASE \`${restoreDatabase}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`, undefined, true);
   run('mysql', [restoreDatabase], snapshot.sql, true);
   query('UPDATE auth_sessions SET revoked_at = NOW(3) WHERE revoked_at IS NULL', restoreDatabase, true);
+  // A restored copy must never inherit permission to replay external notifications.
+  if (tableExists('activity_sync_settings', restoreDatabase, true)) query('UPDATE activity_sync_settings SET calendar_enabled=0, todo_enabled=0, auto_enabled=0, updated_at=NOW(3)', restoreDatabase, true);
+  if (tableExists('activity_sync_jobs', restoreDatabase, true)) {
+    query("UPDATE activity_sync_jobs SET status='uncertain', error='Restored interrupted delivery; reconcile before sending', updated_at=NOW(3) WHERE status='dispatching'", restoreDatabase, true);
+    query("UPDATE activity_sync_jobs SET status='cancelled', error='Restored queued delivery; fresh consent required', updated_at=NOW(3) WHERE status='prepared'", restoreDatabase, true);
+  }
   const restoredCounts = counts(restoreDatabase, true);
   if (!native) query(`GRANT ALL PRIVILEGES ON \`${restoreDatabase}\`.* TO 'crm'@'%'`, undefined, true);
   const recovered = { ...snapshot.configuration,

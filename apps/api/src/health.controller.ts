@@ -19,8 +19,8 @@ export class HealthController {
   check() {
     return {
       status: 'ok',
-      service: 'partneros-crm-api',
-      version: '0.2.0-demo.2',
+      service: 'tb-crm-api',
+      version: '0.3.0',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
     };

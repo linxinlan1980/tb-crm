@@ -81,12 +81,21 @@ try {
   const createBody = command({
     username: 'staff',
     name: '合成销售',
+    phone: '13900002222',
     password: pw,
     deptId: dept.id,
     roleIds: [role('sales')],
   });
   let staff = (await call('/system/users', 'POST', createBody, admin, 201)).data;
   const replay = (await call('/system/users', 'POST', createBody, admin, 201)).data;
+  ok(/^RY\d{6,}$/.test(staff.employeeNo), 'Personnel identifier assigned');
+  ok((await login(staff.employeeNo)).user.id === staff.id, 'Unique personnel ID login');
+  ok((await login('13900002222')).user.id === staff.id, 'Mobile login');
+  await login('合成销售', pw, 400);
+  const clash=command({username:'phone_clash',name:'合成销售',password:pw,phone:'13900002222',roleIds:[role('sales')]});
+  await call('/system/users','POST',clash,admin,409);
+  const sameName=(await call('/system/users','POST',command({username:'same_name',name:'合成销售',password:pw,roleIds:[role('sales')]}),admin,201)).data;
+  ok(sameName.employeeNo!==staff.employeeNo, 'Same names have separate unique personnel IDs');
   ok(replay.id === staff.id, 'Create idempotency');
   ok((await db.user.count({ where: { username: 'staff' } })) === 1, 'No duplicate user');
   ok(!JSON.stringify(staff).includes('passwordHash'), 'No password hash in user response');
@@ -324,6 +333,26 @@ try {
         (await db.systemCommandExecution.count({ where: { requestKey: rollbackBody.requestKey } })) === 0,
       'System failure rolls back writes and receipt',
     );
+    const workerUrl = new URL('../apps/api/src/modules/integration/activity-sync.service.ts', import.meta.url);
+    const workerSource = readFileSync(workerUrl, 'utf8');
+    const workerCalls = workerSource.match(/createSystemPrincipal\(/g) || [];
+    assert(workerCalls.length > 0);
+    assert.equal(workerSource.match(/createSystemPrincipal\(\s*[^,]+,\s*'dingtalk'/g)?.length, workerCalls.length);
+    assert.doesNotMatch(workerSource, /'renewal'|'forecast'/);
+    const nativeWorkerUrl=new URL('../apps/api/src/modules/integration/native-approval.service.ts',import.meta.url);
+    const nativeWorker=readFileSync(nativeWorkerUrl,'utf8');
+    assert.equal(nativeWorker.match(/createSystemPrincipal\(/g)?.length,1);
+    assert.match(nativeWorker,/createSystemPrincipal\(\s*r\.tenantId,\s*'dingtalk_approval',\s*randomUUID\(\),?\s*\)/);
+    const nativePrincipal=createSystemPrincipal(user.tenantId,'dingtalk_approval',randomUUID());
+    assert.deepEqual(nativePrincipal.allowedCapabilities,['approval.native.result']);
+    await assert.rejects(runSystemCommand(commandDb,nativePrincipal,'renewal.generate',{requestKey:randomUUID()},work));
+    checks++;
+    const systemFiles = new Set([
+      new URL('../apps/api/src/modules/workspace/command-runner.ts', import.meta.url).href,
+      new URL('../apps/api/src/modules/workspace/system-principal.ts', import.meta.url).href,
+      workerUrl.href,
+      nativeWorkerUrl.href,
+    ]);
     function assertNoSystemCallers(dir) {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const path = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir);
@@ -331,7 +360,7 @@ try {
         else if (
           entry.name.endsWith('.ts') &&
           !entry.name.endsWith('.spec.ts') &&
-          !['command-runner.ts', 'system-principal.ts'].includes(entry.name)
+          !systemFiles.has(path.href)
         ) {
           assert.doesNotMatch(
             readFileSync(path, 'utf8'),

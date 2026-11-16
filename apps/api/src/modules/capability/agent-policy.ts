@@ -3,7 +3,7 @@ import { createHash, createHmac } from 'node:crypto';
 import type { Actor } from '../../common/types/actor';
 import { object, text } from '../workspace/command-runner';
 
-export const AGENT_CAPABILITIES = ['customer.search', 'customer.get', 'action.propose', 'action.execute'] as const;
+export const AGENT_CAPABILITIES = ['customer.search', 'customer.get', 'action.propose', 'action.execute', 'report.sales.forecast', 'report.cash.collections', 'report.business.cash'] as const;
 export function only(body: Record<string, unknown>, keys: string[]) {
   object(body);
   if (Object.keys(body).some((k) => !keys.includes(k))) throw new BadRequestException('存在未定义参数');
@@ -56,7 +56,7 @@ export function grantInput(body: Record<string, unknown>) {
   if (
     !Array.isArray(capabilities) ||
     !capabilities.length ||
-    capabilities.length > 4 ||
+    capabilities.length > AGENT_CAPABILITIES.length ||
     capabilities.some(
       (c) => typeof c !== 'string' || !AGENT_CAPABILITIES.includes(c as (typeof AGENT_CAPABILITIES)[number]),
     ) ||

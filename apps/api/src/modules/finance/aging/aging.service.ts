@@ -20,22 +20,24 @@ export class AgingService {
     });
 
     const now = new Date();
-    const buckets = { notDue: { amount: 0, count: 0 }, d1_30: { amount: 0, count: 0 }, d31_60: { amount: 0, count: 0 }, d60plus: { amount: 0, count: 0 } };
+    const buckets = { undated: { amount: 0, count: 0 }, notDue: { amount: 0, count: 0 }, d1_30: { amount: 0, count: 0 }, d31_60: { amount: 0, count: 0 }, d60plus: { amount: 0, count: 0 } };
 
     for (const p of plans) {
       const outstanding = Number(p.outstandingAmount);
       if (outstanding <= 0) continue;
-      const overdueDays = Math.floor((now.getTime() - new Date(p.dueDate).getTime()) / 86400000);
+      if (!p.dueDate) { buckets.undated.amount += outstanding; buckets.undated.count++; continue; }
+      const overdueDays = Math.floor((now.getTime() - p.dueDate.getTime()) / 86400000);
       if (overdueDays <= 0) { buckets.notDue.amount += outstanding; buckets.notDue.count++; }
       else if (overdueDays <= 30) { buckets.d1_30.amount += outstanding; buckets.d1_30.count++; }
       else if (overdueDays <= 60) { buckets.d31_60.amount += outstanding; buckets.d31_60.count++; }
       else { buckets.d60plus.amount += outstanding; buckets.d60plus.count++; }
     }
 
-    const total = buckets.notDue.amount + buckets.d1_30.amount + buckets.d31_60.amount + buckets.d60plus.amount;
+    const total = buckets.undated.amount + buckets.notDue.amount + buckets.d1_30.amount + buckets.d31_60.amount + buckets.d60plus.amount;
     return {
       totalOutstanding: total,
       buckets: [
+        { bucket: 'undated', label: '日期待补', ...buckets.undated, percent: total ? +(buckets.undated.amount / total * 100).toFixed(1) : 0 },
         { bucket: 'not_due', label: '未到期', ...buckets.notDue, percent: total ? +(buckets.notDue.amount / total * 100).toFixed(1) : 0 },
         { bucket: 'd1_30', label: '1-30天', ...buckets.d1_30, percent: total ? +(buckets.d1_30.amount / total * 100).toFixed(1) : 0 },
         { bucket: 'd31_60', label: '31-60天', ...buckets.d31_60, percent: total ? +(buckets.d31_60.amount / total * 100).toFixed(1) : 0 },
@@ -57,7 +59,7 @@ export class AgingService {
       if (!cid) continue;
       const outstanding = Number(p.outstandingAmount);
       if (outstanding <= 0) continue;
-      const overdueDays = Math.max(0, Math.floor((now.getTime() - new Date(p.dueDate).getTime()) / 86400000));
+      const overdueDays = p.dueDate ? Math.max(0, Math.floor((now.getTime() - p.dueDate.getTime()) / 86400000)) : 0;
 
       if (!customerMap.has(cid)) customerMap.set(cid, { customerId: cid, customerName: p.contract?.customer?.name || '', outstanding: 0, maxOverdueDays: 0, planCount: 0 });
       const entry = customerMap.get(cid)!;
@@ -78,8 +80,8 @@ export class AgingService {
 
     const now = new Date();
     let details = plans.map((p) => {
-      const overdueDays = Math.max(0, Math.floor((now.getTime() - new Date(p.dueDate).getTime()) / 86400000));
-      const bucket = overdueDays === 0 ? 'not_due' : overdueDays <= 30 ? 'd1_30' : overdueDays <= 60 ? 'd31_60' : 'd60_plus';
+      const overdueDays = p.dueDate ? Math.max(0, Math.floor((now.getTime() - p.dueDate.getTime()) / 86400000)) : null;
+      const bucket = overdueDays === null ? 'undated' : overdueDays === 0 ? 'not_due' : overdueDays <= 30 ? 'd1_30' : overdueDays <= 60 ? 'd31_60' : 'd60_plus';
       return { id: p.id, planNo: p.planNo, customerName: p.contract?.customer?.name, contractNo: p.contract?.contractNo, amount: p.amount, receivedAmount: p.receivedAmount, outstandingAmount: p.outstandingAmount, dueDate: p.dueDate, overdueDays, bucket, status: p.status };
     });
 
