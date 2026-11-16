@@ -1,5 +1,6 @@
 /** Public-tree guard: no business installation, private exports, or non-TIANYU data packs. */
 import assert from 'node:assert/strict';
+import { gunzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -60,8 +61,13 @@ try {
     actual = JSON.parse(readFileSync('demo/tianyu/manifest.json'));
   assert.equal(actual.fictional, true);
   assert.equal(actual.companyCode, 'TIANYU');
-  assert.equal(actual.sha256, expected.sha256);
-  assert.equal(createHash('sha256').update(readFileSync('demo/tianyu/data.jsonl.gz')).digest('hex'), expected.sha256);
+  const published = readFileSync('demo/tianyu/data.jsonl.gz');
+  // zlib versions and OS headers may differ; verify the shipped archive against
+  // its own manifest, then compare every uncompressed source byte across hosts.
+  assert.equal(createHash('sha256').update(published).digest('hex'), actual.sha256);
+  assert.deepEqual(gunzipSync(published), gunzipSync(readFileSync(join(scratch, 'data.jsonl.gz'))));
+  assert.deepEqual(actual.counts, expected.counts);
+  assert.equal(actual.version, expected.version);
   assert(actual.counts.customer <= 15000 && actual.counts.opportunity <= 2400);
   const pack = JSON.parse(readFileSync('demo/tianyu/ai-workflow/workflow.json'));
   assert.deepEqual(pack, buildWorkflow());
