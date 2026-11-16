@@ -1,0 +1,27 @@
+import { ApprovalRequestService } from './approval-request.service';
+import { ApprovalRequestController } from './approval-request.controller';
+import { WorkspaceModule } from '../workspace/workspace.module';
+import { ApprovalModule } from '../approval/approval.module';
+import { McpController } from './mcp.controller';
+import { Module } from '@nestjs/common';
+import { CustomerModule } from '../customer/customer.module';
+import { CapabilityController } from './capability.controller';
+import { CapabilityService } from './capability.service';
+import { ReportCapabilityService } from './report-capability.service';
+import { AgentService } from './agent.service';
+import { AgentControlController, AgentRuntimeController } from './agent.controller';
+import { AgentMcpController } from './agent-mcp.controller';
+
+@Module({
+  imports: [CustomerModule, WorkspaceModule, ApprovalModule],
+  controllers: [
+    ApprovalRequestController,
+    CapabilityController,
+    McpController,
+    AgentControlController,
+    AgentRuntimeController,
+    AgentMcpController,
+  ],
+  providers: [ApprovalRequestService, CapabilityService, AgentService, ReportCapabilityService],
+})
+export class CapabilityModule {}

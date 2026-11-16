@@ -1,0 +1,745 @@
+name: CRM checks
+on:
+  push:
+    branches: [main, dev, 'feat/**', 'fix/**']
+  pull_request:
+    branches: [main, dev]
+permissions:
+  contents: read
+jobs:
+  access-policy-allocation:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_access_policy
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_access_policy
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - name: Install SQL fault-injection client
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/access-policy-smoke.mjs
+  reviewed-sales-intake:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_sales_intake
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_sales_intake
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - run: node scripts/sales-intake-smoke.mjs
+  business-knowledge-intake:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_knowledge
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_knowledge
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - run: node scripts/knowledge-smoke.mjs
+  tianyu-ai-workflow:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_tianyu_workflow
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_tianyu_workflow
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - run: node scripts/tianyu-workflow-smoke.mjs
+  dingtalk-native-approval:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_native_approval
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_native_approval
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - run: node scripts/native-approval-smoke.mjs
+  dingtalk-activities:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_activities
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_activities
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - name: Install recovery and fault-injection clients
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/dingtalk-activities-smoke.mjs
+  dingtalk-directory:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_directory
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_directory
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - run: node scripts/dingtalk-directory-smoke.mjs
+  private-attachments:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_attachments
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_attachments
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - name: Install SQL fixture and recovery clients
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/attachment-smoke.mjs
+  approval-countersign:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_countersign
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_countersign
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - name: Install SQL fixture and recovery clients
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/countersign-smoke.mjs
+  service-ticket-lifecycle:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_service
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_service
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - name: Install SQL fixture and recovery clients
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/service-ticket-smoke.mjs
+  agent-populated-upgrade:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_agent_upgrade
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_agent_upgrade
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm build
+      - run: node scripts/agent-upgrade-smoke.mjs
+  delegated-agent:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_agent
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_agent
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - name: Install SQL fixture and recovery clients
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/agent-smoke.mjs
+  approval-transfer:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_approval
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_approval
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - name: Install SQL fixture client
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/approval-transfer-smoke.mjs
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm public:audit
+      - run: pnpm check
+      - name: Block known vulnerabilities in production dependencies
+        run: pnpm audit --prod --audit-level=low
+      - name: Block high and critical vulnerabilities in build tooling
+        run: pnpm audit --audit-level=high
+  mysql-smoke:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test
+      JWT_SECRET: ci-only-synthetic-secret-at-least-32-bytes
+      SEED_ADMIN_PASSWORD: CI-Only-Fixture-Password-2026
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm demo:seed
+      - run: pnpm build
+      - run: node scripts/smoke.mjs
+  identity-lifecycle:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_identity
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_identity
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - run: node scripts/identity-smoke.mjs
+
+  commercial-lifecycle:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_commercial
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_commercial
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - run: node scripts/commercial-smoke.mjs
+
+  receivable-ledger:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_finance
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_finance
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - name: Install SQL fixture client
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/finance-smoke.mjs
+
+  receipt-populated-upgrade:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_receipt_upgrade
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_receipt_upgrade
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm build
+      - name: Install SQL fixture client
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/receipt-upgrade-smoke.mjs
+
+  analytics-reporting:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_analytics
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_analytics
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - name: Install report fault-injection SQL client
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/analytics-smoke.mjs
+
+  company-isolation:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tb_crm_test_accounts
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/tb_crm_test_accounts
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+      ACCOUNT_ROOT_DATABASE_URL: mysql://root:test@127.0.0.1:3306/mysql
+      ACCOUNT_TEST_MYSQL_HOST: '%'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm --filter @partneros/database migrate:deploy
+      - run: pnpm build
+      - run: node scripts/account-isolation-smoke.mjs
+
+  local-installation-recovery:
+    runs-on: ubuntu-latest
+    needs: verify
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -ptest"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    env:
+      DATABASE_URL: mysql://root:test@127.0.0.1:3306/mysql
+      ACCOUNT_ROOT_DATABASE_URL: mysql://root:test@127.0.0.1:3306/mysql
+      ACCOUNT_TEST_MYSQL_HOST: '%'
+      SMOKE_ALLOW_WRITES: 'true'
+      DEMO_MODE: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+      - run: pnpm --filter @partneros/database generate
+      - run: pnpm build
+      - name: Install native SQL backup client
+        run: |
+          bash scripts/ensure-ci-mysql-client.sh
+      - run: node scripts/local-recovery-smoke.mjs

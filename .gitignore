@@ -21,3 +21,22 @@ keys/*.pem
 # Internal source materials are kept locally, never published
 docs/reference/
 .artifacts/
+
+# Local demo credentials and machine-specific notes
+.local/
+deploy/.env
+deploy/*.env
+backups/
+
+# Business exports and installation archives stay private.
+production-data/
+imports/
+uploads/
+*.xlsx
+*.xls
+*.crmbackup
+*.sql.gz
+*.dump
+*.sqlite
+*.sqlite3
+*.zip

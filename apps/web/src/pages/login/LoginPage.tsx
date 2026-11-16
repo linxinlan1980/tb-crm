@@ -1,0 +1,68 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Form, Input, Button, Card, message, Typography, Select } from 'antd';
+import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { useAuthStore } from '../../stores/useAuthStore';
+import { authApi } from '../../services/auth.api';
+
+const { Title, Text } = Typography;
+
+export default function LoginPage() {
+  const [form] = Form.useForm();
+  const [companies,setCompanies] = useState<{code:string;name:string}[]>([]);
+  useEffect(()=>{fetch('/api/companies').then(r=>r.ok?r.json():Promise.reject()).then((r:{items:{code:string;name:string}[]})=>{setCompanies(r.items);const requested=new URLSearchParams(window.location.search).get('company');if(requested&&r.items.some(a=>a.code===requested))form.setFieldValue('tenantCode',requested);else if(r.items.length===1)form.setFieldValue('tenantCode',r.items[0].code);}).catch(()=>message.error('帐套列表读取失败，请刷新重试'));},[form]);
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+  const setAuth = useAuthStore((s) => s.setAuth);
+
+  const onFinish = async (values: { tenantCode: string; username: string; password: string }) => {
+    setLoading(true);
+    try {
+      const res = await authApi.login(values);
+      sessionStorage.setItem('companyCode', values.tenantCode);
+      setAuth(res.accessToken, res.refreshToken, res.user);
+      message.success(`欢迎回来，${res.user.name}`);
+      navigate('/dashboard', { replace: true });
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || '登录失败，请重试';
+      message.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: '#f1f5f9',
+    }}>
+      <Card style={{ width: 400, maxWidth: 'calc(100vw - 32px)', boxShadow: '0 4px 12px rgba(15,23,42,.06)' }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <Title level={4} style={{ marginBottom: 4 }}>伴圆 CRM</Title>
+          <Text type="secondary">AI 原生 · 客户经营与销售协同</Text>
+        </div>
+        <Form form={form} initialValues={{}} name="login" onFinish={onFinish} size="large" autoComplete="on">
+          <Form.Item name="tenantCode" rules={[{ required: true, message: '请输入企业编码' }, { pattern: /^[A-Z][A-Z0-9_-]{1,29}$/, message: '企业编码为2至30位大写字母、数字、下划线或短横线' }]}>
+            <Select placeholder="请选择公司帐套" aria-label="公司帐套" options={companies.map(c=>({value:c.code,label:c.name}))} />
+          </Form.Item>
+          <Form.Item name="username" rules={[{ required: true, message: '请输入手机号或人员编号' }, { pattern: /^[A-Za-z0-9_-]{2,50}$/, message: '请用手机号或人员编号，不使用姓名登录' }]}>
+            <Input prefix={<UserOutlined />} placeholder="手机号或人员编号" autoComplete="username" />
+          </Form.Item>
+          <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+            <Input.Password prefix={<LockOutlined />} placeholder="密码" autoComplete="current-password" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={loading} block>
+              登录
+            </Button>
+          </Form.Item>
+        </Form>
+        <div style={{ textAlign: 'center' }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            伴圆 CRM · 本地安装与企业协同
+          </Text>
+        </div>
+      </Card>
+    </div>
+  );
+}

@@ -1,0 +1,44 @@
+{
+  "name": "tb-crm",
+  "version": "0.3.0",
+  "private": true,
+  "description": "本地安装、多公司数据库隔离的 B2B CRM",
+  "author": "Osborn Studio",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=11 <12"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "eslint apps packages --max-warnings 0",
+    "test": "pnpm --filter @partneros/api test && node --test deploy/installation.test.mjs && node --test deploy/local-accounts.test.mjs && node --test deploy/local-recovery.test.mjs && node --test apps/web/src/utils/csv.test.mjs && node --test apps/web/src/utils/xlsx.test.mjs && node --test demo/tianyu/generate.test.mjs && node --test demo/tianyu/ai-workflow/generate.test.mjs",
+    "db:migrate": "pnpm --filter @partneros/database migrate",
+    "db:seed": "pnpm --filter @partneros/database seed",
+    "db:studio": "pnpm --filter @partneros/database studio",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "typecheck": "pnpm --filter @partneros/database generate && pnpm --filter @partneros/api exec tsc --noEmit && pnpm --filter @partneros/web exec tsc --noEmit",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "demo:seed": "pnpm db:seed && pnpm --filter @partneros/database seed:demo",
+    "demo:reset": "node --env-file=.env scripts/new-demo.mjs",
+    "demo:test": "node --env-file=.env scripts/new-demo.mjs --test --verify",
+    "demo:start": "node --env-file=.env scripts/start-demo.mjs",
+    "install:production": "node deploy/configure-production.mjs",
+    "backup": "node --env-file=deploy/production.env deploy/data.mjs backup",
+    "restore": "node --env-file=deploy/production.env deploy/data.mjs restore",
+    "local:start": "node scripts/start-local.mjs",
+    "accounts:serve": "node deploy/local-accounts.mjs serve",
+    "demo:tianyu:export": "node scripts/tianyu-demo.mjs --export && node demo/tianyu/ai-workflow/generate.mjs",
+    "public:audit": "node scripts/audit-public-tree.mjs"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "prettier": "^3.4.0",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.72.1"
+  }
+}
