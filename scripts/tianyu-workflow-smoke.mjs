@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { readFileSync } from 'node:fs';
 import { initializeProduction } from '../deploy/initialize-production.mjs';
 import { installTianyu } from './tianyu-demo.mjs';
+import { installOpportunityActions } from './tianyu-opportunity-actions.mjs';
 import { applyWorkflow } from './tianyu-ai-workflow.mjs';
 import { installApprovalScenarios } from './tianyu-approval-scenarios.mjs';
 import { accounts, DEMO_PASSWORD } from '../demo/tianyu/generate.mjs';
@@ -148,12 +149,24 @@ try {
     sales = await call('analytics/funnel?from=2010-01-01&to=2060-12-31', 1100);
   assert(manager.summary.count >= sales.summary.count && sales.summary.count > 0);
   checks++;
+  const opportunityPlans = await installOpportunityActions(db, { ...env, TIANYU_ALLOW_ACTIVITY_SEED: 'true' });
+  eq(opportunityPlans.openOpportunities, 1752, 'Only reduced base opportunities, not imported AI cases');
+  eq(opportunityPlans.newActions, 1752, 'Every base open opportunity has a next action');
+  eq(opportunityPlans.newCalendarEntries, 1752, 'Every base next action has a local proposed slot');
+  const repeatedPlans = await installOpportunityActions(db, { ...env, TIANYU_ALLOW_ACTIVITY_SEED: 'true' });
+  eq(
+    [repeatedPlans.newActions, repeatedPlans.newCalendarEntries],
+    [0, 0],
+    'Supplemental plans replay without duplicates',
+  );
+  eq(await db.actionPlan.count({ where: { source: 'ai_recommend' } }), 36, 'Case-specific AI plans preserved');
   console.log(
     JSON.stringify({
       result: 'PASS',
       checks,
       baseCounts: base.counts,
       workflow,
+      opportunityPlans,
       approval: approval.counts,
       fixtures: 'TIANYU synthetic only',
       financialRecordsPreserved: true,

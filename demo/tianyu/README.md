@@ -55,3 +55,15 @@ SMOKE_ALLOW_WRITES=true node scripts/tianyu-workflow-smoke.mjs
 ```
 
 数据生成器只读公开合成源，不读取任何实际公司数据库、聊天或文件。数据哈希见manifest.json；实际MySQL及HTTP验证摘要见verification.json。
+
+## 可选：为全部基础业务补足下一步
+
+以下命令只处理固定天雨基础编号，新增AI故事保留自己的来源和计划。先运行基础商机行动，再运行合同路径，最后确认已签阀门业务分类；已存在的计划及分类复用，不外发。
+
+```sh
+node scripts/tianyu-opportunity-actions.mjs --company-config .local/accounts/TIANYU.json --confirm-fictional-tianyu
+node scripts/tianyu-business-plans.mjs --company-config .local/accounts/TIANYU.json --confirm-fictional-tianyu
+node scripts/tianyu-trade-classification.mjs --company-config .local/accounts/TIANYU.json --confirm-fictional-tianyu
+```
+
+新增计划日期为安装当日之后的拟定时段，不是实际客户承诺。未签的AI整理草稿不确认为已签业务。
