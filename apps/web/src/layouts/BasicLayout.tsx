@@ -82,6 +82,7 @@ export default function BasicLayout() {
         { key: '/opportunities', label: '商机与报价' },
         { key: '/opportunities/board', label: '商机看板' },
         { key: '/products', label: '产品目录' },
+        ...(isAdmin ? [{ key: '/business-knowledge', label: '产品报价与项目知识' }] : []),
       ],
     },
     {
@@ -198,7 +199,13 @@ export default function BasicLayout() {
             <Typography.Text strong>客户经营与销售协同</Typography.Text>
             <Tag
               className="company-badge"
-              style={{ marginLeft: 12, maxWidth: mobile ? 'calc(100vw - 120px)' : 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              style={{
+                marginLeft: 12,
+                maxWidth: mobile ? 'calc(100vw - 120px)' : 360,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
               color={user?.company?.purpose === 'test' ? 'orange' : 'blue'}
             >
               {user?.company?.purpose === 'test' ? '测试帐套' : '正式帐套'} ·{' '}
@@ -227,7 +234,10 @@ export default function BasicLayout() {
               },
             }}
           >
-            <div aria-label="当前账号菜单" style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexShrink: 0 }}>
+            <div
+              aria-label="当前账号菜单"
+              style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexShrink: 0 }}
+            >
               {!mobile && <Tag>{roleName}</Tag>}
               <Avatar style={{ background: '#1e40af' }}>{user?.name?.slice(0, 1)}</Avatar>
               {!mobile && <span>{user?.name}</span>}

@@ -92,3 +92,5 @@ pnpm local:start
 ## 开源许可
 
 本项目采用 [MIT License](LICENSE)。工作区包的 `private: true` 用于防止误发布到 npm，不影响 GitHub 仓库的公开状态。
+
+- 产品、报价与客户证据知识导入：[操作与契约](docs/operations/BUSINESS_KNOWLEDGE.md)。
