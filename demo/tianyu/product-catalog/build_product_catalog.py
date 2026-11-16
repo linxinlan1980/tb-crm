@@ -44,11 +44,4 @@ nav=[('01_伴圆CRM_产品全景介绍_v3.html','产品全景介绍','12个主�
 write('产品资料导航.html','产品资料导航','<div class="eyebrow">伴圆CRM · 完整产品资料</div><h1>产品是什么，怎样工作，为什么值得使用。</h1><p class="lead">先读产品全景，再看AI工作方式和实际业务过程。</p><div class="cards">'+''.join(f'<article class="card"><a href="{a}">{b} ↗</a><p>{c}</p></article>' for a,b,c in nav)+'</div><section><h2>建议阅读顺序</h2><div class="chain"><span>产品定位</span><span>AI与业务能力</span><span>行业场景</span><span>实际过程图</span><span>部署和采用</span></div><p>目录内采用通用产品说明和天雨虚构业务。真实企业案例PDF单独保存。</p><a class="button" href="01_伴圆CRM_产品全景介绍_v3.html">从完整产品介绍开始</a></section>')
 (ROOT/'product_content.json').write_text(json.dumps({'chapters':CH,'faq':FAQ,'guide':GUIDE},ensure_ascii=False,indent=2))
 if __name__=='__main__':
- target=Path('/Users/linxinlan/工作文档/00_天雨CRM_AI产品介绍_20261115');target.mkdir(exist_ok=True)
- for f in ROOT.glob('*.html'):(target/f.name).write_text(f.read_text().replace('../product-story/天雨CRM_AI协同产品介绍.html','CRM_AI协同产品介绍.html'))
- # Keep the user-renamed existing scene page intact; create a copy only if absent.
- if not (target/'CRM_AI协同产品介绍.html').exists():shutil.copy2(ROOT.parent/'product-story/天雨CRM_AI协同产品介绍.html',target/'CRM_AI协同产品介绍.html')
- with zipfile.ZipFile(str(target)+'_产品资料增补版.zip','w',zipfile.ZIP_DEFLATED) as z:
-  selected=[target/f.name for f in ROOT.glob('*.html')]+[target/'CRM_AI协同产品介绍.html']+[target/'天雨产品截图'/f.name for f in (ROOT.parent/'product-story/天雨产品截图').glob('*.jpg')]
-  for p in selected:z.write(p,str(Path(target.name)/p.relative_to(target)))
- print(json.dumps({'chapters':len(CH),'newHtml':len(list(ROOT.glob('*.html'))),'target':str(target)},ensure_ascii=False))
+ print(json.dumps({'chapters':len(CH),'htmlFiles':len(list(ROOT.glob('*.html'))),'output':'demo/tianyu/product-catalog'},ensure_ascii=False))

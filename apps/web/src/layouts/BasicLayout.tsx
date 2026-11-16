@@ -41,6 +41,7 @@ export default function BasicLayout() {
         /* Authentication handler manages revoked sessions. */
       });
   }, []);
+  const fictionalDemo = user?.company?.code === 'TIANYU' && user?.company?.purpose === 'test';
   const roles = user?.roles ?? [],
     isAdmin = roles.includes('super_admin'),
     roleName = isAdmin
@@ -208,7 +209,7 @@ export default function BasicLayout() {
               }}
               color={user?.company?.purpose === 'test' ? 'orange' : 'blue'}
             >
-              {user?.company?.purpose === 'test' ? '测试帐套' : '正式帐套'} ·{' '}
+              {fictionalDemo ? '虚构演示数据' : user?.company?.purpose === 'test' ? '测试帐套' : '正式帐套'} ·{' '}
               {user?.company?.name ?? sessionStorage.getItem('companyCode')}
             </Tag>
           </div>
